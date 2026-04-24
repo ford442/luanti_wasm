@@ -96,7 +96,14 @@ volatile std::sig_atomic_t *signal_handler_killstatus()
 	return &g_killed;
 }
 
-#if !defined(_WIN32) // POSIX
+#if defined(__EMSCRIPTEN__)
+
+void signal_handler_init(void)
+{
+	// Browsers do not deliver SIGINT/SIGTERM in the usual sense; nothing to do.
+}
+
+#elif !defined(_WIN32) // POSIX
 
 static void signal_handler(int sig)
 {
@@ -596,6 +603,20 @@ bool setSystemPaths()
 		path_user = std::string(getHomeOrFail())
 			+ "/Library/Application Support/" "minetest";
 	}
+	return true;
+}
+
+
+//// Emscripten / WebAssembly
+#elif defined(__EMSCRIPTEN__)
+
+bool setSystemPaths()
+{
+	// Read-only assets are mounted at the root by Emscripten's --preload-file.
+	// User data (worlds, config) live on the IDBFS partition set up in
+	// porting_emscripten.cpp before main() runs.
+	path_share = "/";
+	path_user  = "/home/web_user/.luanti";
 	return true;
 }
 

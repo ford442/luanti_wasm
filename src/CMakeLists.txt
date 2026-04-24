@@ -324,6 +324,10 @@ if(WIN32)
 			set(LUA_DLL "" CACHE FILEPATH "Path to luajit-5.1.dll for installation (optional)")
 		endif()
 	endif()
+elseif(EMSCRIPTEN)
+	# Emscripten / WebAssembly — no native sockets, no platform threading libs needed
+	# SDL2, ZLIB, and Freetype are provided via Emscripten ports (USE_SDL=2 etc.)
+	# pthreads come from the -pthread compile/link flag added to the target below
 else()
 	# Unix probably
 	list(APPEND PLATFORM_LIBS ${CMAKE_DL_LIBS})
@@ -503,6 +507,10 @@ set(common_SRCS
 
 if(ANDROID)
 	list(APPEND common_SRCS porting_android.cpp)
+endif()
+
+if(EMSCRIPTEN)
+	list(APPEND common_SRCS porting_emscripten.cpp)
 endif()
 
 if(BUILD_UNITTESTS OR BUILD_BENCHMARKS)
@@ -761,6 +769,35 @@ if(BUILD_CLIENT)
 
 	if(PRECOMPILE_HEADERS)
 		target_precompile_headers(${PROJECT_NAME} PRIVATE ${PRECOMPILED_HEADERS_LIST})
+	endif()
+
+	if(EMSCRIPTEN)
+		# Emscripten ports and WebAssembly-specific linker flags
+		target_compile_options(${PROJECT_NAME} PRIVATE -pthread)
+		target_link_options(${PROJECT_NAME} PRIVATE
+			-sUSE_SDL=2
+			-sUSE_ZLIB=1
+			-sUSE_FREETYPE=1
+			-sFULL_ES2=1
+			-sALLOW_MEMORY_GROWTH=1
+			-sINITIAL_MEMORY=268435456  # 256 MB
+			-sMAXIMUM_MEMORY=1073741824 # 1 GB
+			-pthread
+			-sSHARED_MEMORY=1
+			-sFETCH=1
+			-sFORCE_FILESYSTEM=1
+			-sEXIT_RUNTIME=1
+			-sASSERTIONS=1
+			# Asset preloading — paths are relative to CMAKE_SOURCE_DIR at build time
+			--preload-file ${CMAKE_SOURCE_DIR}/builtin@/builtin
+			--preload-file ${CMAKE_SOURCE_DIR}/games/devtest@/games/devtest
+			--preload-file ${CMAKE_SOURCE_DIR}/textures@/textures
+			--preload-file ${CMAKE_SOURCE_DIR}/fonts@/fonts
+			--preload-file ${CMAKE_SOURCE_DIR}/client/shaders@/client/shaders
+			--preload-file ${CMAKE_SOURCE_DIR}/clientmods@/clientmods
+		)
+		# Emit .html shell so the build is directly servable
+		set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
 	endif()
 endif(BUILD_CLIENT)
 
