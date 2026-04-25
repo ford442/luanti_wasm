@@ -36,6 +36,34 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "MinSizeRel"
       }
+    },
+    {
+      "name": "Emscripten",
+      "displayName": "Emscripten (WebAssembly)",
+      "description": "Client-only WASM build via Emscripten. Run: emcmake cmake --preset Emscripten -B build-wasm",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "binaryDir": "${sourceDir}/build-wasm",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_CLIENT": "TRUE",
+        "BUILD_SERVER": "FALSE",
+        "BUILD_UNITTESTS": "FALSE",
+        "BUILD_BENCHMARKS": "FALSE",
+        "ENABLE_SOUND": "FALSE",
+        "ENABLE_CURL": "FALSE",
+        "ENABLE_GETTEXT": "FALSE",
+        "ENABLE_CURSES": "FALSE",
+        "ENABLE_POSTGRESQL": "FALSE",
+        "ENABLE_LEVELDB": "FALSE",
+        "ENABLE_REDIS": "FALSE",
+        "ENABLE_PROMETHEUS": "FALSE",
+        "ENABLE_SPATIAL": "FALSE",
+        "ENABLE_OPENSSL": "FALSE",
+        "ENABLE_GLES2": "TRUE",
+        "ENABLE_OPENGL": "FALSE",
+        "ENABLE_OPENGL3": "FALSE",
+        "RUN_IN_PLACE": "TRUE"
+      }
     }
   ]
 }

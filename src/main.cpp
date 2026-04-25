@@ -23,6 +23,9 @@
 #include "config.h"
 #include "player.h"
 #include "porting.h"
+#ifdef __EMSCRIPTEN__
+#include "porting_emscripten.h"
+#endif
 #include "serialization.h" // SER_FMT_VER_HIGHEST_*
 #include "serverenvironment.h"
 #include "servermap.h"
@@ -186,6 +189,10 @@ int main(int argc, char *argv[])
 
 	porting::signal_handler_init();
 	porting::initializePaths();
+
+#ifdef __EMSCRIPTEN__
+	porting::emscripten_init_filesystem();
+#endif
 
 	if (!create_userdata_path()) {
 		errorstream << "Cannot create user data directory" << std::endl;
@@ -755,7 +762,9 @@ static bool init_common(const Settings &cmd_args, int argc, char *argv[])
 {
 	startup_message();
 
+#ifndef __EMSCRIPTEN__
 	sockets_init();
+#endif
 
 	// Initialize g_settings
 	set_default_settings();
@@ -799,7 +808,9 @@ static void uninit_common()
 {
 	httpfetch_cleanup();
 
+#ifndef __EMSCRIPTEN__
 	sockets_cleanup();
+#endif
 
 	// It'd actually be okay to leak these but we want to please valgrind...
 	for (int i = 0; i < (int)SL_TOTAL_COUNT; i++)

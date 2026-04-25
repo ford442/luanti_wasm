@@ -12,6 +12,48 @@
 #include "log.h"
 #include "networkexceptions.h"
 
+#ifdef __EMSCRIPTEN__
+// ---------------------------------------------------------------------------
+// Emscripten stub — browsers have no UDP sockets.
+// All methods are no-ops so the engine compiles and links; real networking
+// (WebRTC DataChannels or in-memory loopback) will replace this in a later
+// phase.
+// ---------------------------------------------------------------------------
+
+void sockets_init()   {}
+void sockets_cleanup() {}
+
+UDPSocket::UDPSocket(bool /*ipv6*/) {}
+
+bool UDPSocket::init(bool /*ipv6*/, bool /*noExceptions*/)
+{
+	verbosestream << "UDPSocket::init: no-op on Emscripten" << std::endl;
+	return true;
+}
+
+UDPSocket::~UDPSocket() {}
+
+void UDPSocket::Bind(Address /*addr*/) {}
+
+void UDPSocket::Send(const Address & /*destination*/, const void * /*data*/, int /*size*/) {}
+
+int UDPSocket::Receive(Address & /*sender*/, void * /*data*/, int /*size*/)
+{
+	return -1; // no data
+}
+
+void UDPSocket::setTimeoutMs(int timeout_ms)
+{
+	m_timeout_ms = timeout_ms;
+}
+
+bool UDPSocket::WaitData(int /*timeout_ms*/)
+{
+	return false;
+}
+
+#else // !__EMSCRIPTEN__
+
 #ifdef _WIN32
 #include <windows.h>
 #include <winsock2.h>
@@ -298,3 +340,5 @@ bool UDPSocket::WaitData(int timeout_ms)
 
 	throw SocketException("poll failed");
 }
+
+#endif // !__EMSCRIPTEN__
