@@ -142,3 +142,72 @@ TEST(fn, ...)   // register a sub-test
 - C/C++: https://docs.luanti.org/for-engine-devs/code-style-guidelines/
 - Lua: https://docs.luanti.org/for-engine-devs/lua-code-style-guidelines/
 - Lua API reference: `doc/lua_api.md`
+
+---
+
+## WASM/Emscripten Porting (This Repository)
+
+This fork targets WebAssembly (WASM) compilation via Emscripten to run Luanti in browsers. **Key differences from the upstream native build:**
+
+### WASM-Specific Architecture
+- **Browser Platform**: Runs in web workers and main thread via Emscripten's execution model
+- **Networking**: UDP is replaced with a WebSocket proxy layer over emsocket + encapsulation (see `02-websocket-proxy-networking.md`)
+- **File System**: Native file I/O replaced with IDBFS (IndexedDB-backed file system) for persistence across reloads
+- **Main Loop**: Blocking `while` loops must yield control to browser via `emscripten_set_main_loop()` or async/await patterns (see `03-async-main-loop.md`)
+- **Graphics**: IrrlichtMt already has Emscripten support (GLES2, SDL2 backend, EGL stubs)
+
+### Build for WASM
+```bash
+# (Requires Emscripten SDK installed: emsdk)
+# Build client with WASM toolchain (CMake cross-compile)
+cmake -B build_wasm \
+  -DCMAKE_TOOLCHAIN_FILE=$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DBUILD_CLIENT=TRUE \
+  -DBUILD_SERVER=FALSE \
+  -DENABLE_SOUND=FALSE \
+  -DENABLE_CURL=FALSE
+cmake --build build_wasm --parallel $(nproc)
+# Output: `build_wasm/bin/luanti.js` + `luanti.wasm`
+```
+
+### WASM-Specific Code Locations
+- `wasm_porting.md` — Master technical porting guide (read first)
+- `docs/wasm-issues/` — Modular issue breakdowns (MVP roadmap, persistence, networking, async loop, CI)
+- `docs/wasm-investigation-paradust.md` — Analysis of prior art (paradust7/minetest WASM fork)
+- IrrlichtMt Emscripten code: `irr/src/CIrrDeviceSDL.cpp`, `irr/src/os.cpp`, `irr/src/CEGLManager.cpp`
+
+### Critical WASM Blockers
+1. **Networking** — Browser cannot do UDP. Use WebSocket proxy (design in `02-websocket-proxy-networking.md`)
+2. **Main Loop** — Blocking loops freeze the browser. Use `emscripten_set_main_loop()` with frame stepping (design in `03-async-main-loop.md`)
+3. **Persistence** — Data must survive tab reload. Use IDBFS + automatic sync (design in `01-persistence-mvp.md`)
+4. **Shared Library Linking** — Some native dependencies may not have WASM builds; static linking and conditional disable strategy required
+
+### Platform Guards for WASM
+Use `#ifdef __EMSCRIPTEN__` / `#if defined(__EMSCRIPTEN__)` to isolate browser-only code. Key modules:
+- `src/network/` — Custom socket layer for WebSocket proxy
+- `src/threading/` — May need adjustments for Emscripten's single-threaded model
+- `src/client/clientlauncher.cpp` — Main loop integration
+
+### Testing WASM Builds
+```bash
+# Run in Node.js (headless validation)
+node build_wasm/bin/luanti.js --version
+
+# Or in a browser (requires HTTP server; WebGL context needed)
+python3 -m http.server 8000
+# Then visit http://localhost:8000 with index.html that loads luanti.js/wasm
+```
+
+### MVP Roadmap (from `docs/wasm-issues/`)
+1. **Persistence MVP** — Save/restore worlds via IDBFS (unblocks real play)
+2. **Async Main Loop** — Non-blocking frame stepping (unblocks responsive UI)
+3. **Proxy Networking** — WebSocket-bridged client-to-server (unlocks multiplayer)
+4. **Build/CI + Public Demo** — Reproducible builds & testable artifacts
+5. **Launcher & Embedding** — Web UX layer for sharing & integration
+
+### Upstream Compatibility
+- Stay on clean upstream Luanti `master` branch (do not fork)
+- Minimal guarded platform layer (`#ifdef __EMSCRIPTEN__` only for real differences)
+- Reuse proven patterns from paradust7's prior WASM work (emsocket design, WASMFS, etc.)
+- Avoid divergence; periodic rebases on Luanti releases
