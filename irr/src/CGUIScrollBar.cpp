@@ -88,10 +88,7 @@ bool CGUIScrollBar::OnEvent(const SEvent &event)
 			break;
 		case EET_GUI_EVENT:
 			if (event.GUIEvent.EventType == EGET_BUTTON_CLICKED) {
-				if (event.GUIEvent.Caller == UpButton)
-					setPosAndSend(Pos - SmallStep);
-				else if (event.GUIEvent.Caller == DownButton)
-					setPosAndSend(Pos + SmallStep);
+				// Scolling handled by `handleAutoScroll`
 
 				return true;
 			} else if (event.GUIEvent.EventType == EGET_ELEMENT_FOCUS_LOST) {
@@ -246,7 +243,7 @@ void CGUIScrollBar::setArrowsVisible(ArrowVisibility visible)
 //!
 s32 CGUIScrollBar::getPosFromMousePos(const core::position2di &pos) const
 {
-	f32 w, // tray width (size minus all buttons)
+	s32 w, // tray width (size minus all buttons)
 		p; // clicked position relative to the scrollbar
 
 	s32 occupied = 2 * BorderSize + DrawHeight;
@@ -261,7 +258,7 @@ s32 CGUIScrollBar::getPosFromMousePos(const core::position2di &pos) const
 		w = RelativeRect.getHeight() - occupied;
 		p = pos.Y - AbsoluteRect.UpperLeftCorner.Y - occupied / 2 - offset;
 	}
-	return (s32)(p / w * range()) + Min;
+	return (s32)(p * range() / w) + Min;
 }
 
 void CGUIScrollBar::updatePos()
@@ -284,8 +281,8 @@ void CGUIScrollBar::setPosRaw(const s32 pos)
 
 	if (PageSize >= 0) {
 		// Auto-scaling
-		DrawHeight = std::min<s32>(INT32_MAX,
-				thumb_area * (f32(thumb_area + BorderSize * 2)) / f32(PageSize));
+		DrawHeight = std::min<s32>(INT32_MAX, s32(
+				thumb_area * f32(thumb_area + BorderSize * 2) / f32(PageSize)));
 	}
 
 	DrawHeight = core::s32_clamp(DrawHeight, thumb_min, thumb_area);

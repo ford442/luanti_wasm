@@ -12,6 +12,7 @@
 #include "map.h"
 #include "client.h"
 #include "content_cao.h"
+#include "hud_element.h"
 
 /*
 	PlayerSettings
@@ -330,9 +331,15 @@ void LocalPlayer::move(f32 dtime, Environment *env,
 	const v3f initial_position = position;
 	const v3f initial_speed = m_speed;
 
-	collisionMoveResult result = collisionMoveSimple(env, m_client,
+
+	StepUpMode step_up_mode = StepUpMode::LEGACY;
+	if (m_cao != nullptr) {
+		step_up_mode = m_cao->getProperties().step_up_mode;
+	}
+
+	CollisionMoveResult result = collisionMoveSimple(env, m_client,
 		m_collisionbox, player_stepheight, dtime,
-		&position, &m_speed, accel_f, m_cao);
+		&position, &m_speed, accel_f, m_cao, true, step_up_mode);
 
 	bool could_sneak = control.sneak && !free_move && !in_liquid &&
 		!is_climbing && physics_override.sneak;
@@ -950,9 +957,14 @@ void LocalPlayer::old_move(f32 dtime, Environment *env,
 	const v3f initial_position = position;
 	const v3f initial_speed = m_speed;
 
-	collisionMoveResult result = collisionMoveSimple(env, m_client,
+	StepUpMode step_up_mode = StepUpMode::LEGACY;
+	if (m_cao != nullptr) {
+		step_up_mode = m_cao->getProperties().step_up_mode;
+	}
+
+	CollisionMoveResult result = collisionMoveSimple(env, m_client,
 		m_collisionbox, player_stepheight, dtime,
-		&position, &m_speed, accel_f, m_cao);
+		&position, &m_speed, accel_f, m_cao, true, step_up_mode);
 
 	// Position was slightly changed; update standing node pos
 	if (touching_ground)
@@ -1158,7 +1170,7 @@ float LocalPlayer::getSlipFactor(Environment *env, const v3f &speedH)
 }
 
 void LocalPlayer::handleAutojump(f32 dtime, Environment *env,
-	const collisionMoveResult &result, v3f initial_position, v3f initial_speed)
+	const CollisionMoveResult &result, v3f initial_position, v3f initial_speed)
 {
 	PlayerSettings &player_settings = getPlayerSettings();
 	if (!player_settings.autojump)
@@ -1213,9 +1225,15 @@ void LocalPlayer::handleAutojump(f32 dtime, Environment *env,
 	v3f jump_pos = initial_position + v3f(0.0f, jump_height, 0.0f);
 	v3f jump_speed = initial_speed;
 
+	StepUpMode step_up_mode = StepUpMode::LEGACY;
+	if (m_cao != nullptr) {
+		step_up_mode = m_cao->getProperties().step_up_mode;
+	}
+
 	// try at peak of jump, zero step height
-	collisionMoveResult jump_result = collisionMoveSimple(env, m_client,
-		m_collisionbox, 0.0f, dtime, &jump_pos, &jump_speed, v3f(0.0f), m_cao);
+	CollisionMoveResult jump_result = collisionMoveSimple(env, m_client,
+		m_collisionbox, 0.0f, dtime, &jump_pos, &jump_speed, v3f(0.0f), m_cao, true,
+		step_up_mode);
 
 	// see if we can get a little bit farther horizontally if we had
 	// jumped

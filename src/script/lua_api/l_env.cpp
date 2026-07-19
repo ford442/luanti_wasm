@@ -10,6 +10,7 @@
 #include "lua_api/l_noise.h"
 #include "lua_api/l_vmanip.h"
 #include "lua_api/l_object.h"
+#include "common/helper.h"
 #include "common/c_converter.h"
 #include "common/c_content.h"
 #include "scripting_server.h"
@@ -356,9 +357,9 @@ int ModApiEnv::l_place_node(lua_State *L)
 	GET_ENV_PTR;
 
 	ScriptApiItem *scriptIfaceItem = getScriptApi<ScriptApiItem>(L);
-	Server *server = getServer(L);
-	const NodeDefManager *ndef = server->ndef();
-	IItemDefManager *idef = server->idef();
+	IGameDef *gamedef = getGameDef(L);
+	const NodeDefManager *ndef = gamedef->ndef();
+	IItemDefManager *idef = gamedef->idef();
 
 	v3s16 pos = read_v3s16(L, 1);
 	MapNode n = readnode(L, 2);
@@ -597,8 +598,8 @@ int ModApiEnv::l_add_item(lua_State *L)
 	// pos
 	//v3f pos = checkFloatPos(L, 1);
 	// item
-	ItemStack item = read_item(L, 2,getServer(L)->idef());
-	if(item.empty() || !item.isKnown(getServer(L)->idef()))
+	ItemStack item = read_item(L, 2, getGameDef(L)->idef());
+	if(item.empty() || !item.isKnown(getGameDef(L)->idef()))
 		return 0;
 
 	int error_handler = PUSH_ERROR_HANDLER(L);
@@ -749,14 +750,10 @@ void ModApiEnvBase::collectNodeIds(lua_State *L, int idx, const NodeDefManager *
 	std::vector<content_t> &filter)
 {
 	if (lua_istable(L, idx)) {
-		lua_pushnil(L);
-		while (lua_next(L, idx) != 0) {
-			// key at index -2 and value at index -1
+		LuaHelper::for_ipairs(L, idx, [&]() {
 			luaL_checktype(L, -1, LUA_TSTRING);
 			ndef->getIds(readParam<std::string>(L, -1), filter);
-			// removes value, keeps key for next iteration
-			lua_pop(L, 1);
-		}
+		});
 	} else if (lua_isstring(L, idx)) {
 		ndef->getIds(readParam<std::string>(L, idx), filter);
 	}
@@ -1269,6 +1266,60 @@ int ModApiEnv::l_forceload_block(lua_State *L)
 	return 0;
 }
 
+// get_loaded_blocks()
+int ModApiEnv::l_get_loaded_blocks(lua_State *L)
+{
+	GET_ENV_PTR;
+
+	std::vector<v3s16> loaded_blocks;
+	env->getServerMap().listAllLoadedBlocks(loaded_blocks);
+
+	lua_createtable(L, loaded_blocks.size(), 0);
+	int index = 0;
+	for (const v3s16 &p : loaded_blocks) {
+		push_v3s16(L, p);
+		lua_rawseti(L, -2, ++index);
+	}
+
+	return 1;
+}
+
+// get_loadable_blocks()
+int ModApiEnv::l_get_loadable_blocks(lua_State *L)
+{
+	GET_ENV_PTR;
+
+	std::vector<v3s16> loadable_blocks;
+	env->getServerMap().listAllLoadableBlocks(loadable_blocks);
+
+	lua_createtable(L, loadable_blocks.size(), 0);
+	int index = 0;
+	for (const v3s16 &p : loadable_blocks) {
+		push_v3s16(L, p);
+		lua_rawseti(L, -2, ++index);
+	}
+
+	return 1;
+}
+
+// get_active_blocks()
+int ModApiEnv::l_get_active_blocks(lua_State *L)
+{
+	GET_ENV_PTR;
+
+	const auto &active_blocks = env->getActiveBlocks();
+
+	lua_createtable(L, active_blocks.size(), 0);
+	int index = 0;
+	for (const v3s16 &p : active_blocks) {
+		push_v3s16(L, p);
+		lua_rawseti(L, -2, ++index);
+	}
+
+	return 1;
+}
+
+// compare_block_status(nodepos)
 int ModApiEnv::l_compare_block_status(lua_State *L)
 {
 	GET_ENV_PTR;
@@ -1357,6 +1408,9 @@ void ModApiEnv::Initialize(lua_State *L, int top)
 	API_FCT(raycast);
 	API_FCT(transforming_liquid_add);
 	API_FCT(forceload_block);
+	API_FCT(get_loaded_blocks);
+	API_FCT(get_loadable_blocks);
+	API_FCT(get_active_blocks);
 	API_FCT(forceload_free_block);
 	API_FCT(compare_block_status);
 	API_FCT(get_translated_string);
