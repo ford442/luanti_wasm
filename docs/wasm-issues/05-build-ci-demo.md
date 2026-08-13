@@ -6,12 +6,16 @@
 
 ## Current Situation
 
-We have a working `Emscripten` preset in `CMakePresets.json` and good Emscripten branches in `src/CMakeLists.txt` (platform libs, linker flags with `-sUSE_SDL=2`, `-sWASMFS=1`, preload of `builtin/`, `games/devtest/`, textures, shaders, etc.).
+The `Emscripten` preset now prepares the required Emscripten ports, builds a
+pinned zstd source archive, and produces a generated client with SDL2,
+OffscreenCanvas/WebGL2, pthreads, legacy JS FS + IDBFS, and the preload bundle.
+The generated client passes a headless Chrome startup smoke with storage ready
+before the application worker starts.
 
 However:
 - No automated CI job that builds the WASM target on every PR (or nightly).
 - No public demo that outsiders can try without cloning + installing emsdk + fighting COOP/COEP headers.
-- The build still requires a full emsdk + specific flags; small changes can break the WASM path silently.
+- The build still requires a full emsdk; CI does not yet guard the path.
 - Hosting a real demo is non-trivial (must serve with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` for pthreads + SharedArrayBuffer).
 - Our vendoring / asset strategy for the big preload `.data` file needs care for cache invalidation and load time.
 
@@ -19,7 +23,7 @@ paradust7's system (content-addressed release UUIDs, separate packs, custom www 
 
 ## Goals
 
-- [ ] `cmake --preset Emscripten` (or a documented one-liner) produces a working `luanti.html` + `.js` + `.wasm` + `.data` that runs locally when served correctly.
+- [x] `cmake --preset Emscripten` produces `luanti.html` + `.js` + `.wasm` + `.data` and passes the local generated-client startup smoke.
 - [ ] GitHub Actions workflow (`.github/workflows/wasm.yml` or similar) that:
   - Installs emsdk (pinned version for reproducibility).
   - Builds the WASM client in Release mode.
@@ -37,7 +41,7 @@ paradust7's system (content-addressed release UUIDs, separate packs, custom www 
 
 ## Implementation Hints
 
-- Pin emsdk version in the workflow (e.g. `3.1.60` or whatever is current and stable with pthreads + WASMFS).
+- Pin emsdk 6.0.3 in the future workflow and validate pthreads plus the explicitly linked legacy IDBFS backend.
 - Consider using Emscripten's own `embuilder` + ports more aggressively to reduce custom build scripts.
 - The preload-file list is already in CMakeLists — keep it there as the source of truth.
 - For GitHub Pages demo: the headers problem is well-known. Common solutions:

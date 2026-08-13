@@ -23,9 +23,7 @@
 #include "config.h"
 #include "player.h"
 #include "porting.h"
-#ifdef __EMSCRIPTEN__
 #include "porting_emscripten.h"
-#endif
 #include "serialization.h" // SER_FMT_VER_HIGHEST_*
 #include "serverenvironment.h"
 #include "servermap.h"
@@ -136,6 +134,7 @@ int main(int argc, char *argv[])
 {
 	int retval;
 	debug_set_exception_handler();
+	porting::emscripten_validate_main_loop();
 
 	g_logger.registerThread("Main");
 	g_logger.addOutputMaxLevel(&stderr_output, LL_ACTION);
@@ -189,11 +188,6 @@ int main(int argc, char *argv[])
 
 	porting::signal_handler_init();
 	porting::initializePaths();
-
-#ifdef __EMSCRIPTEN__
-	porting::emscripten_init_filesystem();
-#endif
-
 	if (!create_userdata_path()) {
 		errorstream << "Cannot create user data directory" << std::endl;
 		return 1;
@@ -297,6 +291,11 @@ int main(int argc, char *argv[])
 	// Update configuration file
 	if (!g_settings_path.empty())
 		g_settings->updateConfigFile(g_settings_path.c_str());
+
+	porting::emscripten_mark_persistence_dirty(
+		porting::EmscriptenPersistenceReason::Shutdown, true);
+	porting::emscripten_service_persistence();
+	porting::emscripten_wait_for_persistence();
 
 	print_modified_quicktune_values();
 

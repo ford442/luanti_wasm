@@ -265,7 +265,13 @@ endif(ENABLE_OPENSSL)
 
 
 find_package(ZLIB REQUIRED)
-find_package(Zstd REQUIRED)
+if(TARGET libzstd_static)
+	# Supplied by EmscriptenDependencies.cmake. FindZstd performs a try-link and
+	# cannot pass a build-tree target into its isolated check project.
+	set(ZSTD_LIBRARY libzstd_static)
+else()
+	find_package(Zstd REQUIRED)
+endif()
 
 
 if(NOT MSVC)
@@ -795,12 +801,21 @@ if(BUILD_CLIENT)
 
 	if(EMSCRIPTEN)
 		# Emscripten ports and WebAssembly-specific linker flags
-		target_compile_options(${PROJECT_NAME} PRIVATE -pthread)
+		target_compile_options(${PROJECT_NAME} PRIVATE -pthread -fexceptions)
 		target_link_options(${PROJECT_NAME} PRIVATE
+			-fexceptions
 			-sUSE_SDL=2
 			-sUSE_ZLIB=1
 			-sUSE_FREETYPE=1
 			-sFULL_ES2=1
+			-sMAX_WEBGL_VERSION=2
+			# Keep Luanti's synchronous launcher/game stack off the browser UI
+			# thread. Transfer the canvas to that worker where supported, with
+			# OFFSCREEN_FRAMEBUFFER retaining Emscripten's main-thread proxy as
+			# the fallback path.
+			-sPROXY_TO_PTHREAD=1
+			-sOFFSCREENCANVAS_SUPPORT=1
+			-sOFFSCREEN_FRAMEBUFFER=1
 			-sALLOW_MEMORY_GROWTH=1
 			-sINITIAL_MEMORY=268435456  # 256 MB
 			-sMAXIMUM_MEMORY=1073741824 # 1 GB
@@ -808,18 +823,28 @@ if(BUILD_CLIENT)
 			-sSHARED_MEMORY=1
 			-sFETCH=1
 			-sFORCE_FILESYSTEM=1
-			-sEXIT_RUNTIME=1
+			-sEXIT_RUNTIME=0
 			-sASSERTIONS=1
+			-sDISABLE_EXCEPTION_CATCHING=0
+			-lidbfs.js
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
+			"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/client/web/shell.html"
 			# Asset preloading — paths are relative to CMAKE_SOURCE_DIR at build time
-			--preload-file ${CMAKE_SOURCE_DIR}/builtin@/builtin
-			--preload-file ${CMAKE_SOURCE_DIR}/games/devtest@/games/devtest
-			--preload-file ${CMAKE_SOURCE_DIR}/textures@/textures
-			--preload-file ${CMAKE_SOURCE_DIR}/fonts@/fonts
-			--preload-file ${CMAKE_SOURCE_DIR}/client/shaders@/client/shaders
-			--preload-file ${CMAKE_SOURCE_DIR}/clientmods@/clientmods
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/builtin@/builtin"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/devtest@/games/devtest"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/textures@/textures"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/fonts@/fonts"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/client/shaders@/client/shaders"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/clientmods@/clientmods"
 		)
 		# Emit .html shell so the build is directly servable
 		set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
+		set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
+			${CMAKE_SOURCE_DIR}/client/web/network.js
+			${CMAKE_SOURCE_DIR}/client/web/persistence.js
+			${CMAKE_SOURCE_DIR}/client/web/shell.html
+		)
 	endif()
 endif(BUILD_CLIENT)
 

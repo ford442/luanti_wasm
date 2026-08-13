@@ -6,6 +6,11 @@
 
 #include "irrlichttypes.h"
 
+#ifdef __EMSCRIPTEN__
+#include <memory>
+struct EmscriptenUDPSocketState;
+#endif
+
 class Address;
 
 void sockets_init();
@@ -32,6 +37,9 @@ public:
 	int GetHandle() const { return m_handle; };
 
 private:
+#ifdef __EMSCRIPTEN__
+	std::shared_ptr<EmscriptenUDPSocketState> m_emscripten;
+#endif
 	int m_handle = -1;
 	int m_timeout_ms = -1;
 	unsigned short m_addr_family = 0;

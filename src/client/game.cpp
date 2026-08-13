@@ -33,6 +33,7 @@
 #include "nodemetadata.h"
 #include "particles.h"
 #include "porting.h"
+#include "porting_emscripten.h"
 #include "profiler.h"
 #include "raycast.h"
 #include "server.h"
@@ -3805,4 +3806,7 @@ void the_game(volatile std::sig_atomic_t *kill,
 	}
 
 	game.shutdown();
+	porting::emscripten_mark_persistence_dirty(
+		porting::EmscriptenPersistenceReason::Disconnect, true);
+	porting::emscripten_service_persistence();
 }

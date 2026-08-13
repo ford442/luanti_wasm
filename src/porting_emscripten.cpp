@@ -1,69 +1,157 @@
 // Luanti
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2024 The Luanti Contributors
+// Copyright (C) 2024-2026 The Luanti Contributors
 
 #ifdef __EMSCRIPTEN__
 
 #include "porting_emscripten.h"
-#include "log.h"
+
+#include "porting.h"
+
+#include <atomic>
+#include <cstdlib>
+#include <cstdint>
 #include <emscripten.h>
-#include <emscripten/html5.h>
+#include <emscripten/threading.h>
+
+namespace {
+
+constexpr std::uint64_t ORDINARY_SYNC_INTERVAL_MS = 10'000;
+
+std::atomic<std::uint64_t> dirty_generation{0};
+std::atomic<std::uint64_t> submitted_generation{0};
+std::atomic<std::uint64_t> saved_generation{0};
+std::atomic<porting::EmscriptenPersistenceReason> pending_reason{
+	porting::EmscriptenPersistenceReason::Periodic};
+std::atomic<bool> pending_urgent{false};
+std::atomic<bool> sync_error{false};
+std::uint64_t last_ordinary_start_ms = 0;
+
+const char *reason_name(porting::EmscriptenPersistenceReason reason)
+{
+	switch (reason) {
+	case porting::EmscriptenPersistenceReason::Settings:
+		return "settings";
+	case porting::EmscriptenPersistenceReason::Disconnect:
+		return "disconnect";
+	case porting::EmscriptenPersistenceReason::Shutdown:
+		return "shutdown";
+	case porting::EmscriptenPersistenceReason::Periodic:
+	default:
+		return "periodic";
+	}
+}
+
+} // namespace
+
+extern "C" {
+
+EMSCRIPTEN_KEEPALIVE void luanti_persistence_sync_completed(double generation)
+{
+	auto completed = static_cast<std::uint64_t>(generation);
+	auto current = saved_generation.load(std::memory_order_relaxed);
+	while (current < completed && !saved_generation.compare_exchange_weak(
+			current, completed, std::memory_order_release,
+			std::memory_order_relaxed)) {
+	}
+	sync_error.store(false, std::memory_order_release);
+}
+
+EMSCRIPTEN_KEEPALIVE void luanti_persistence_sync_failed(double generation)
+{
+	(void)generation;
+	sync_error.store(true, std::memory_order_release);
+}
+
+} // extern "C"
 
 namespace porting {
 
-// Mount an IDBFS volume at the user-data path so worlds and settings survive
-// page reloads.  Must be called before any file I/O to that path.
-void emscripten_init_filesystem()
+void emscripten_validate_main_loop()
 {
-	EM_ASM(
-		// Create the directory tree for persistent user data.
-		var dirs = [
-			'/home',
-			'/home/web_user',
-			'/home/web_user/.luanti',
-			'/home/web_user/.luanti/worlds',
-			'/home/web_user/.luanti/mods',
-			'/home/web_user/.luanti/textures',
-			'/home/web_user/.luanti/games',
-		];
-		dirs.forEach(function(d) {
-			try { FS.mkdir(d); } catch(e) { /* already exists */ }
-		});
+	if (emscripten_is_main_browser_thread()) {
+		emscripten_log(EM_LOG_ERROR,
+				"Luanti: browser main-loop contract violated; "
+				"build with -sPROXY_TO_PTHREAD=1");
+		std::abort();
+	}
 
-		// Mount IndexedDB-backed FS for persistence.
-		FS.mount(IDBFS, {}, '/home/web_user/.luanti');
-
-		// Populate memory FS from IndexedDB (synchronous load via semaphore).
-		var done = false;
-		FS.syncfs(true, function(err) {
-			if (err) {
-				console.error('Luanti: IDBFS load error:', err);
-			} else {
-				console.log('Luanti: IDBFS loaded successfully');
-			}
-			done = true;
-		});
-
-		// Spin until the async callback fires.  This is intentional: we are
-		// called from C++ before the game loop starts, so we block here via
-		// Emscripten's synchronous emulation.  If ASYNCIFY is enabled the
-		// emscripten_sleep calls below will yield properly.
-		var deadline = Date.now() + 5000;
-		while (!done && Date.now() < deadline) {
-			// busy-wait – acceptable only during early init
-		}
-	);
+	emscripten_log(EM_LOG_CONSOLE,
+			"Luanti: synchronous engine loop running on an application worker");
 }
 
-// Flush any dirty pages in the IDBFS back to IndexedDB.  Call this after
-// saving a world, changing settings, or periodically during gameplay.
-void emscripten_sync_filesystem()
+void emscripten_service_browser_frame()
 {
-	EM_ASM(
-		FS.syncfs(false, function(err) {
-			if (err) console.error('Luanti: IDBFS save error:', err);
-		});
-	);
+	emscripten_service_persistence();
+}
+
+void emscripten_mark_persistence_dirty(EmscriptenPersistenceReason reason,
+		bool urgent)
+{
+	pending_reason.store(reason, std::memory_order_relaxed);
+	if (urgent)
+		pending_urgent.store(true, std::memory_order_release);
+	dirty_generation.fetch_add(1, std::memory_order_release);
+}
+
+void emscripten_service_persistence()
+{
+	auto generation = dirty_generation.load(std::memory_order_acquire);
+	if (generation <= submitted_generation.load(std::memory_order_acquire))
+		return;
+
+	const bool urgent = pending_urgent.load(std::memory_order_acquire);
+	const auto now = porting::getTimeMs();
+	if (!urgent && last_ordinary_start_ms != 0 &&
+			now - last_ordinary_start_ms < ORDINARY_SYNC_INTERVAL_MS)
+		return;
+
+	// Exchange only after the request is eligible. An urgent worker request
+	// racing after this exchange remains set for the next service point.
+	const bool submitted_urgent = pending_urgent.exchange(false,
+		std::memory_order_acq_rel);
+	const auto reason = pending_reason.load(std::memory_order_relaxed);
+
+	if (!submitted_urgent)
+		last_ordinary_start_ms = now;
+	submitted_generation.store(generation, std::memory_order_release);
+
+	MAIN_THREAD_EM_ASM({
+		var persistence = Module["luantiPersistence"];
+		if (!persistence || !persistence["_requestGeneration"]) {
+			console.error("Luanti persistence service is unavailable");
+			var failed = Module["_luanti_persistence_sync_failed"];
+			if (typeof failed === "function")
+				failed($0);
+		} else {
+			persistence["_requestGeneration"]({
+				"generation": $0,
+				"reason": UTF8ToString($1),
+				"urgent": !!$2
+			});
+		}
+	}, static_cast<double>(generation), reason_name(reason), submitted_urgent);
+}
+
+bool emscripten_persistence_pending()
+{
+	return saved_generation.load(std::memory_order_acquire) <
+		dirty_generation.load(std::memory_order_acquire);
+}
+
+bool emscripten_persistence_error()
+{
+	return sync_error.load(std::memory_order_acquire);
+}
+
+void emscripten_wait_for_persistence()
+{
+	while (emscripten_persistence_pending()) {
+		emscripten_service_persistence();
+		// main() runs on the application worker. Sleeping it leaves the browser
+		// main thread free to complete syncfs callbacks and display errors.
+		emscripten_thread_sleep(16);
+	}
 }
 
 } // namespace porting

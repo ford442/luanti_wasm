@@ -1,0 +1,42 @@
+<!--
+Luanti
+SPDX-License-Identifier: LGPL-2.1-or-later
+Copyright (C) 2026 The Luanti Contributors
+-->
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>Luanti network bridge probe</title>
+</head>
+<body>
+	<div id="luanti-network-status"></div>
+	<div id="luanti-network-error" hidden></div>
+	<script>
+		var HEAPU8 = new Uint8Array(65536);
+		var probeAllocation = 1024;
+		function _malloc(length) {
+			var pointer = probeAllocation;
+			probeAllocation += length;
+			return pointer;
+		}
+		function _free() {}
+		var Module = {
+			luantiNetworkProbe: {received: [], events: []},
+			_luanti_websocket_proxy_receive: function(handle, pointer, length,
+					address, port) {
+				Module.luantiNetworkProbe.received.push({
+					handle: handle,
+					payload: Array.from(HEAPU8.subarray(pointer, pointer + length)),
+					address: address >>> 0,
+					port: port
+				});
+			}
+		};
+		window.addEventListener("luanti:network", function(event) {
+			Module.luantiNetworkProbe.events.push(event.detail);
+		});
+	</script>
+	<script src="../../client/web/network.js"></script>
+</body>
+</html>

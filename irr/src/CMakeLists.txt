@@ -162,7 +162,9 @@ endif()
 
 if(EMSCRIPTEN)
 	find_path(EGL_INCLUDE_DIR EGL/egl.h)
-	find_library(EGL_LIBRARY NAMES EGL)
+	# EGL is an Emscripten system library selected by the driver rather than a
+	# standalone archive discoverable through CMake's find_library().
+	set(EGL_LIBRARY -lEGL)
 endif()
 
 set(USE_SDL2_SHARED FALSE)

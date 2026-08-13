@@ -15,6 +15,7 @@
 #include "client/render/core.h"
 // include the shadow mapper classes too
 #include "client/shadows/dynamicshadowsrender.h"
+#include "porting_emscripten.h"
 #include <IVideoDriver.h>
 
 #if !IS_CLIENT_BUILD
@@ -137,7 +138,9 @@ public:
 
 	bool run()
 	{
-		return m_device->run();
+		bool keep_running = m_device->run();
+		porting::emscripten_service_browser_frame();
+		return keep_running;
 	}
 
 	// FIXME: this is still global when it shouldn't be

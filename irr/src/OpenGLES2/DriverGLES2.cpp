@@ -124,7 +124,9 @@ void COpenGLES2Driver::initFeatures()
 	// this and violates the spec (see #15830). This happens to work on Mesa
 	// nonetheless so continue allowing this useful debug feature there.
 	if (Name.find("Mesa") != -1) {
-		KHRDebugSupported = queryExtension("GL_KHR_debug");
+		// WebGL implementations can advertise KHR_debug while omitting the
+		// native glObjectLabel entry point from getProcAddress.
+		KHRDebugSupported = queryExtension("GL_KHR_debug") && GL.ObjectLabel;
 		if (KHRDebugSupported)
 			MaxLabelLength = GetInteger(GL.MAX_LABEL_LENGTH);
 	}

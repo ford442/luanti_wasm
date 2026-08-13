@@ -4,6 +4,7 @@
 
 #include "socket.h"
 
+#include <algorithm>
 #include <iostream>
 #include <cstring>
 #include "util/numeric.h"
@@ -13,33 +14,256 @@
 #include "networkexceptions.h"
 
 #ifdef __EMSCRIPTEN__
-// ---------------------------------------------------------------------------
-// Emscripten stub — browsers have no UDP sockets.
-// All methods are no-ops so the engine compiles and links; real networking
-// (WebRTC DataChannels or in-memory loopback) will replace this in a later
-// phase.
-// ---------------------------------------------------------------------------
 
-void sockets_init()   {}
-void sockets_cleanup() {}
+#include "websocket_proxy.h"
 
-UDPSocket::UDPSocket(bool /*ipv6*/) {}
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <emscripten.h>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
-bool UDPSocket::init(bool /*ipv6*/, bool /*noExceptions*/)
+namespace {
+
+struct QueuedDatagram {
+	Address sender;
+	std::vector<u8> data;
+};
+
+std::atomic<int> next_socket_handle{1};
+std::atomic<u16> next_ephemeral_port{20000};
+std::mutex sockets_mutex;
+std::unordered_map<int, std::shared_ptr<EmscriptenUDPSocketState>> sockets_by_handle;
+std::unordered_map<u16, std::shared_ptr<EmscriptenUDPSocketState>> sockets_by_port;
+bool sockets_initialized = false;
+
+u16 allocate_ephemeral_port()
 {
-	verbosestream << "UDPSocket::init: no-op on Emscripten" << std::endl;
+	for (u32 attempt = 0; attempt < 45535; ++attempt) {
+		u16 port = next_ephemeral_port.fetch_add(1, std::memory_order_relaxed);
+		if (port < 20000) {
+			next_ephemeral_port.store(20001, std::memory_order_relaxed);
+			port = 20000;
+		}
+		if (sockets_by_port.count(port) == 0)
+			return port;
+	}
+	return 0;
+}
+
+} // namespace
+
+struct EmscriptenUDPSocketState {
+	std::mutex mutex;
+	std::condition_variable event;
+	std::deque<QueuedDatagram> receive_queue;
+	Address bind_address;
+	bool closed = false;
+};
+
+extern "C" EMSCRIPTEN_KEEPALIVE void luanti_websocket_proxy_receive(
+		int handle, const void *data, int size, u32 source_ip, u16 source_port)
+{
+	if (!data || size < 0)
+		return;
+
+	std::shared_ptr<EmscriptenUDPSocketState> state;
+	{
+		std::lock_guard<std::mutex> lock(sockets_mutex);
+		auto found = sockets_by_handle.find(handle);
+		if (found != sockets_by_handle.end())
+			state = found->second;
+	}
+	if (!state)
+		return;
+
+	QueuedDatagram datagram;
+	datagram.sender = Address(source_ip, source_port);
+	datagram.data.assign(static_cast<const u8 *>(data),
+		static_cast<const u8 *>(data) + size);
+	{
+		std::lock_guard<std::mutex> lock(state->mutex);
+		if (state->closed)
+			return;
+		if (state->receive_queue.size() >= 1024)
+			state->receive_queue.pop_front();
+		state->receive_queue.emplace_back(std::move(datagram));
+	}
+	state->event.notify_one();
+}
+
+void websocket_proxy_register_hostname(const char *address, const char *hostname)
+{
+	MAIN_THREAD_EM_ASM({
+		var network = Module["luantiNetwork"];
+		if (network && network["_registerHostname"])
+			network["_registerHostname"](UTF8ToString($0), UTF8ToString($1));
+	}, address, hostname);
+}
+
+void sockets_init()
+{
+	sockets_initialized = true;
+}
+
+void sockets_cleanup()
+{
+	sockets_initialized = false;
+}
+
+UDPSocket::UDPSocket(bool ipv6)
+{
+	init(ipv6, false);
+}
+
+bool UDPSocket::init(bool ipv6, bool noExceptions)
+{
+	if (!sockets_initialized) {
+		verbosestream << "Sockets not initialized" << std::endl;
+		return false;
+	}
+	if (m_handle >= 0) {
+		if (noExceptions)
+			return false;
+		throw SocketException("Cannot initialize socket twice");
+	}
+	if (ipv6)
+		warningstream << "WebSocket proxy transport is IPv4-only; using IPv4"
+			<< std::endl;
+
+	m_handle = next_socket_handle.fetch_add(1, std::memory_order_relaxed);
+	m_addr_family = AF_INET;
+	m_timeout_ms = 0;
+	m_emscripten = std::make_shared<EmscriptenUDPSocketState>();
+	{
+		std::lock_guard<std::mutex> lock(sockets_mutex);
+		sockets_by_handle[m_handle] = m_emscripten;
+	}
 	return true;
 }
 
-UDPSocket::~UDPSocket() {}
-
-void UDPSocket::Bind(Address /*addr*/) {}
-
-void UDPSocket::Send(const Address & /*destination*/, const void * /*data*/, int /*size*/) {}
-
-int UDPSocket::Receive(Address & /*sender*/, void * /*data*/, int /*size*/)
+UDPSocket::~UDPSocket()
 {
-	return -1; // no data
+	if (!m_emscripten)
+		return;
+	{
+		std::lock_guard<std::mutex> lock(m_emscripten->mutex);
+		m_emscripten->closed = true;
+	}
+	m_emscripten->event.notify_all();
+	{
+		std::lock_guard<std::mutex> lock(sockets_mutex);
+		sockets_by_handle.erase(m_handle);
+		if (m_emscripten->bind_address.getPort() != 0)
+			sockets_by_port.erase(m_emscripten->bind_address.getPort());
+	}
+	MAIN_THREAD_EM_ASM({
+		var network = Module["luantiNetwork"];
+		if (network && network["_destroySocket"])
+			network["_destroySocket"]($0);
+	}, m_handle);
+}
+
+void UDPSocket::Bind(Address addr)
+{
+	if (!m_emscripten)
+		throw SocketException("Socket is not initialized");
+	if (addr.getFamily() != AF_INET)
+		throw SocketException("WebSocket proxy transport supports IPv4 only");
+
+	u16 port;
+	{
+		std::lock_guard<std::mutex> lock(sockets_mutex);
+		if (m_emscripten->bind_address.getPort() != 0)
+			throw SocketException("Socket is already bound");
+		port = addr.getPort();
+		if (port == 0)
+			port = allocate_ephemeral_port();
+		if (port == 0 || sockets_by_port.count(port) != 0)
+			throw SocketException("Failed to bind browser UDP socket");
+		addr.setPort(port);
+		m_emscripten->bind_address = addr;
+		sockets_by_port[port] = m_emscripten;
+	}
+	MAIN_THREAD_EM_ASM({
+		var network = Module["luantiNetwork"];
+		if (network && network["_createSocket"])
+			network["_createSocket"]($0, $1);
+	}, m_handle, port);
+}
+
+void UDPSocket::Send(const Address &destination, const void *data, int size)
+{
+	if (!m_emscripten || !data || size < 0)
+		throw SendFailedException("Invalid browser UDP send");
+	if (destination.getFamily() != AF_INET)
+		throw SendFailedException("WebSocket proxy transport supports IPv4 only");
+	if (m_emscripten->bind_address.getPort() == 0)
+		Bind(Address(0, 0, 0, 0, 0));
+
+	if (destination.isLocalhost()) {
+		std::shared_ptr<EmscriptenUDPSocketState> target;
+		{
+			std::lock_guard<std::mutex> lock(sockets_mutex);
+			auto found = sockets_by_port.find(destination.getPort());
+			if (found != sockets_by_port.end())
+				target = found->second;
+		}
+		if (!target)
+			return;
+		QueuedDatagram datagram;
+		datagram.sender = Address(127, 0, 0, 1,
+			m_emscripten->bind_address.getPort());
+		datagram.data.assign(static_cast<const u8 *>(data),
+			static_cast<const u8 *>(data) + size);
+		{
+			std::lock_guard<std::mutex> lock(target->mutex);
+			if (target->closed)
+				return;
+			if (target->receive_queue.size() >= 1024)
+				target->receive_queue.pop_front();
+			target->receive_queue.emplace_back(std::move(datagram));
+		}
+		target->event.notify_one();
+		return;
+	}
+
+	const std::string address = destination.serializeString();
+	int accepted = MAIN_THREAD_EM_ASM_INT({
+		var network = Module["luantiNetwork"];
+		return network && network["_send"] ?
+			network["_send"]($0, $1, $2, UTF8ToString($3), $4) : 0;
+	}, m_handle, data, size, address.c_str(), destination.getPort());
+	if (!accepted)
+		throw SendFailedException("Multiplayer proxy is unavailable");
+}
+
+int UDPSocket::Receive(Address &sender, void *data, int size)
+{
+	if (!m_emscripten || !data || size < 0)
+		return -1;
+	std::unique_lock<std::mutex> lock(m_emscripten->mutex);
+	auto ready = [this]() {
+		return m_emscripten->closed || !m_emscripten->receive_queue.empty();
+	};
+	if (m_timeout_ms < 0) {
+		m_emscripten->event.wait(lock, ready);
+	} else if (!m_emscripten->event.wait_for(lock,
+			std::chrono::milliseconds(m_timeout_ms), ready)) {
+		return -1;
+	}
+	if (m_emscripten->closed || m_emscripten->receive_queue.empty())
+		return -1;
+
+	QueuedDatagram datagram = std::move(m_emscripten->receive_queue.front());
+	m_emscripten->receive_queue.pop_front();
+	int received = std::min<int>(size, datagram.data.size());
+	memcpy(data, datagram.data.data(), received);
+	sender = datagram.sender;
+	return received;
 }
 
 void UDPSocket::setTimeoutMs(int timeout_ms)
@@ -47,9 +271,19 @@ void UDPSocket::setTimeoutMs(int timeout_ms)
 	m_timeout_ms = timeout_ms;
 }
 
-bool UDPSocket::WaitData(int /*timeout_ms*/)
+bool UDPSocket::WaitData(int timeout_ms)
 {
-	return false;
+	if (!m_emscripten)
+		return false;
+	std::unique_lock<std::mutex> lock(m_emscripten->mutex);
+	if (!m_emscripten->receive_queue.empty())
+		return true;
+	auto ready = [this]() {
+		return m_emscripten->closed || !m_emscripten->receive_queue.empty();
+	};
+	return m_emscripten->event.wait_for(lock,
+		std::chrono::milliseconds(std::max(timeout_ms, 0)), ready) &&
+		!m_emscripten->closed && !m_emscripten->receive_queue.empty();
 }
 
 #else // !__EMSCRIPTEN__

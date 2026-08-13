@@ -14,6 +14,7 @@
 #include "nodemetadata.h"
 #include "gamedef.h"
 #include "porting.h"
+#include "porting_emscripten.h"
 #include "profiler.h"
 #include "raycast.h"
 #include "remoteplayer.h"
@@ -373,11 +374,16 @@ void ServerEnvironment::removePlayer(RemotePlayer *player)
 
 bool ServerEnvironment::removePlayerFromDatabase(const std::string &name)
 {
-	return m_player_database->removePlayer(name);
+	const bool removed = m_player_database->removePlayer(name);
+	if (removed)
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
+	return removed;
 }
 
 void ServerEnvironment::saveLoadedPlayers(bool force)
 {
+	bool saved = false;
 	for (RemotePlayer *player : m_players) {
 		if (force || player->checkModified() || (player->getPlayerSAO() &&
 				player->getPlayerSAO()->getMeta().isModified())) {
@@ -388,8 +394,12 @@ void ServerEnvironment::saveLoadedPlayers(bool force)
 					<< e.what() << std::endl;
 				throw;
 			}
+			saved = true;
 		}
 	}
+	if (saved)
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
 }
 
 void ServerEnvironment::savePlayer(RemotePlayer *player)
@@ -401,6 +411,8 @@ void ServerEnvironment::savePlayer(RemotePlayer *player)
 			<< e.what() << std::endl;
 		throw;
 	}
+	porting::emscripten_mark_persistence_dirty(
+		porting::EmscriptenPersistenceReason::Periodic);
 }
 
 std::unique_ptr<PlayerSAO> ServerEnvironment::loadPlayer(RemotePlayer *player, session_t peer_id)
@@ -460,6 +472,8 @@ void ServerEnvironment::saveMeta()
 			<<path<<std::endl;
 		throw SerializationError("Couldn't save env meta");
 	}
+	porting::emscripten_mark_persistence_dirty(
+		porting::EmscriptenPersistenceReason::Periodic);
 }
 
 void ServerEnvironment::loadMeta()

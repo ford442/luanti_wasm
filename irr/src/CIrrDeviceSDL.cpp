@@ -32,6 +32,7 @@
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
 #include <emscripten.h>
+#include <emscripten/html5_webgl.h>
 #endif
 
 #include "CSDLManager.h"
@@ -391,6 +392,7 @@ void CIrrDeviceSDL::resetReceiveTextInputEvents()
 //! constructor
 CIrrDeviceSDL::CIrrDeviceSDL(const SIrrlichtCreationParameters &param) :
 		CIrrDeviceStub(param),
+		Context(nullptr),
 		Window((SDL_Window *)param.WindowId),
 		MouseX(0), MouseY(0), MouseXRel(0), MouseYRel(0), MouseButtonStates(0),
 		Width(param.WindowSize.Width), Height(param.WindowSize.Height),
@@ -517,10 +519,18 @@ CIrrDeviceSDL::~CIrrDeviceSDL()
 	for (const auto &p: gamepads)
 		SDL_CloseGamepad(p.second);
 #endif
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	if (Context) {
+		emscripten_webgl_make_context_current(0);
+		emscripten_webgl_destroy_context(
+			reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context));
+	}
+#else
 	if (Window && Context) {
 		SDL_GL_MakeCurrent(Window, NULL);
 		SDL_GL_DestroyContext(Context);
 	}
+#endif
 	if (Window) {
 		SDL_DestroyWindow(Window);
 	}
@@ -649,16 +659,18 @@ bool CIrrDeviceSDL::createWindowWithContext()
 		SDL_Flags |= SDL_WINDOW_RESIZABLE;
 	if (CreationParams.WindowMaximized)
 		SDL_Flags |= SDL_WINDOW_MAXIMIZED;
+#ifndef _IRR_EMSCRIPTEN_PLATFORM_
 	SDL_Flags |= SDL_WINDOW_OPENGL;
+#endif
 
 	SDL_GL_ResetAttributes();
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
 	if (Width != 0 || Height != 0)
-		emscripten_set_canvas_size(Width, Height);
+		emscripten_set_canvas_element_size("#canvas", Width, Height);
 	else {
-		int w, h, fs;
-		emscripten_get_canvas_size(&w, &h, &fs);
+		int w, h;
+		emscripten_get_canvas_element_size("#canvas", &w, &h);
 		Width = w;
 		Height = h;
 	}
@@ -680,9 +692,52 @@ bool CIrrDeviceSDL::createWindowWithContext()
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
 	}
 
-	SDL_CreateWindowAndRenderer(0, 0, SDL_Flags, &Window, &Renderer); // 0,0 will use the canvas size
+	Window = SDL_CreateWindow("", SDL_WINDOWPOS_UNDEFINED,
+		SDL_WINDOWPOS_UNDEFINED, Width, Height, SDL_Flags);
+	if (!Window) {
+		os::Printer::log("Could not create browser window", SDL_GetError(), ELL_WARNING);
+		return false;
+	}
 
+	EmscriptenWebGLContextAttributes attributes;
+	emscripten_webgl_init_context_attributes(&attributes);
+	attributes.alpha = CreationParams.WithAlphaChannel;
+	attributes.depth = CreationParams.ZBufferBits > 0;
+	attributes.stencil = CreationParams.Stencilbuffer;
+	attributes.antialias = CreationParams.AntiAlias > 1;
+	// Irrlicht's current GLES driver uses uniform blocks and other GLES 3
+	// entry points during shader setup, which map to WebGL 2.
+	attributes.majorVersion = 2;
+	attributes.enableExtensionsByDefault = true;
+	attributes.explicitSwapControl = true;
+	attributes.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_FALLBACK;
+
+	const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_context =
+		emscripten_webgl_create_context("#canvas", &attributes);
+	if (!webgl_context) {
+		os::Printer::log("Could not create browser WebGL context", ELL_WARNING);
+		SDL_DestroyWindow(Window);
+		Window = nullptr;
+		return false;
+	}
+	Context = reinterpret_cast<SDL_GLContext>(webgl_context);
+	if (emscripten_webgl_make_context_current(webgl_context) != EMSCRIPTEN_RESULT_SUCCESS) {
+		os::Printer::log("Could not activate browser WebGL context", ELL_WARNING);
+		emscripten_webgl_destroy_context(webgl_context);
+		Context = nullptr;
+		SDL_DestroyWindow(Window);
+		Window = nullptr;
+		return false;
+	}
+
+	// SDL_GL_GetAttribute resolves GL entry points dynamically. Under
+	// PROXY_TO_PTHREAD + OFFSCREEN_FRAMEBUFFER those indirect calls do not carry
+	// Emscripten's worker-side GL proxy context, so this diagnostic query fails
+	// even though the context itself was created and made current successfully.
+	// Rendering uses the normal linked GL entry points and remains proxied.
+#ifndef _IRR_EMSCRIPTEN_PLATFORM_
 	logAttributes();
+#endif
 
 	// "#canvas" is for the opengl context
 	emscripten_set_mousedown_callback("#canvas", (void *)this, true, MouseUpDownCallback);
@@ -931,7 +986,7 @@ bool CIrrDeviceSDL::run()
 						emscripten_exit_pointerlock();
 						return !Close;
 					} else if (!CursorControl->isVisible() && !pointerlockStatus.isActive) {
-						emscripten_request_pointerlock(0, true);
+						emscripten_request_pointerlock("#canvas", true);
 						return !Close;
 					}
 				}
@@ -1275,7 +1330,11 @@ float CIrrDeviceSDL::getDisplayDensity() const
 
 void CIrrDeviceSDL::SwapWindow()
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	emscripten_webgl_commit_frame();
+#else
 	SDL_GL_SwapWindow(Window);
+#endif
 }
 
 //! pause execution temporarily

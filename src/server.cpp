@@ -22,6 +22,7 @@
 #include "nodedef.h"
 #include "particles.h"
 #include "profiler.h"
+#include "porting_emscripten.h"
 #include "remoteplayer.h"
 #include "server/ban.h"
 #include "serverenvironment.h"
@@ -431,8 +432,11 @@ Server::~Server()
 	}
 
 	// Write any changes before deletion.
-	if (m_mod_storage_database)
+	if (m_mod_storage_database) {
 		m_mod_storage_database->endSave();
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
+	}
 
 	// Clean up files
 	for (auto &it : m_media) {
@@ -889,6 +893,8 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		if (m_mod_storage_save_timer <= 0.0f) {
 			m_mod_storage_save_timer = g_settings->getFloat("server_map_save_interval");
 			m_mod_storage_database->endSave();
+			porting::emscripten_mark_persistence_dirty(
+				porting::EmscriptenPersistenceReason::Periodic);
 			m_mod_storage_database->beginSave();
 		}
 	}

@@ -1,0 +1,12 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=url
+command=/usr/bin/cmake;-P;/root/luanti_wasm/build-wasm/_deps/luanti_zstd-subbuild/luanti_zstd-populate-prefix/src/luanti_zstd-populate-stamp/download-luanti_zstd-populate.cmake;COMMAND;/usr/bin/cmake;-P;/root/luanti_wasm/build-wasm/_deps/luanti_zstd-subbuild/luanti_zstd-populate-prefix/src/luanti_zstd-populate-stamp/verify-luanti_zstd-populate.cmake;COMMAND;/usr/bin/cmake;-P;/root/luanti_wasm/build-wasm/_deps/luanti_zstd-subbuild/luanti_zstd-populate-prefix/src/luanti_zstd-populate-stamp/extract-luanti_zstd-populate.cmake
+source_dir=/root/luanti_wasm/build-wasm/_deps/luanti_zstd-src
+work_dir=/root/luanti_wasm/build-wasm/_deps
+url(s)=https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+hash=SHA256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+no_extract=
+

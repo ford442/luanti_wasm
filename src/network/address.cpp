@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cerrno>
 #include "network/networkexceptions.h"
+#include "network/websocket_proxy.h"
 #include "settings.h"
 
 #ifdef _WIN32
@@ -125,10 +126,14 @@ void Address::Resolve(const char *name, Address *fallback)
 
 	// Copy data
 	copy_from_ai(resolved, this);
+	websocket_proxy_register_hostname(serializeString().c_str(), name);
 	if (fallback) {
 		*fallback = Address();
-		if (resolved->ai_next)
+		if (resolved->ai_next) {
 			copy_from_ai(resolved->ai_next, fallback);
+			websocket_proxy_register_hostname(
+				fallback->serializeString().c_str(), name);
+		}
 	}
 
 	freeaddrinfo(resolved);

@@ -33,11 +33,12 @@ This document describes the current state, blockers, and step-by-step plan for b
   - GLES2 is enabled by default for Emscripten
   - SDL2 device backend is used (Emscripten has excellent SDL2 port support)
 
-### What Does NOT Work
+### Remaining Work
 
-- The **main Luanti engine** (`src/`) has **zero Emscripten-specific code**
-- No Emscripten build preset or toolchain file exists
-- The networking, file system, threading, and main loop are all designed for native desktop/server platforms
+- A deployed TLS proxy and public-server multiplayer acceptance are outstanding.
+- Full world persistence acceptance across Chrome/Edge/Firefox is outstanding.
+- CI and public demo hosting are not yet configured.
+- Sound and complete keyboard, pointer-lock, and touch acceptance remain.
 
 ---
 
@@ -87,9 +88,13 @@ Luanti uses **raw UDP sockets** for all client-server communication (including s
 | **WebRTC DataChannels** | UDP-like, low latency, supported in all modern browsers | Complex signaling required; Luanti protocol would need STUN/TURN or a signaling server |
 | **WebSockets** | Simple, widely supported | TCP-only; changes game feel (head-of-line blocking); requires proxy server or protocol rewrite |
 | **WebTransport** | Modern UDP-like API | Still emerging; not universally supported; requires HTTP/3 server |
-| **Disable networking** | Gets a build working fastest | Only local singleplayer works; no multiplayer, no server list |
+| **In-process loopback** | No browser transport overhead for singleplayer | Does not reach remote servers |
 
-**Recommendation:** For the first milestone, **disable real networking entirely** and run the internal server with a localhost loopback shim. For multiplayer, implement WebRTC DataChannels later.
+**Implemented MVP:** Keep singleplayer UDP in an in-process queue and route only
+remote IPv4 destinations through a versioned WebSocket-to-UDP proxy. This leaves
+Luanti's reliable-UDP layer unchanged and works in current browsers. It adds one
+TCP/WebSocket hop, so head-of-line blocking and proxy placement still affect
+latency. See `docs/wasm-issues/02-websocket-proxy-networking.md`.
 
 ### 2. Main Game Loop
 
@@ -110,7 +115,10 @@ Browsers require yielding control to the event loop. A blocking loop freezes the
 - **`emscripten_set_main_loop()`**: Refactor the game loop into a callback function. This is the cleanest approach but requires restructuring `ClientLauncher::run()` and `Game::run()`.
 - **`-sPROXY_TO_PTHREAD`**: Run the main application on a web worker thread. Allows blocking code but requires `SHARED_MEMORY` and has compatibility constraints.
 
-**Recommendation:** Use `emscripten_set_main_loop()` with a state machine refactor. It is the most performant and idiomatic approach.
+**Implemented MVP:** Use `PROXY_TO_PTHREAD` with an offscreen framebuffer so the full
+synchronous launcher/menu/game lifecycle runs on an application worker. Keep a
+complete `emscripten_set_main_loop()` state-machine conversion as a measured
+follow-up if worker-side canvas stalls remain.
 
 ### 3. Threading
 
@@ -145,8 +153,8 @@ Emscripten provides virtual file systems:
 **Strategy:**
 1. At build time, use `--preload-file` or `--embed-file` to bundle read-only assets (`builtin/`, `games/devtest/`, `textures/`, `fonts/`)
 2. At runtime, mount an `IDBFS` on `/home/web_user/.luanti/` for `worlds/`, `minetest.conf`, and `debug.txt`
-3. Call `EM_ASM(FS.syncfs(true, ...))` on startup to load saved data
-4. Call `EM_ASM(FS.syncfs(false, ...))` periodically or on exit to persist
+3. Hydrate with `FS.syncfs(true)` from the `Module.preRun` bootstrap before `main()`
+4. Submit committed saves to the serialized `FS.syncfs(false)` service
 
 **Files to modify:**
 - `src/filesys.cpp` — Path logic, directory listing
@@ -207,12 +215,13 @@ Goal: Get `luanti` to compile and link as a `.js` + `.wasm` blob, even if it cra
    - Adjust `EXECUTABLE_OUTPUT_PATH` if needed
    - Remove or guard `CreateLegacyAlias` (symlinks don't exist on Emscripten FS)
 
-4. **Patch `src/network/socket.cpp` and `address.cpp`**:
-   - Create stub implementations for Emscripten:
-     - `UDPSocket::init()` returns a dummy handle
-     - `Send()` / `Receive()` / `Bind()` are no-ops or log warnings
-     - `Address::Resolve()` returns localhost
-   - This temporarily breaks multiplayer but allows compilation
+4. **Use the browser `UDPSocket` transport in `src/network/socket.cpp`:**
+   - Deliver loopback packets through a shared-memory queue for the internal
+     singleplayer server.
+   - Submit remote packets to `client/web/network.js`, which connects to the
+     configured WebSocket-to-UDP proxy.
+   - Register Emscripten's synthetic DNS addresses from `Address::Resolve()` so
+     the proxy resolves the original hostname.
 
 5. **Patch `src/porting.cpp` and `src/porting.h`**:
    - Add `__EMSCRIPTEN__` includes where needed
@@ -240,99 +249,62 @@ Goal: The game can load its Lua builtins, textures, and fonts; save data goes to
    ```
    Or use `--embed-file` if you want them inside the `.wasm` binary.
 
-2. **Mount IDBFS for user data** in `src/main.cpp` (or a new `src/porting_emscripten.cpp`):
-   ```cpp
-   #ifdef __EMSCRIPTEN__
-   #include <emscripten.h>
-   void emscripten_init_filesystem()
-   {
-       EM_ASM(
-           // Create the directory structure
-           FS.mkdir('/home');
-           FS.mkdir('/home/web_user');
-           FS.mkdir('/home/web_user/.luanti');
-           FS.mkdir('/home/web_user/.luanti/worlds');
-           FS.mkdir('/home/web_user/.luanti/mods');
-           FS.mkdir('/home/web_user/.luanti/textures');
-           
-           // Mount IDBFS for persistence
-           FS.mount(IDBFS, {}, '/home/web_user/.luanti');
-           
-           // Sync from IndexedDB to memory
-           FS.syncfs(true, function(err) {
-               if (err) console.error('IDBFS sync load error:', err);
-               else console.log('IDBFS loaded');
-           });
-       );
-   }
-   #endif
-   ```
+2. **Mount and hydrate IDBFS before `main()`.**
+   `client/web/persistence.js` is linked as `--pre-js`. Its `Module.preRun`
+   callback holds a run dependency until `FS.syncfs(true)` succeeds, then creates
+   the writable user directories. A startup storage failure intentionally keeps
+   `main()` gated. See `docs/wasm-issues/01-persistence-mvp.md` for the runtime
+   state contract and error behavior.
 
 3. **Set default paths** in `src/porting.cpp`:
    - `path_share = "/"` (or wherever preloaded files are mounted)
    - `path_user = "/home/web_user/.luanti"`
 
-4. **Add periodic save sync** or sync on `atexit()` / `main()` cleanup.
+4. **Service committed saves.** Engine save paths record atomic dirty
+   generations. The application-worker frame pump submits them to the
+   single-flight JavaScript `FS.syncfs(false)` service, with urgent disconnect,
+   shutdown, and page lifecycle requests.
 
 ### Phase 3: Async Main Loop
 
 Goal: The game renders without freezing the browser tab.
 
-1. **Refactor `ClientLauncher::run()` and `Game::run()`**:
-   - Extract the body of the `while (m_rendering_engine->run())` loops into a `step()` or `frame()` method
-   - Store all local variables that cross frame boundaries as class members
+**Implemented MVP:** link with `-sPROXY_TO_PTHREAD=1` and
+`-sOFFSCREEN_FRAMEBUFFER=1`. Luanti's synchronous launcher, menu, gameplay,
+server-start, and shutdown stacks run away from the browser UI thread while the
+SDL/EGL GL calls are proxied to the browser-owned canvas. Direct OffscreenCanvas
+transfer is not enabled because it conflicts with that context-creation path in
+Emscripten 6.0.3. No Asyncify or native behavior changes are required.
 
-2. **Create an Emscripten main loop callback**:
-   ```cpp
-   #ifdef __EMSCRIPTEN__
-   #include <emscripten.h>
-   
-   static Game *g_game = nullptr;
-   
-   void emscripten_game_loop()
-   {
-       if (!g_game || !g_game->step()) {
-           emscripten_cancel_main_loop();
-       }
-   }
-   #endif
-   ```
+`porting::emscripten_validate_main_loop()` enforces this build contract at
+startup. Every `RenderingEngine::run()` call services browser-platform work;
+this currently submits persistence dirty generations. During final durable
+shutdown, only the application worker waits, so the browser can keep showing
+storage state and completing IndexedDB callbacks.
 
-3. **In `main.cpp` or `ClientLauncher`**:
-   ```cpp
-   #ifdef __EMSCRIPTEN__
-       g_game = &game;
-       emscripten_set_main_loop(emscripten_game_loop, 0, 1);
-   #else
-       while (m_rendering_engine->run() && !*kill) { ... }
-   #endif
-   ```
+This architecture keeps the page and launcher overlays responsive during
+engine work. A single long Lua callback can still stall the game canvas on the
+application worker. If profiling proves that boundary unacceptable, the
+follow-up is a complete `ClientLauncher` + `GUIEngine` + `Game` lifecycle state
+machine for `emscripten_set_main_loop()`, not a gameplay-loop-only extraction.
+See `docs/wasm-issues/03-async-main-loop.md` for the contract and focused browser
+smoke.
 
-4. **Alternative:** If refactoring is too invasive, use `-sASYNCIFY` as a temporary bridge:
-   ```cmake
-   target_link_options(luanti PRIVATE -sASYNCIFY)
-   ```
-   Then insert `emscripten_sleep(1)` inside tight loops. This is slower but requires less code change.
+### Phase 4: WebSocket Proxy Networking
 
-### Phase 4: Networking (WebRTC DataChannels)
+Goal: Join native Luanti servers without changing those servers.
 
-Goal: Multiplayer works by connecting to servers via a WebRTC bridge.
+**Implemented transport:** The Emscripten `UDPSocket` branch presents the same
+blocking interface used by `Connection`. Remote packets cross the browser main
+thread through `client/web/network.js`, use a 12-byte destination/source header
+over WebSocket, and are forwarded by the self-hostable Node server under
+`util/wasm/proxy/`. The generated shell and `?proxy=` query parameter configure
+the URL. IPv6 is intentionally rejected for this MVP.
 
-This is the most complex phase and can be deferred.
-
-1. **Design a WebRTC transport layer** in `src/network/webrtc_transport.cpp` (new file):
-   - Wraps a JavaScript WebRTC peer connection via `EM_ASM` / `emscripten::val` (if using Embind)
-   - Uses a lightweight signaling server (WebSocket) for SDP exchange
-   - Presents the same interface as `UDPSocket` so `Connection` doesn't need to change
-
-2. **Alternatively, use WebSockets**:
-   - Implement a `WebSocketSocket` class that speaks TCP
-   - Run a proxy server that translates WebSocket ↔ UDP
-   - This is easier to implement but changes latency characteristics
-
-3. **For singleplayer** (internal server):
-   - Keep the existing `UDPSocket` stub that simply delivers packets in-memory
-   - The client and server can communicate via a shared memory queue instead of a real socket
+The remaining phase gate is deployed acceptance: serve the built client with
+COOP/COEP, deploy the proxy behind WSS near the test server, join by hostname,
+and validate at least ten minutes of movement and chat. The proxy's shell status
+and `Module.luantiNetwork.getState()` expose link RTT and packet counters.
 
 ### Phase 5: Sound
 
@@ -427,6 +399,8 @@ emcmake cmake -B build-wasm \
         -sUSE_ZLIB=1 \
         -sUSE_FREETYPE=1 \
         -sFULL_ES2=1 \
+        -sPROXY_TO_PTHREAD=1 \
+        -sOFFSCREEN_FRAMEBUFFER=1 \
         -sALLOW_MEMORY_GROWTH=1 \
         -sINITIAL_MEMORY=256MB \
         -sMAXIMUM_MEMORY=1GB \
@@ -434,6 +408,9 @@ emcmake cmake -B build-wasm \
         -sSHARED_MEMORY=1 \
         -sFETCH=1 \
         -sFORCE_FILESYSTEM=1 \
+        -lidbfs.js \
+        --pre-js client/web/persistence.js \
+        --shell-file client/web/shell.html \
         --preload-file builtin \
         --preload-file games/devtest \
         --preload-file textures \
@@ -496,7 +473,9 @@ Then open `http://localhost:8000/build-wasm/bin/luanti.html`.
 ### Platform Abstraction
 - `src/porting.cpp` — Paths, signals, `secure_rand_fill_buf()`, `get_sysinfo()`, `getTimeNs()`
 - `src/porting.h` — `sleep_ms()`, `sleep_us()` macros (already work, but verify)
-- **NEW:** `src/porting_emscripten.cpp/h` — FS init, IDBFS sync, WebRTC helpers
+- `src/porting_emscripten.cpp/h` — dirty generations and application-thread persistence service
+- `client/web/persistence.js` — pre-main hydration, IDBFS sync serialization, retries, and public API
+- `client/web/shell.html` — generated-shell persistence status and sticky errors
 
 ### File System
 - `src/filesys.cpp` — `GetDirListing()`, `CreateDir()`, `RemoveDir()`, `CopyFile()`, `DeleteSingleFile()`
@@ -513,9 +492,10 @@ Then open `http://localhost:8000/build-wasm/bin/luanti.html`.
 - `src/threading/thread.cpp` — `setName()`, `bindToProcessor()`
 
 ### Main Loop & Entry Point
-- `src/main.cpp` — Add `emscripten_init_filesystem()` call, `#ifdef __EMSCRIPTEN__` around `main()` loop
-- `src/client/clientlauncher.cpp` — Refactor `run()` into step-based or use ASYNCIFY
-- `src/client/game.cpp` — Refactor `run()` into `step()` or `frame()`
+- `src/main.cpp` — Submit the urgent final persistence generation on graceful shutdown
+- `src/porting_emscripten.cpp/h` — Enforce and service the worker-main contract
+- `src/client/renderingengine.h` — Service browser-platform work once per frame
+- `src/client/clientlauncher.cpp`, `src/gui/guiEngine.cpp`, `src/client/game.cpp` — Preserve synchronous lifecycle under `PROXY_TO_PTHREAD`; a complete state-machine conversion remains optional follow-up work
 
 ### Rendering
 - `src/client/renderingengine.cpp/h` — Verify GLES2 context creation
@@ -608,7 +588,11 @@ Write a proxy that sits between the browser and native Luanti servers:
 Browser (WebSocket)  →  WS-to-UDP Proxy  →  Native Luanti Server
 ```
 
-This requires no changes to the native server and minimal changes to the client (just replace UDP with WebSocket), but TCP head-of-line blocking can affect real-time gameplay.
+This is the implemented multiplayer path. `client/web/network.js` and
+`util/wasm/proxy/` implement protocol version 1 while the C++ adapter keeps the
+normal `UDPSocket` contract. TCP head-of-line blocking can still affect
+real-time gameplay. The proxy can inspect unencrypted game traffic, so users
+must trust its operator or self-host it.
 
 ---
 
@@ -629,21 +613,11 @@ Use `--preload-file` or `--embed-file` at link time.
 ### Read-Write User Data
 Use `IDBFS` mounted at runtime.
 
-```javascript
-// In pre-run JS or EM_ASM
-FS.mkdir('/home/web_user/.luanti');
-FS.mount(IDBFS, {}, '/home/web_user/.luanti');
-FS.syncfs(true, function(err) {
-    if (err) console.warn('syncfs error:', err);
-    // Now safe to call main()
-});
-```
-
-**Call `FS.syncfs(false, cb)` after:**
-- World save
-- Settings change
-- Player logout
-- Every N minutes (auto-save)
+The implementation is `client/web/persistence.js`, linked through `--pre-js` and
+`-lidbfs.js`. It hydrates in `Module.preRun`, exposes
+`Module.luantiPersistence`, and serializes every `FS.syncfs(false)` call. Engine
+save paths record committed work; they do not call asynchronous JavaScript from
+worker threads. See `docs/wasm-issues/01-persistence-mvp.md`.
 
 ---
 
@@ -676,7 +650,8 @@ Luanti's shaders in `client/shaders/` use GLSL. Under WebGL/GLES2:
 5. **Singleplayer test:** Create a world, load it, place/break blocks
 6. **Save/load test:** Exit, reload the page, verify world persisted in IDBFS
 7. **Input test:** Keyboard, mouse look, touch, chat
-8. **Multiplayer test:** (Phase 4) Connect to a server via WebRTC or WS proxy
+8. **Multiplayer test:** Configure `wss://` in the shell, connect by hostname to
+   a native public server, and compare in-game latency with proxy RTT
 
 ---
 
@@ -694,15 +669,19 @@ Luanti's shaders in `client/shaders/` use GLSL. Under WebGL/GLES2:
 | `-sMAXIMUM_MEMORY=1GB` | Max heap size |
 | `-pthread` | Enable pthread support |
 | `-sSHARED_MEMORY=1` | Required for pthreads |
+| `-sPROXY_TO_PTHREAD=1` | Run the synchronous application main on a worker |
+| `-sOFFSCREEN_FRAMEBUFFER=1` | Proxy worker-side SDL/EGL rendering to the browser canvas |
 | `-sFETCH=1` | Enable `emscripten_fetch` API |
 | `-sFORCE_FILESYSTEM=1` | Include FS support even if not auto-detected |
-| `-sASYNCIFY` | Enable ASYNCIFY for blocking sleep/yield |
-| `-sEXIT_RUNTIME=1` | Allow `atexit` handlers and full runtime shutdown |
+| `-sASYNCIFY` | Optional blocking-yield transform; not used by the current target |
+| `-sEXIT_RUNTIME=0` | Keep browser callbacks and final persistence retries alive after `main()` returns |
+| `-lidbfs.js` | Explicitly retain the legacy JavaScript IDBFS backend |
 | `-sMODULARIZE=1` | Wrap output in a factory function |
 | `-sEXPORT_NAME="LuantiModule"` | Name of the factory function |
 | `--preload-file src@dst` | Bundle files into a `.data` payload |
 | `--embed-file src@dst` | Embed files into the wasm binary |
 | `--shell-file template.html` | Custom HTML shell |
+| `--pre-js file.js` | Install the browser networking and persistence contracts before engine startup |
 | `-sASSERTIONS=1` | Enable runtime assertions (debug builds) |
 | `-sSAFE_HEAP=1` | Check for memory errors (debug builds) |
 | `-g` / `-gsource-map` | Debug info / source maps |
@@ -711,15 +690,16 @@ Luanti's shaders in `client/shaders/` use GLSL. Under WebGL/GLES2:
 
 ## Summary Checklist
 
-- [ ] Phase 0: Emscripten SDK installed; all dependencies compiled for WASM
-- [ ] Phase 1: CMake configures and links a client-only build
-- [ ] Phase 1: UDP sockets stubbed; game compiles
-- [ ] Phase 1: `porting.cpp` returns correct virtual paths
-- [ ] Phase 2: Asset preloading works; menu Lua loads
-- [ ] Phase 2: IDBFS mounts and syncs; worlds save across reloads
-- [ ] Phase 3: Async main loop works; browser stays responsive
+- [x] Phase 0: Emscripten SDK installed; required dependencies prepared for WASM
+- [x] Phase 1: CMake configures and links a client-only build
+- [x] Phase 1: Browser UDP interface has in-process loopback and proxy routing
+- [x] Phase 1: `porting.cpp` returns correct virtual paths
+- [x] Phase 2: Asset preload bundle is emitted and available at startup
+- [x] Phase 2: IDBFS hydration and sentinel persistence pass browser automation
+- [x] Phase 3: Synchronous engine loop is isolated from the browser main thread
 - [ ] Phase 3: Rendering pipeline runs (menu visible)
-- [ ] Phase 4: (Optional) Networking via WebRTC or WebSocket proxy
+- [x] Phase 4: WebSocket/UDP transport, launcher configuration, and self-hostable proxy implemented
+- [ ] Phase 4: Public-server browser play acceptance completed
 - [ ] Phase 5: (Optional) Sound enabled
 - [ ] Phase 6: Input fully functional (keyboard, mouse, touch)
 - [ ] Phase 7: Optimized release build; CI workflow added

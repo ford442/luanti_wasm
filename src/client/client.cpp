@@ -32,6 +32,7 @@
 #include "minimap.h"
 #include "node_visuals.h"
 #include "profiler.h"
+#include "porting_emscripten.h"
 #include "shader.h"
 #include "translation.h"
 #include "util/auth.h"
@@ -420,8 +421,11 @@ Client::~Client()
 	m_media_downloader.reset();
 
 	// Write the changes and delete
-	if (m_mod_storage_database)
+	if (m_mod_storage_database) {
 		m_mod_storage_database->endSave();
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
+	}
 	delete m_mod_storage_database;
 
 	// Free sound ids
@@ -833,6 +837,8 @@ void Client::step(float dtime)
 	if (m_mod_storage_save_timer <= 0.0f) {
 		m_mod_storage_save_timer = g_settings->getFloat("server_map_save_interval");
 		m_mod_storage_database->endSave();
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
 		m_mod_storage_database->beginSave();
 	}
 

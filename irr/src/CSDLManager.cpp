@@ -9,6 +9,10 @@
 #include "CIrrDeviceSDL.h"
 #include "os.h"
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+#include <emscripten/html5_webgl.h>
+#endif
+
 namespace video
 {
 
@@ -19,6 +23,9 @@ CSDLManager::CSDLManager(CIrrDeviceSDL *device) :
 bool CSDLManager::initialize(const SIrrlichtCreationParameters &params, const SExposedVideoData &data)
 {
 	Data = data;
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	return true;
+#else
 	int interval = params.Vsync ? 1 : 0;
 #ifdef _IRR_USE_SDL3_
 	bool ok = SDL_GL_SetSwapInterval(interval);
@@ -28,6 +35,7 @@ bool CSDLManager::initialize(const SIrrlichtCreationParameters &params, const SE
 	if (!ok)
 		os::Printer::log("Setting GL swap interval failed");
 	return true;
+#endif
 }
 
 const SExposedVideoData &CSDLManager::getContext() const
@@ -42,7 +50,11 @@ bool CSDLManager::activateContext(const SExposedVideoData &videoData, bool resto
 
 void *CSDLManager::getProcAddress(const std::string &procName)
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	return emscripten_webgl_get_proc_address(procName.c_str());
+#else
 	return (void *)SDL_GL_GetProcAddress(procName.c_str());
+#endif
 }
 
 bool CSDLManager::swapBuffers()
