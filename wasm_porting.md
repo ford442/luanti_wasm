@@ -338,6 +338,18 @@ Goal: Keyboard, mouse, touch, and gamepad work correctly in the browser.
 4. **Fullscreen:**
    - Use `emscripten_request_fullscreen()` or SDL's fullscreen toggle
 
+The MVP web experience now lives in `client/web/`. It holds `main()` with
+`Module.noInitialRun` until preload-file and IDBFS startup complete, then calls
+the exported Emscripten `callMain` once with validated launcher arguments. It
+includes local/direct launch flows, an opt-in public server list, deployment-
+configured WSS regions, real engine loading status, deep links, sharing,
+fullscreen/pointer-lock affordances, a runtime console, and release-scoped PWA
+caching. See `doc/compiling/wasm-embedding.md` for the supported iframe contract.
+
+Touch-only gameplay and a stable pause/unpause API remain follow-up work. The
+launcher intentionally does not expose provisional setters that would race the
+synchronous application-worker lifecycle.
+
 ### Phase 7: Polish & Optimization
 
 1. **Memory tuning**:
@@ -363,102 +375,21 @@ Goal: Keyboard, mouse, touch, and gamepad work correctly in the browser.
 
 ---
 
-## Build Instructions (Target)
+## Build Instructions
 
-These are the *target* commands once the port is complete. They will not work today without the code changes described above.
-
-### Configure
+The checked-in Emscripten preset is now the supported build path:
 
 ```bash
-# Activate Emscripten
 source /path/to/emsdk/emsdk_env.sh
-
-# Configure
-emcmake cmake -B build-wasm \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_CLIENT=TRUE \
-    -DBUILD_SERVER=FALSE \
-    -DBUILD_UNITTESTS=FALSE \
-    -DBUILD_BENCHMARKS=FALSE \
-    -DENABLE_SOUND=FALSE \
-    -DENABLE_CURL=FALSE \
-    -DENABLE_GETTEXT=FALSE \
-    -DENABLE_CURSES=FALSE \
-    -DENABLE_POSTGRESQL=FALSE \
-    -DENABLE_LEVELDB=FALSE \
-    -DENABLE_REDIS=FALSE \
-    -DENABLE_PROMETHEUS=FALSE \
-    -DENABLE_SPATIAL=FALSE \
-    -DENABLE_OPENSSL=FALSE \
-    -DENABLE_GLES2=TRUE \
-    -DENABLE_OPENGL=FALSE \
-    -DENABLE_OPENGL3=FALSE \
-    -DRUN_IN_PLACE=TRUE \
-    -DCMAKE_EXE_LINKER_FLAGS="\
-        -sUSE_SDL=2 \
-        -sUSE_ZLIB=1 \
-        -sUSE_FREETYPE=1 \
-        -sFULL_ES2=1 \
-        -sPROXY_TO_PTHREAD=1 \
-        -sOFFSCREEN_FRAMEBUFFER=1 \
-        -sALLOW_MEMORY_GROWTH=1 \
-        -sINITIAL_MEMORY=256MB \
-        -sMAXIMUM_MEMORY=1GB \
-        -pthread \
-        -sSHARED_MEMORY=1 \
-        -sFETCH=1 \
-        -sFORCE_FILESYSTEM=1 \
-        -lidbfs.js \
-        --pre-js client/web/persistence.js \
-        --shell-file client/web/shell.html \
-        --preload-file builtin \
-        --preload-file games/devtest \
-        --preload-file textures \
-        --preload-file fonts \
-        --preload-file client/shaders \
-        --preload-file clientmods \
-    "
+cmake --preset Emscripten
+cmake --build build-wasm --parallel 2
+python3 util/wasm/serve.py
 ```
 
-### Build
-
-```bash
-emmake cmake --build build-wasm --parallel $(nproc)
-```
-
-### Output
-
-```
-build-wasm/bin/
-├── luanti.js          # JS runtime / loader
-├── luanti.wasm        # Compiled engine
-├── luanti.data        # Preloaded asset bundle
-└── luanti.html        # Shell page (if -o luanti.html or --shell-file used)
-```
-
-### Serve
-
-You must serve the files with the correct COOP/COEP headers for `SHARED_MEMORY` / pthreads:
-
-```python
-# serve.py
-import http.server
-import socketserver
-
-PORT = 8000
-
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def end_headers(self):
-        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
-        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
-        super().end_headers()
-
-with socketserver.TCPServer(("", PORT), Handler) as httpd:
-    print(f"Serving at http://localhost:{PORT}")
-    httpd.serve_forever()
-```
-
-Then open `http://localhost:8000/build-wasm/bin/luanti.html`.
+Then open `http://127.0.0.1:8000/luanti.html`. The server helper sends the
+COOP/COEP headers required by pthreads and shared WebAssembly memory. See
+`doc/compiling/wasm.md` for the pinned SDK revision, emitted files, browser
+smoke, Cloudflare Pages deployment, cache strategy, and troubleshooting.
 
 ---
 

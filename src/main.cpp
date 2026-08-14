@@ -442,6 +442,12 @@ static void set_allowed_options(OptionList *allowed_options)
 			_("Skip main menu, go directly in-game"))));
 	allowed_options->insert(std::make_pair("console", ValueSpec(VALUETYPE_FLAG,
 			_("Start with the console open (Windows only)"))));
+#ifdef __EMSCRIPTEN__
+	allowed_options->insert(std::make_pair("language", ValueSpec(VALUETYPE_STRING,
+			_("Set language for the browser session"))));
+	allowed_options->insert(std::make_pair("viewing-range", ValueSpec(VALUETYPE_STRING,
+			_("Set viewing range for the browser session"))));
+#endif
 #endif
 
 #undef SERVER_ONLY
@@ -774,6 +780,16 @@ static bool init_common(const Settings &cmd_args, int argc, char *argv[])
 
 	if (!read_config_file(cmd_args))
 		return false;
+
+#ifdef __EMSCRIPTEN__
+	// These launcher-owned overrides are applied after persisted configuration is
+	// loaded, but before localization and rendering consume them.
+	if (cmd_args.exists("language"))
+		g_settings->set("language", cmd_args.get("language"));
+	if (cmd_args.exists("viewing-range"))
+		g_settings->setS32("viewing_range",
+				mystoi(cmd_args.get("viewing-range"), 20, 300));
+#endif
 
 	migrate_settings();
 

@@ -354,6 +354,7 @@ private:
 	bool EnableErrorTest;
 
 	OGLBufferObject QuadIndexVBO = OGLBufferObject(OGLBufferObject::TARGET_VBO);
+	std::vector<u16> QuadsIndices;
 	void initQuadsIndices(u32 max_vertex_count = 65536);
 
 	u16 MaxJointTransforms = 0;

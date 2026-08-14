@@ -826,6 +826,7 @@ if(BUILD_CLIENT)
 			-sEXIT_RUNTIME=0
 			-sASSERTIONS=1
 			-sDISABLE_EXCEPTION_CATCHING=0
+			-sEXPORTED_RUNTIME_METHODS=callMain
 			-lidbfs.js
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
@@ -844,6 +845,23 @@ if(BUILD_CLIENT)
 			${CMAKE_SOURCE_DIR}/client/web/network.js
 			${CMAKE_SOURCE_DIR}/client/web/persistence.js
 			${CMAKE_SOURCE_DIR}/client/web/shell.html
+			${CMAKE_SOURCE_DIR}/client/web/launcher.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher.css
+			${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+			${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
+			${CMAKE_SOURCE_DIR}/client/web/service-worker.js
+			${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
+		)
+		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				${CMAKE_SOURCE_DIR}/client/web/launcher.js
+				${CMAKE_SOURCE_DIR}/client/web/launcher.css
+				${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+				${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
+				${CMAKE_SOURCE_DIR}/client/web/service-worker.js
+				${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
+				$<TARGET_FILE_DIR:${PROJECT_NAME}>
+			COMMENT "Copying Luanti web launcher and PWA assets"
 		)
 	endif()
 endif(BUILD_CLIENT)

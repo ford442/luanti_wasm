@@ -40,7 +40,7 @@
     {
       "name": "Emscripten",
       "displayName": "Emscripten (WebAssembly)",
-      "description": "Client-only WASM build via Emscripten. Run: emcmake cmake --preset Emscripten -B build-wasm",
+      "description": "Client-only Release WASM build via pinned Emscripten. Run after sourcing emsdk_env.sh: cmake --preset Emscripten",
       "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
       "binaryDir": "${sourceDir}/build-wasm",
       "cacheVariables": {

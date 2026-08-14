@@ -7,29 +7,13 @@
 from __future__ import annotations
 
 import argparse
-import functools
-import http.server
 from pathlib import Path
 import shutil
-import socketserver
 import threading
 
 from playwright.sync_api import sync_playwright
 
-
-class CrossOriginIsolatedHandler(http.server.SimpleHTTPRequestHandler):
-	def end_headers(self) -> None:
-		self.send_header("Cross-Origin-Opener-Policy", "same-origin")
-		self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
-		super().end_headers()
-
-	def log_message(self, format: str, *args: object) -> None:
-		pass
-
-
-class ReusableTCPServer(socketserver.ThreadingTCPServer):
-	allow_reuse_address = True
-	daemon_threads = True
+from serve import create_server
 
 
 def format_page_error(error: object) -> str:
@@ -42,6 +26,7 @@ def main() -> int:
 	parser.add_argument("--browser", default=shutil.which("google-chrome"))
 	parser.add_argument("--build", default="build-wasm")
 	parser.add_argument("--screenshot")
+	parser.add_argument("--launcher-screenshot")
 	args = parser.parse_args()
 	if not args.browser:
 		parser.error("Google Chrome was not found")
@@ -51,8 +36,7 @@ def main() -> int:
 	if not (output / "luanti.html").exists():
 		parser.error(f"generated client not found under {output}")
 
-	handler = functools.partial(CrossOriginIsolatedHandler, directory=output)
-	with ReusableTCPServer(("127.0.0.1", 0), handler) as server:
+	with create_server(output, "127.0.0.1", 0, quiet=True) as server:
 		thread = threading.Thread(target=server.serve_forever, daemon=True)
 		thread.start()
 		try:
@@ -68,14 +52,31 @@ def main() -> int:
 				page.on("pageerror", lambda error: page_errors.append(
 					format_page_error(error)))
 				page.goto(
-					f"http://127.0.0.1:{server.server_address[1]}/luanti.html",
+					f"http://127.0.0.1:{server.server_address[1]}/luanti.html"
+					"?game=devtest&view=60&name=Smoke_Player",
 					wait_until="domcontentloaded", timeout=60_000)
 				page.wait_for_function(
 					"Module.luantiPersistence?.getState().state === 'ready'",
 					timeout=60_000)
 				page.wait_for_function(
-					"Module.calledRun === true || typeof calledRun !== 'undefined' && calledRun",
+					"Module.luantiLauncher?.getState().runtimeReady === true",
 					timeout=60_000)
+				page.wait_for_function(
+					"async () => (await navigator.serviceWorker.getRegistration())?.active?.state === 'activated'",
+					timeout=60_000)
+				prelaunch = page.evaluate("""() => ({
+					launcher: Module.luantiLauncher.getState(),
+					buttonDisabled: document.getElementById('luanti-play-button').disabled,
+					game: document.getElementById('luanti-game').value,
+					view: document.getElementById('luanti-quality').value,
+					name: document.getElementById('luanti-player-name').value
+				})""")
+				if args.launcher_screenshot:
+					page.screenshot(path=args.launcher_screenshot)
+				page.click("#luanti-play-button")
+				page.wait_for_function(
+					"['loading', 'playing'].includes(Module.luantiLauncher?.getState().phase)",
+					timeout=90_000)
 				page.evaluate("""() => {
 					window.luantiResponsivenessTicks = 0;
 					window.luantiResponsivenessTimer = setInterval(
@@ -86,6 +87,8 @@ def main() -> int:
 					crossOriginIsolated,
 					persistence: Module.luantiPersistence.getState(),
 					network: Module.luantiNetwork.getState(),
+					launcher: Module.luantiLauncher.getState(),
+					serviceWorkerControlled: !!navigator.serviceWorker.controller,
 					ticks: window.luantiResponsivenessTicks,
 					canvas: {width: Module.canvas.width, height: Module.canvas.height}
 				})""")
@@ -96,9 +99,18 @@ def main() -> int:
 			server.shutdown()
 
 	assert not page_errors, {"pageErrors": page_errors, "console": messages[-30:]}
+	assert prelaunch["launcher"]["runtimeReady"], prelaunch
+	assert not prelaunch["launcher"]["started"], prelaunch
+	assert not prelaunch["buttonDisabled"], prelaunch
+	assert prelaunch["game"] == "devtest", prelaunch
+	assert prelaunch["view"] == "60", prelaunch
+	assert prelaunch["name"] == "Smoke_Player", prelaunch
 	assert state["crossOriginIsolated"], state
 	assert state["persistence"]["state"] == "ready", state
 	assert state["network"]["state"] == "disabled", state
+	assert state["launcher"]["started"], state
+	assert state["launcher"]["phase"] in ("loading", "playing"), state
+	assert state["serviceWorkerControlled"], state
 	assert state["ticks"] >= 20, state
 	assert state["canvas"]["width"] > 0 and state["canvas"]["height"] > 0, state
 	assert any("application worker" in message for message in messages), {

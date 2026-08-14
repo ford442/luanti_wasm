@@ -19,6 +19,7 @@
 #include "clientlauncher.h"
 #include "version.h"
 #include "renderingengine.h"
+#include "porting_emscripten.h"
 #include "settings.h"
 #include "gettime.h"
 #include "util/numeric.h"
@@ -97,6 +98,7 @@ ClientLauncher::~ClientLauncher()
 
 bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args)
 {
+	porting::emscripten_report_status("Starting renderer…", 2, "engine");
 	GameStartData start_data;
 	static_cast<GameParams &>(start_data) = game_params;
 
@@ -163,6 +165,7 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 	scene::ICameraSceneNode* camera;
 	camera = g_menucloudsmgr->addCameraSceneNode(NULL, v3f(0, 0, 0), v3f(0, 60, 100));
 	camera->setFarValue(10000);
+	porting::emscripten_report_status("Main menu ready", 100, "menu");
 
 	/*
 		GUI stuff
@@ -227,6 +230,7 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 			if (!m_rendering_engine->run() || *kill)
 				break;
 
+			porting::emscripten_report_status("Starting world…", 0, "loading");
 			the_game(
 				kill,
 				input,
@@ -235,6 +239,7 @@ bool ClientLauncher::run(const GameParams &game_params, const Settings &cmd_args
 				errordata,
 				chat_backend
 			);
+			porting::emscripten_report_status("Returned to main menu", 100, "menu");
 #ifdef NDEBUG
 		} catch (std::exception &e) {
 			errordata.message = "Some exception: " + debug_describe_exc(e);

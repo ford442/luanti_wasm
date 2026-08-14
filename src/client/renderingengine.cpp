@@ -18,6 +18,7 @@
 #include "camera.h"
 #include "minimap.h"
 #include "porting.h"
+#include "porting_emscripten.h"
 #include "clientmap.h"
 #include "renderingengine.h"
 #include "render/core.h"
@@ -25,6 +26,7 @@
 #include "filesys.h"
 #include "irrlicht_changes/static_text.h"
 #include "irr_ptr.h"
+#include "util/string.h"
 
 RenderingEngine *RenderingEngine::s_singleton = nullptr;
 
@@ -298,6 +300,7 @@ void RenderingEngine::draw_load_screen(const std::wstring &text,
 		gui::IGUIEnvironment *guienv, ITextureSource *tsrc, float dtime,
 		int percent, float *indef_pos)
 {
+	porting::emscripten_report_status(wide_to_utf8(text), percent, "loading");
 	v2u32 screensize = getWindowSize();
 
 	v2s32 textsize(g_fontengine->getTextWidth(text), g_fontengine->getLineHeight());

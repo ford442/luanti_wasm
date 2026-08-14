@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace porting {
 
@@ -21,6 +22,10 @@ enum class EmscriptenPersistenceReason : std::uint8_t {
 // application worker. Fail early if the browser build contract regresses.
 void emscripten_validate_main_loop();
 void emscripten_service_browser_frame();
+// Send human-readable engine loading state to the browser launcher. Phase is a
+// stable machine-readable value such as "engine", "loading", or "playing".
+void emscripten_report_status(const std::string &message, int percent = -1,
+		const char *phase = nullptr);
 
 // Save paths on any engine thread only record committed work. The application
 // worker calls emscripten_service_persistence() while pumping frames and the
@@ -42,6 +47,11 @@ inline void emscripten_validate_main_loop()
 }
 
 inline void emscripten_service_browser_frame()
+{
+}
+
+inline void emscripten_report_status(const std::string &, int = -1,
+		const char * = nullptr)
 {
 }
 

@@ -3,6 +3,8 @@
 - [Compiling on GNU/Linux](linux.md)
 - [Compiling on Windows](windows.md)
 - [Compiling on MacOS](macos.md)
+- [Compiling for WebAssembly](wasm.md)
+- [Embedding the WebAssembly client](wasm-embedding.md)
 
 
 ## CMake options

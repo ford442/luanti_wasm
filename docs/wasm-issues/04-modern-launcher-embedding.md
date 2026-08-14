@@ -21,17 +21,17 @@ We should do better with modern web practices while keeping the core simple and 
 
 ## Goals
 
-- [ ] A clean, attractive, responsive launcher (single HTML + small CSS/TS or vanilla JS bundle) that lives in `client/web/` or a dedicated `web/` dir and gets copied into the Emscripten output.
-- [ ] Proxy / region selector with sensible defaults + "self-host / custom" option.
-- [ ] Direct connect + server list (reuse or embed the existing Luanti server list with CORS-friendly proxying if needed).
-- [ ] Basic settings (player name, view distance presets for memory-constrained devices, language).
-- [ ] Progress / loading screen with real status (asset packs, IDBFS sync, world load, shader compilation).
-- [ ] Deep linking: `?address=foo.example.com&port=30000&name=Player&game=devtest` (or nicer short codes later).
-- [ ] "Copy shareable link" button once in a world.
-- [ ] Pointerlock + fullscreen + escape handling that feels web-native.
-- [ ] Basic PWA manifest + service worker skeleton (precache the .wasm + base.pack for offline after first visit).
-- [ ] Easy embedding docs: `<iframe>` or script-tag canvas embed with minimal permissions.
-- [ ] Mobile warning + touch controls roadmap note (or basic on-screen joystick if time permits).
+- [x] A clean, attractive, responsive vanilla-JS launcher in `client/web/`, copied beside the Emscripten output.
+- [x] Deployment-configurable proxy / region selector with singleplayer and custom/self-hosted defaults.
+- [x] Direct connect plus the CORS-enabled official Luanti server directory, fetched only on request.
+- [x] Player name, low-memory view-distance presets, and engine language selection.
+- [x] Real Emscripten asset, IDBFS, engine/world, and shader/content loading status.
+- [x] Deep linking: `?address=foo.example.com&port=30000&name=Player&game=devtest`.
+- [x] Shareable, password-free link from the running-world toolbar.
+- [x] SDL pointer lock, fullscreen, Escape release, focus-resume overlay, and runtime console.
+- [x] PWA manifest and release-scoped service worker precaching Wasm plus the base data pack.
+- [x] Minimal iframe, permissions, headers, and deployment configuration documentation.
+- [x] Mobile warning and an explicit touch-controls roadmap note.
 
 ## Non-Goals (MVP)
 
@@ -67,6 +67,20 @@ We should do better with modern web practices while keeping the core simple and 
 
 ---
 
-**Related:** `wasm_porting.md` "Phase 6: Input & Browser Integration", our current `static/` (empty today), paradust7 launcher patterns.
+## Implemented contract
+
+The shell sets `Module.noInitialRun` before generated code loads. Emscripten
+still completes preload-file work and the fail-closed IDBFS `preRun`; only then
+does the launcher enable Play and invoke the exported `Module.callMain()` once
+with validated CLI settings. `porting::emscripten_report_status()` sends the
+engine's existing loading messages and progress percentages to the browser
+main thread. This avoids introducing a broad mutable `cwrap` surface before the
+async-loop work has stable pause and re-entry semantics.
+
+Hosted proxy endpoints are deliberately deployment configuration, not source
+defaults. The repository cannot promise a region it does not operate.
+
+**Related:** `wasm_porting.md` "Phase 6: Input & Browser Integration",
+`doc/compiling/wasm-embedding.md`, and the paradust7 launcher patterns.
 
 This is where our web + creative tooling strengths can shine and differentiate the port from a pure technical exercise.

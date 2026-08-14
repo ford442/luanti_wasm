@@ -12,26 +12,34 @@ OffscreenCanvas/WebGL2, pthreads, legacy JS FS + IDBFS, and the preload bundle.
 The generated client passes a headless Chrome startup smoke with storage ready
 before the application worker starts.
 
-However:
-- No automated CI job that builds the WASM target on every PR (or nightly).
-- No public demo that outsiders can try without cloning + installing emsdk + fighting COOP/COEP headers.
-- The build still requires a full emsdk; CI does not yet guard the path.
-- Hosting a real demo is non-trivial (must serve with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` for pthreads + SharedArrayBuffer).
-- Our vendoring / asset strategy for the big preload `.data` file needs care for cache invalidation and load time.
+CI now builds the target with pinned Emscripten 6.0.3, runs the generated-client
+startup smoke, uploads a versioned deployment artifact, and can deploy the
+default branch to Cloudflare Pages. A repository owner still needs to create
+the Pages project and configure its GitHub variable and credentials before a
+public URL exists. The deployment enable flag must remain off until menu
+rendering and world-entry acceptance pass the manual release gate; the current
+automated smoke does not claim visual proof.
 
 paradust7's system (content-addressed release UUIDs, separate packs, custom www builder, `.htaccess` templates) shows one working model. We can do something similar or simpler.
 
 ## Goals
 
 - [x] `cmake --preset Emscripten` produces `luanti.html` + `.js` + `.wasm` + `.data` and passes the local generated-client startup smoke.
-- [ ] GitHub Actions workflow (`.github/workflows/wasm.yml` or similar) that:
+- [x] GitHub Actions workflow (`.github/workflows/wasm.yml`) that:
   - Installs emsdk (pinned version for reproducibility).
   - Builds the WASM client in Release mode.
   - Uploads the artifacts (or deploys to GitHub Pages / a demo bucket on success for `main`).
-- [ ] A public, always-up-to-date demo at something like `https://luanti-wasm.example.org/` or a GitHub Pages site (with proper headers — this may require a Cloudflare Worker / thin nginx proxy or Pages + special config).
-- [ ] Clear `doc/compiling/wasm.md` (or update `wasm_porting.md`) with exact steps, common pitfalls (headers, memory, asyncify vs main_loop), and how to run a local demo with the required COOP/COEP.
-- [ ] Basic smoke test (even if manual or Playwright-driven in headless with xvfb + special flags) that the main menu renders and a world can at least start loading.
-- [ ] Asset / binary versioning strategy so updates don't break clients mid-session (or at least a clear "hard refresh" instruction).
+- [ ] A public, always-up-to-date demo. The Cloudflare Pages deployment path is
+  implemented; project creation, credentials, URL verification, and the manual
+  menu/world release gate remain owner/deployment work.
+- [x] Clear `doc/compiling/wasm.md` with exact steps, common pitfalls (headers,
+  memory, worker main loop vs Asyncify), local serving, and deployment setup.
+- [x] Basic launcher/world smoke. Playwright verifies the ready launcher,
+  starts DevTest, observes real engine world-loading status, and rejects page
+  errors; optional screenshots retain the manual visual gate.
+- [x] Asset / binary versioning strategy: each engine plus launcher/PWA output
+  is packaged under `releases/<git-sha>/`, with a non-cacheable root, immutable
+  release files, and a revalidated service-worker script.
 
 ## Non-Goals for First Pass
 
@@ -41,7 +49,7 @@ paradust7's system (content-addressed release UUIDs, separate packs, custom www 
 
 ## Implementation Hints
 
-- Pin emsdk 6.0.3 in the future workflow and validate pthreads plus the explicitly linked legacy IDBFS backend.
+- Keep emsdk 6.0.3 pinned in the workflow and validate pthreads plus the explicitly linked legacy IDBFS backend.
 - Consider using Emscripten's own `embuilder` + ports more aggressively to reduce custom build scripts.
 - The preload-file list is already in CMakeLists — keep it there as the source of truth.
 - For GitHub Pages demo: the headers problem is well-known. Common solutions:
@@ -63,6 +71,7 @@ paradust7's system (content-addressed release UUIDs, separate packs, custom www 
 
 ---
 
-**Related:** `CMakePresets.json` (Emscripten preset), `src/CMakeLists.txt:774` (the big `if(EMSCRIPTEN)` linker block), `wasm_porting.md` "Appendix: Useful Emscripten Flags" and "Build Instructions (Target)", our current lack of `.github/workflows/*wasm*`.
+**Related:** `CMakePresets.json`, `src/CMakeLists.txt`,
+`.github/workflows/wasm.yml`, `doc/compiling/wasm.md`, and `wasm_porting.md`.
 
 This is the "make it real for other people" issue. Without a working public demo + easy local repro, the port will stay a private research project.

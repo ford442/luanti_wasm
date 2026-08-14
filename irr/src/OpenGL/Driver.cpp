@@ -204,10 +204,11 @@ void COpenGL3DriverBase::initQuadsIndices(u32 max_vertex_count)
 {
 	u32 max_quad_count = max_vertex_count / 4;
 	u32 indices_size = 6 * max_quad_count;
-	if (indices_size == QuadIndexVBO.getSize() * sizeof(u16))
+	if (indices_size == QuadsIndices.size() &&
+			indices_size * sizeof(u16) == QuadIndexVBO.getSize())
 		return;
 	// initialize buffer contents
-	std::vector<u16> QuadsIndices;
+	QuadsIndices.clear();
 	QuadsIndices.reserve(indices_size);
 	for (u32 k = 0; k < max_quad_count; k++) {
 		QuadsIndices.push_back(4 * k + 0);
@@ -894,9 +895,17 @@ void COpenGL3DriverBase::draw2DImageBatch(const video::ITexture *texture,
 				tcoords.UpperLeftCorner.X, tcoords.LowerRightCorner.Y);
 	}
 
+#ifdef __EMSCRIPTEN__
+	// FULL_ES2 uploads the client-side vertices just before drawing. WebGL
+	// cannot inspect a bound element buffer to size that upload, so pair these
+	// vertices with the retained CPU indices instead of the native VBO.
+	drawElements(GL_TRIANGLES, vt2DImage, vtx.data(), vtx.size(),
+			QuadsIndices.data(), 6 * drawCount);
+#else
 	GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, QuadIndexVBO.getName());
 	drawElements(GL_TRIANGLES, vt2DImage, vtx.data(), vtx.size(), 0, 6 * drawCount);
 	GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+#endif
 
 	if (clipRect)
 		GL.Disable(GL_SCISSOR_TEST);

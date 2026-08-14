@@ -1,0 +1,144 @@
+name: wasm
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+    paths:
+      - '.github/workflows/wasm.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'builtin/**'
+      - 'client/**'
+      - 'clientmods/**'
+      - 'cmake/**'
+      - 'fonts/**'
+      - 'games/devtest/**'
+      - 'irr/**'
+      - 'lib/**'
+      - 'src/**'
+      - 'textures/**'
+      - 'util/wasm/**'
+  pull_request:
+    paths:
+      - '.github/workflows/wasm.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'builtin/**'
+      - 'client/**'
+      - 'clientmods/**'
+      - 'cmake/**'
+      - 'fonts/**'
+      - 'games/devtest/**'
+      - 'irr/**'
+      - 'lib/**'
+      - 'src/**'
+      - 'textures/**'
+      - 'util/wasm/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EMSDK_VERSION: '6.0.3'
+  EMSDK_COMMIT: '1b8b2456bf3f54fd6e47d55a82dde7752978a40f'
+  EMSDK_DIR: ${{ github.workspace }}/.cache/emsdk-sdk-6.0.3
+  EM_CACHE: ${{ github.workspace }}/.cache/emscripten-6.0.3
+  PLAYWRIGHT_VERSION: '1.59.0'
+
+jobs:
+  release:
+    name: Release build and browser smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out Luanti
+        uses: actions/checkout@v7
+
+      - name: Cache Emscripten SDK and ports
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.EMSDK_DIR }}
+            ${{ env.EM_CACHE }}
+          key: wasm-${{ runner.os }}-${{ env.EMSDK_VERSION }}-${{ env.EMSDK_COMMIT }}
+
+      - name: Install pinned Emscripten SDK
+        shell: bash
+        run: |
+          if [[ ! -x "$EMSDK_DIR/emsdk" ]]; then
+            git clone https://github.com/emscripten-core/emsdk.git "$EMSDK_DIR"
+          fi
+          git -C "$EMSDK_DIR" fetch --depth=1 origin "$EMSDK_COMMIT"
+          git -C "$EMSDK_DIR" checkout --detach "$EMSDK_COMMIT"
+          "$EMSDK_DIR/emsdk" install "$EMSDK_VERSION"
+          "$EMSDK_DIR/emsdk" activate "$EMSDK_VERSION"
+          source "$EMSDK_DIR/emsdk_env.sh"
+          emcc --version
+
+      - name: Install browser smoke dependency
+        run: python3 -m pip install --user "playwright==$PLAYWRIGHT_VERSION"
+
+      - name: Test deployment tools
+        run: python3 util/wasm/test_demo_tools.py
+
+      - name: Configure Release build
+        shell: bash
+        run: |
+          source "$EMSDK_DIR/emsdk_env.sh"
+          cmake --preset Emscripten
+
+      - name: Build WebAssembly client
+        shell: bash
+        run: |
+          source "$EMSDK_DIR/emsdk_env.sh"
+          cmake --build build-wasm --parallel 2
+
+      - name: Smoke generated client in Chrome
+        run: python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
+
+      - name: Package versioned demo
+        run: python3 util/wasm/package_demo.py --version "$GITHUB_SHA" --output wasm-demo
+
+      - name: Upload deployable demo
+        uses: actions/upload-artifact@v7
+        with:
+          name: luanti-wasm-${{ github.sha }}
+          path: wasm-demo/
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    name: Deploy default branch to Cloudflare Pages
+    needs: release
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') &&
+      vars.WASM_DEMO_DEPLOY_ENABLED == 'true' &&
+      vars.CLOUDFLARE_PAGES_PROJECT != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Download deployable demo
+        uses: actions/download-artifact@v8
+        with:
+          name: luanti-wasm-${{ github.sha }}
+          path: wasm-demo
+
+      - name: Deploy current default-branch build to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy wasm-demo
+            --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+            --branch=${{ github.ref_name }}
+            --commit-hash=${{ github.sha }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}

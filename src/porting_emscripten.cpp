@@ -85,6 +85,30 @@ void emscripten_service_browser_frame()
 	emscripten_service_persistence();
 }
 
+void emscripten_report_status(const std::string &message, int percent,
+		const char *phase)
+{
+	static std::string last_message;
+	static std::string last_phase;
+	static int last_percent = -2;
+	const std::string phase_string = phase ? phase : "";
+	if (message == last_message && phase_string == last_phase &&
+			percent == last_percent)
+		return;
+	last_message = message;
+	last_phase = phase_string;
+	last_percent = percent;
+
+	MAIN_THREAD_EM_ASM({
+		var launcher = Module["luantiLauncher"];
+		if (launcher && typeof launcher["reportEngineStatus"] === "function") {
+			launcher["reportEngineStatus"](
+				UTF8ToString($0), $1, $2 ? UTF8ToString($2) : null);
+		}
+	}, message.c_str(), percent,
+			phase_string.empty() ? nullptr : phase_string.c_str());
+}
+
 void emscripten_mark_persistence_dirty(EmscriptenPersistenceReason reason,
 		bool urgent)
 {

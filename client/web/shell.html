@@ -7,43 +7,149 @@ Copyright (C) 2026 The Luanti Contributors
 <html lang="en">
 <head>
 	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Luanti</title>
-	<style>
-		html, body { width: 100%; height: 100%; margin: 0; background: #101418; color: #fff; }
-		body { display: grid; place-items: center; font: 14px system-ui, sans-serif; overflow: hidden; }
-		#canvas { width: 100%; height: 100%; border: 0; outline: 0; }
-		#luanti-network { position: fixed; z-index: 3; top: 12px; left: 12px; max-width: min(34rem, calc(100% - 24px)); padding: 8px 12px; border-radius: 6px; background: rgba(10, 14, 18, .88); }
-		#luanti-proxy-form { display: flex; gap: 6px; margin-top: 6px; }
-		#luanti-proxy-url { min-width: 16rem; }
-		#luanti-network-error { margin-top: 6px; color: #ffd5d5; }
-		#luanti-persistence { position: fixed; z-index: 2; top: 12px; right: 12px; max-width: min(34rem, calc(100% - 24px)); }
-		#luanti-persistence-status, #luanti-persistence-error { padding: 8px 12px; border-radius: 6px; background: rgba(10, 14, 18, .88); }
-		#luanti-persistence-status[data-state="saved"] { color: #a6e3a1; }
-		#luanti-persistence-error { margin-top: 8px; color: #ffd5d5; background: #6c2020; white-space: pre-wrap; }
-	</style>
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<meta name="theme-color" content="#17251d">
+	<meta name="description" content="Play Luanti in your browser">
+	<link rel="manifest" href="manifest.webmanifest">
+	<link rel="icon" href="luanti-web.svg" type="image/svg+xml">
+	<link rel="stylesheet" href="launcher.css">
+	<title>Luanti — Play in your browser</title>
 </head>
 <body>
-	<div id="luanti-network">
-		<div id="luanti-network-status" role="status" aria-live="polite">Multiplayer proxy disabled</div>
-		<form id="luanti-proxy-form">
-			<label for="luanti-proxy-url">Proxy</label>
-			<input id="luanti-proxy-url" type="url" inputmode="url" placeholder="wss://proxy.example.org/">
-			<button type="submit">Apply</button>
-		</form>
-		<div id="luanti-network-error" role="alert" hidden></div>
-	</div>
-	<div id="luanti-persistence" role="status" aria-live="polite">
-		<div id="luanti-persistence-status" data-state="loading">Loading saved data…</div>
-		<div id="luanti-persistence-error" role="alert" hidden></div>
-	</div>
-	<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+	<main id="luanti-launcher" class="launcher">
+		<section class="hero" aria-labelledby="launcher-title">
+			<div class="brand-mark" aria-hidden="true"><span></span></div>
+			<p class="eyebrow">Luanti for the web</p>
+			<h1 id="launcher-title">Make a world.<br>Open it anywhere.</h1>
+			<p class="lede">A free, open-source voxel game engine — ready in this tab.</p>
+			<div class="feature-row" aria-label="Web client features">
+				<span>Persistent worlds</span><span>No install</span><span>Open source</span>
+			</div>
+		</section>
+
+		<section class="launch-card" aria-label="Launch Luanti">
+			<div class="tabs" role="tablist" aria-label="Play mode">
+				<button id="luanti-local-tab" class="tab is-active" type="button" role="tab"
+					aria-selected="true" aria-controls="luanti-local-panel">New world</button>
+				<button id="luanti-remote-tab" class="tab" type="button" role="tab"
+					aria-selected="false" aria-controls="luanti-remote-panel">Join server</button>
+			</div>
+
+			<form id="luanti-launch-form" novalidate>
+				<div id="luanti-local-panel" role="tabpanel" aria-labelledby="luanti-local-tab">
+					<label for="luanti-game">Game</label>
+					<select id="luanti-game" name="game">
+						<option value="devtest">Development Test</option>
+					</select>
+					<p class="field-note">Your world is saved in this browser.</p>
+				</div>
+
+				<div id="luanti-remote-panel" role="tabpanel" aria-labelledby="luanti-remote-tab" hidden>
+					<div class="field-grid address-grid">
+						<div>
+							<label for="luanti-address">Server address</label>
+							<input id="luanti-address" name="address" autocomplete="url"
+								placeholder="play.example.org" spellcheck="false">
+						</div>
+						<div>
+							<label for="luanti-port">Port</label>
+							<input id="luanti-port" name="port" inputmode="numeric" value="30000"
+								pattern="[0-9]*">
+						</div>
+					</div>
+					<button id="luanti-server-list-button" class="text-button" type="button">Browse public servers</button>
+					<div id="luanti-server-list" class="server-list" hidden></div>
+				</div>
+
+				<div class="field-grid">
+					<div>
+						<label for="luanti-player-name">Player name</label>
+						<input id="luanti-player-name" name="name" maxlength="19" autocomplete="nickname"
+							placeholder="Player" pattern="[A-Za-z0-9_-]+">
+					</div>
+					<div>
+						<label for="luanti-quality">View distance</label>
+						<select id="luanti-quality" name="quality">
+							<option value="60">Low memory · 60</option>
+							<option value="100" selected>Balanced · 100</option>
+							<option value="160">Far · 160</option>
+						</select>
+					</div>
+				</div>
+
+				<details class="advanced">
+					<summary>Connection &amp; language</summary>
+					<label for="luanti-proxy-region">Multiplayer proxy</label>
+					<select id="luanti-proxy-region"></select>
+					<div id="luanti-custom-proxy-row" hidden>
+						<label for="luanti-proxy-url">Custom WebSocket URL</label>
+						<input id="luanti-proxy-url" type="url" inputmode="url"
+							placeholder="wss://proxy.example.org/" spellcheck="false">
+					</div>
+					<div id="luanti-network-status" class="inline-status" role="status" aria-live="polite">Multiplayer proxy disabled</div>
+					<div id="luanti-network-error" class="form-error" role="alert" hidden></div>
+
+					<label for="luanti-language">Engine language</label>
+					<select id="luanti-language" name="language">
+						<option value="">System default</option>
+						<option value="en">English</option>
+						<option value="de">Deutsch</option>
+						<option value="es">Español</option>
+						<option value="fr">Français</option>
+						<option value="ja">日本語</option>
+						<option value="pt">Português</option>
+					</select>
+					<p class="field-note">Translations appear when the deployment includes locale packs.</p>
+				</details>
+
+				<div id="luanti-launch-error" class="form-error" role="alert" hidden></div>
+				<button id="luanti-play-button" class="play-button" type="submit" disabled>
+					<span id="luanti-play-label">Preparing engine…</span><span aria-hidden="true">→</span>
+				</button>
+			</form>
+			<p id="luanti-mobile-warning" class="mobile-warning" hidden>
+				Touch controls are not ready yet. A keyboard and mouse are recommended.
+			</p>
+		</section>
+	</main>
+
+	<section id="luanti-game-shell" class="game-shell" hidden aria-label="Luanti game">
+		<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+		<div id="luanti-loading" class="loading-panel" role="status" aria-live="polite">
+			<div class="loading-mark brand-mark" aria-hidden="true"><span></span></div>
+			<p id="luanti-loading-phase" class="eyebrow">Preparing engine</p>
+			<h2 id="luanti-loading-status">Loading browser assets…</h2>
+			<div class="progress-track"><div id="luanti-loading-progress" class="progress-value"></div></div>
+		</div>
+		<div id="luanti-persistence" class="persistence-toast" role="status" aria-live="polite">
+			<div id="luanti-persistence-status" data-state="loading">Loading saved data…</div>
+			<div id="luanti-persistence-error" role="alert" hidden></div>
+		</div>
+		<div id="luanti-resume" class="resume-panel" hidden>
+			<button id="luanti-resume-button" type="button">Click to return to the game</button>
+			<p>Escape releases the pointer.</p>
+		</div>
+		<nav class="game-tools" aria-label="Browser controls">
+			<button id="luanti-share-button" type="button" hidden>Copy invite link</button>
+			<button id="luanti-fullscreen-button" type="button">Fullscreen</button>
+			<button id="luanti-console-button" type="button" aria-expanded="false">Console</button>
+		</nav>
+		<details id="luanti-console" class="console-panel">
+			<summary>Runtime log</summary>
+			<pre id="luanti-console-output"></pre>
+			<button id="luanti-console-clear" type="button">Clear</button>
+		</details>
+	</section>
+
+	<script src="launcher-config.js"></script>
 	<script>
 		var Module = {
 			canvas: document.getElementById("canvas"),
-			printErr: function(text) { console.error(text); }
+			noInitialRun: true,
+			luantiProxyUrl: (window.LUANTI_WEB_CONFIG || {}).defaultProxy || ""
 		};
 	</script>
+	<script src="launcher.js"></script>
 	{{{ SCRIPT }}}
 </body>
 </html>
