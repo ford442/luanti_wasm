@@ -973,13 +973,11 @@ bool CIrrDeviceSDL::run()
 			irrevent.MouseInput.Event = EMIE_MOUSE_MOVED; // value to be ignored
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-			// Handle mouselocking in emscripten in Windowed mode.
-			// In fullscreen SDL will handle it.
-			// The behavior we want windowed is - when the canvas was clicked then
-			// we will lock the mouse-pointer if it should be invisible.
-			// For security reasons this will be delayed until the next mouse-up event.
-			// We do not pass on this event as we don't want the activation click to do anything.
-			if (SDL_event.type == SDL_MOUSEBUTTONDOWN && !isFullscreen()) {
+			// Handle mouselocking in emscripten.
+			// When the canvas is clicked, lock the mouse-pointer if it should be invisible.
+			// For security reasons this is delayed until the mouse-up event.
+			// We do not pass on this event as we don't want the activation click to trigger in-game actions.
+			if (SDL_event.type == SDL_MOUSEBUTTONDOWN) {
 				EmscriptenPointerlockChangeEvent pointerlockStatus; // let's hope that test is not expensive ...
 				if (emscripten_get_pointerlock_status(&pointerlockStatus) == EMSCRIPTEN_RESULT_SUCCESS) {
 					if (CursorControl->isVisible() && pointerlockStatus.isActive) {

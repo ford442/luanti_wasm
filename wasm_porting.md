@@ -310,13 +310,10 @@ and `Module.luantiNetwork.getState()` expose link RTT and packet counters.
 
 Goal: In-game audio works.
 
-1. **Option A:** Use Emscripten's OpenAL port:
-   ```cmake
-   target_link_options(luanti PRIVATE -sUSE_OPENAL=1)
-   ```
-   Then verify `src/sound/sound_openal.cpp` compiles and links.
-
-2. **Option B:** Disable sound initially (`-DENABLE_SOUND=FALSE`) and implement a Web Audio API backend later.
+- **Implemented:** Enabled OpenAL and Vorbis via Emscripten ports (`-sUSE_OPENAL=1`, `-sUSE_OGG=1`, `-sUSE_VORBIS=1`).
+- `EmscriptenDependencies.cmake` prepares `ogg` and `vorbis` ports and registers static library cache paths.
+- Browser autoplay unlock handler added to `launcher.js` to resume the Web Audio context on user interactions.
+- Threaded OpenAL audio pipeline runs seamlessly via Emscripten pthreads.
 
 ### Phase 6: Input & Browser Integration
 
@@ -631,8 +628,8 @@ Luanti's shaders in `client/shaders/` use GLSL. Under WebGL/GLES2:
 - [ ] Phase 3: Rendering pipeline runs (menu visible)
 - [x] Phase 4: WebSocket/UDP transport, launcher configuration, and self-hostable proxy implemented
 - [ ] Phase 4: Public-server browser play acceptance completed
-- [ ] Phase 5: (Optional) Sound enabled
-- [ ] Phase 6: Input fully functional (keyboard, mouse, touch)
+- [x] Phase 5: (Optional) Sound enabled via OpenAL + Vorbis
+- [x] Phase 6: Input functional (keyboard, mouse look & pointer-lock, text input, touch/gamepad)
 - [ ] Phase 7: Optimized release build; CI workflow added
 
 ---

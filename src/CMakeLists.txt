@@ -807,6 +807,8 @@ if(BUILD_CLIENT)
 			-sUSE_SDL=2
 			-sUSE_ZLIB=1
 			-sUSE_FREETYPE=1
+			$<$<BOOL:${USE_SOUND}>:-sUSE_OGG=1>
+			$<$<BOOL:${USE_SOUND}>:-sUSE_VORBIS=1>
 			-sFULL_ES2=1
 			-sMAX_WEBGL_VERSION=2
 			# Keep Luanti's synchronous launcher/game stack off the browser UI

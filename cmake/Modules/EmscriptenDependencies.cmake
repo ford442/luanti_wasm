@@ -17,7 +17,7 @@ if(EMSCRIPTEN_BOOTSTRAP_PORTS)
 	message(STATUS "Preparing Emscripten ports required by Luanti")
 	execute_process(
 		COMMAND "${EMSCRIPTEN_EMBUILDER}" build
-			zlib libjpeg libpng-mt freetype sqlite3-mt sdl2
+			zlib libjpeg libpng-mt freetype sqlite3-mt sdl2 ogg vorbis
 		RESULT_VARIABLE EMSCRIPTEN_PORTS_RESULT
 		COMMAND_ECHO STDOUT
 	)
@@ -41,6 +41,24 @@ if(EMSCRIPTEN_BOOTSTRAP_PORTS)
 	)
 	set(PNG_LIBRARY "${EMSCRIPTEN_PNG_LIBRARY}" CACHE FILEPATH
 		"Path to Emscripten's pthread-enabled PNG port" FORCE)
+	execute_process(
+		COMMAND "${CMAKE_C_COMPILER}" --print-file-name=libvorbis.a
+		OUTPUT_VARIABLE EMSCRIPTEN_VORBIS_LIBRARY
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		COMMAND_ERROR_IS_FATAL ANY
+	)
+	set(VORBIS_LIBRARY "${EMSCRIPTEN_VORBIS_LIBRARY}" CACHE FILEPATH
+		"Path to Emscripten's Vorbis port" FORCE)
+	set(VORBISFILE_LIBRARY "${EMSCRIPTEN_VORBIS_LIBRARY}" CACHE FILEPATH
+		"Path to Emscripten's VorbisFile port" FORCE)
+	execute_process(
+		COMMAND "${CMAKE_C_COMPILER}" --print-file-name=libogg.a
+		OUTPUT_VARIABLE EMSCRIPTEN_OGG_LIBRARY
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		COMMAND_ERROR_IS_FATAL ANY
+	)
+	set(OGG_LIBRARY "${EMSCRIPTEN_OGG_LIBRARY}" CACHE FILEPATH
+		"Path to Emscripten's Ogg port" FORCE)
 endif()
 
 # Emscripten 6.0.3 has no zstd port. Fetch an integrity-pinned release and add

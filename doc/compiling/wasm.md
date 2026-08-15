@@ -27,7 +27,7 @@ cd /path/to/luanti_wasm
 
 The checkout pins both the SDK version and installer revision. The first
 configure needs internet access: it populates Emscripten's SDL2, zlib, PNG,
-JPEG, Freetype, and SQLite ports. Luanti also builds the SHA-256-pinned zstd
+JPEG, Freetype, SQLite, Ogg, and Vorbis ports. Luanti also builds the SHA-256-pinned zstd
 1.5.7 source archive declared by the repository.
 
 If the SDK is installed somewhere this user cannot modify, choose a writable

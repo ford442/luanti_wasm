@@ -171,6 +171,8 @@ void UDPSocket::Bind(Address addr)
 {
 	if (!m_emscripten)
 		throw SocketException("Socket is not initialized");
+	if (addr.getFamily() == 0)
+		addr.setAddress(static_cast<u32>(0));
 	if (addr.getFamily() != AF_INET)
 		throw SocketException("WebSocket proxy transport supports IPv4 only");
 
@@ -204,7 +206,9 @@ void UDPSocket::Send(const Address &destination, const void *data, int size)
 	if (m_emscripten->bind_address.getPort() == 0)
 		Bind(Address(0, 0, 0, 0, 0));
 
-	if (destination.isLocalhost()) {
+	// Singleplayer / in-process loopback: deliver datagram directly to matching port queue
+	if (destination.isLocalhost() || destination.isAny() ||
+			sockets_by_port.count(destination.getPort()) != 0) {
 		std::shared_ptr<EmscriptenUDPSocketState> target;
 		{
 			std::lock_guard<std::mutex> lock(sockets_mutex);
@@ -231,6 +235,7 @@ void UDPSocket::Send(const Address &destination, const void *data, int size)
 		return;
 	}
 
+	// Remote multiplayer destination: route packet through the WebSocket proxy bridge
 	const std::string address = destination.serializeString();
 	int accepted = MAIN_THREAD_EM_ASM_INT({
 		var network = Module["luantiNetwork"];
@@ -251,9 +256,11 @@ int UDPSocket::Receive(Address &sender, void *data, int size)
 	};
 	if (m_timeout_ms < 0) {
 		m_emscripten->event.wait(lock, ready);
-	} else if (!m_emscripten->event.wait_for(lock,
-			std::chrono::milliseconds(m_timeout_ms), ready)) {
-		return -1;
+	} else if (m_timeout_ms > 0) {
+		if (!m_emscripten->event.wait_for(lock,
+				std::chrono::milliseconds(m_timeout_ms), ready)) {
+			return -1;
+		}
 	}
 	if (m_emscripten->closed || m_emscripten->receive_queue.empty())
 		return -1;
@@ -278,11 +285,13 @@ bool UDPSocket::WaitData(int timeout_ms)
 	std::unique_lock<std::mutex> lock(m_emscripten->mutex);
 	if (!m_emscripten->receive_queue.empty())
 		return true;
+	if (timeout_ms <= 0)
+		return false;
 	auto ready = [this]() {
 		return m_emscripten->closed || !m_emscripten->receive_queue.empty();
 	};
 	return m_emscripten->event.wait_for(lock,
-		std::chrono::milliseconds(std::max(timeout_ms, 0)), ready) &&
+		std::chrono::milliseconds(timeout_ms), ready) &&
 		!m_emscripten->closed && !m_emscripten->receive_queue.empty();
 }
 

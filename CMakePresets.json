@@ -50,7 +50,7 @@
         "BUILD_UNITTESTS": "FALSE",
         "BUILD_BENCHMARKS": "FALSE",
         "ENABLE_LTO": "FALSE",
-        "ENABLE_SOUND": "FALSE",
+        "ENABLE_SOUND": "TRUE",
         "ENABLE_CURL": "FALSE",
         "ENABLE_GETTEXT": "FALSE",
         "ENABLE_CURSES": "FALSE",
