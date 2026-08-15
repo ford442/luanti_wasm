@@ -801,7 +801,15 @@ if(BUILD_CLIENT)
 
 	if(EMSCRIPTEN)
 		# Emscripten ports and WebAssembly-specific linker flags
-		target_compile_options(${PROJECT_NAME} PRIVATE -pthread -fexceptions)
+		target_compile_options(${PROJECT_NAME} PRIVATE
+			-pthread
+			-fexceptions
+			-sUSE_SDL=2
+			-sUSE_ZLIB=1
+			-sUSE_FREETYPE=1
+			$<$<BOOL:${USE_SOUND}>:-sUSE_OGG=1>
+			$<$<BOOL:${USE_SOUND}>:-sUSE_VORBIS=1>
+		)
 		target_link_options(${PROJECT_NAME} PRIVATE
 			-fexceptions
 			-sUSE_SDL=2

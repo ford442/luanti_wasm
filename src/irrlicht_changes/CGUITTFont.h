@@ -34,7 +34,7 @@
 #pragma once
 
 #include <ft2build.h>
-#include <freetype/freetype.h>
+#include FT_FREETYPE_H
 
 #include "irr_ptr.h"
 #include "IGUIFont.h"

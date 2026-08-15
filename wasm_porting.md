@@ -574,12 +574,19 @@ Luanti's shaders in `client/shaders/` use GLSL. Under WebGL/GLES2:
 1. **Compile-time:** Get a clean build with zero errors
 2. **Link-time:** Resolve all missing symbols
 3. **Startup test:** Does `main()` run? Does the virtual FS mount?
-4. **Menu test:** Does the main menu render? Can you click buttons?
-5. **Singleplayer test:** Create a world, load it, place/break blocks
-6. **Save/load test:** Exit, reload the page, verify world persisted in IDBFS
-7. **Input test:** Keyboard, mouse look, touch, chat
-8. **Multiplayer test:** Configure `wss://` in the shell, connect by hostname to
-   a native public server, and compare in-game latency with proxy RTT
+
+### First Playable Smoke Test (Integration Gate)
+Before a public demo can be approved, the build must pass this end-to-end checklist on Chrome and Firefox:
+1. Serve with COOP/COEP headers (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`)
+2. Page loads without JS/WASM errors
+3. IDBFS sync completes
+4. Main menu renders and accepts input (no tab freeze)
+5. Create a new singleplayer devtest world
+6. Load world, move, place 10 blocks, break 5 blocks
+7. Exit to menu, hard-reload tab, load same world — blocks persist
+8. `minetest.conf` change survives reload
+
+*Note: Multiplayer testing (WebSocket proxy) is tracked as a separate milestone.*
 
 ---
 
@@ -625,12 +632,13 @@ Luanti's shaders in `client/shaders/` use GLSL. Under WebGL/GLES2:
 - [x] Phase 2: Asset preload bundle is emitted and available at startup
 - [x] Phase 2: IDBFS hydration and sentinel persistence pass browser automation
 - [x] Phase 3: Synchronous engine loop is isolated from the browser main thread
-- [ ] Phase 3: Rendering pipeline runs (menu visible)
+- [x] Phase 3: Rendering pipeline runs (menu visible)
 - [x] Phase 4: WebSocket/UDP transport, launcher configuration, and self-hostable proxy implemented
 - [ ] Phase 4: Public-server browser play acceptance completed
 - [x] Phase 5: (Optional) Sound enabled via OpenAL + Vorbis
 - [x] Phase 6: Input functional (keyboard, mouse look & pointer-lock, text input, touch/gamepad)
 - [ ] Phase 7: Optimized release build; CI workflow added
+- [x] **Shaders**: Added integer precision qualifiers (`int`, `uint`, `sampler2DArray`) in `src/client/shader.cpp` to ensure WebGL 2 / GLES 3 compilation passes for advanced features like FXAA and 3D UI nodes.
 
 ---
 

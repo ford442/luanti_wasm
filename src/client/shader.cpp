@@ -699,12 +699,25 @@ void ShaderSource::generateShader(ShaderInfo &shaderinfo)
 			shaders_header << R"(
 				#ifdef GL_FRAGMENT_PRECISION_HIGH
 				precision highp float;
+				precision highp int;
 				precision highp sampler2D;
 				#else
 				precision mediump float;
+				precision mediump int;
 				precision mediump sampler2D;
 				#endif
 			)";
+			if (use_glsl3) {
+				shaders_header << R"(
+					#ifdef GL_FRAGMENT_PRECISION_HIGH
+					precision highp uint;
+					precision highp sampler2DArray;
+					#else
+					precision mediump uint;
+					precision mediump sampler2DArray;
+					#endif
+				)";
+			}
 		} else {
 			assert(false);
 		}

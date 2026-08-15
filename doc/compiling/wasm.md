@@ -112,14 +112,17 @@ world can be launched, C++ runs on an application worker, browser-main timers
 remain responsive, and real engine loading status reaches the launcher. This
 is the automated CI smoke; it is not a visual regression test.
 
-Before publishing a demo, perform this manual browser gate:
+Before publishing a demo, perform the **First Playable Smoke Test** manual gate.
+Ensure all checklist items pass on both **Chrome** and **Firefox** (latest stable).
 
-1. Confirm the main menu is visibly rendered, resizes with the window, and
-   accepts mouse and keyboard input.
-2. Create a DevTest world and start it. Confirm the loading screen advances
-   into gameplay rather than leaving the tab or canvas frozen.
-3. Exit to the menu, reload the page, and confirm the world remains available.
-4. Check the browser console for WebGL, pthread, preload, or IndexedDB errors.
+1. Serve with COOP/COEP headers (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`).
+2. Page loads without JS/WASM errors.
+3. IDBFS sync completes (console: "IDBFS loaded successfully" or equivalent success state).
+4. Main menu renders and accepts input (no tab freeze).
+5. Create a new singleplayer devtest world.
+6. Load world, move, place 10 blocks, break 5 blocks.
+7. Exit to menu, hard-reload tab, load same world — blocks persist (#3).
+8. `minetest.conf` change survives reload.
 
 The current headless smoke does not replace this menu/world gate.
 
