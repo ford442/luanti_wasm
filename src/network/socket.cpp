@@ -122,8 +122,11 @@ UDPSocket::UDPSocket(bool ipv6)
 bool UDPSocket::init(bool ipv6, bool noExceptions)
 {
 	if (!sockets_initialized) {
-		verbosestream << "Sockets not initialized" << std::endl;
-		return false;
+		const char *msg = "Sockets not initialized";
+		verbosestream << msg << std::endl;
+		if (noExceptions)
+			return false;
+		throw SocketException(msg);
 	}
 	if (m_handle >= 0) {
 		if (noExceptions)
@@ -160,17 +163,17 @@ UDPSocket::~UDPSocket()
 		if (m_emscripten->bind_address.getPort() != 0)
 			sockets_by_port.erase(m_emscripten->bind_address.getPort());
 	}
-	MAIN_THREAD_EM_ASM({
-		var network = Module["luantiNetwork"];
-		if (network && network["_destroySocket"])
-			network["_destroySocket"]($0);
-	}, m_handle);
+	// JS proxy bookkeeping is best-effort and must not run via
+	// MAIN_THREAD_ASYNC_EM_ASM: that import is missing in pthread workers
+	// ("function import requires a callable") and crashes instantiate.
 }
 
 void UDPSocket::Bind(Address addr)
 {
-	if (!m_emscripten)
-		throw SocketException("Socket is not initialized");
+	if (!m_emscripten) {
+		if (!init(addr.getFamily() == AF_INET6, true))
+			throw SocketException("Socket is not initialized");
+	}
 	if (addr.getFamily() == 0)
 		addr.setAddress(static_cast<u32>(0));
 	if (addr.getFamily() != AF_INET)
@@ -189,17 +192,15 @@ void UDPSocket::Bind(Address addr)
 		addr.setPort(port);
 		m_emscripten->bind_address = addr;
 		sockets_by_port[port] = m_emscripten;
+		m_bound_port = port;
 	}
-	MAIN_THREAD_EM_ASM({
-		var network = Module["luantiNetwork"];
-		if (network && network["_createSocket"])
-			network["_createSocket"]($0, $1);
-	}, m_handle, port);
+	// In-process singleplayer only needs the C++ port map. The WSS proxy
+	// link is created lazily in JS on the first remote _send.
 }
 
 void UDPSocket::Send(const Address &destination, const void *data, int size)
 {
-	if (!m_emscripten || !data || size < 0)
+	if (!m_emscripten || size < 0 || (size > 0 && !data))
 		throw SendFailedException("Invalid browser UDP send");
 	if (destination.getFamily() != AF_INET)
 		throw SendFailedException("WebSocket proxy transport supports IPv4 only");
@@ -207,32 +208,49 @@ void UDPSocket::Send(const Address &destination, const void *data, int size)
 		Bind(Address(0, 0, 0, 0, 0));
 
 	// Singleplayer / in-process loopback: deliver datagram directly to matching port queue
-	if (destination.isLocalhost() || destination.isAny() ||
-			sockets_by_port.count(destination.getPort()) != 0) {
+	{
 		std::shared_ptr<EmscriptenUDPSocketState> target;
+		bool in_process = destination.isLocalhost() || destination.isAny();
 		{
 			std::lock_guard<std::mutex> lock(sockets_mutex);
 			auto found = sockets_by_port.find(destination.getPort());
-			if (found != sockets_by_port.end())
+			if (found != sockets_by_port.end()) {
 				target = found->second;
+				in_process = true;
+			}
 		}
-		if (!target)
-			return;
-		QueuedDatagram datagram;
-		datagram.sender = Address(127, 0, 0, 1,
-			m_emscripten->bind_address.getPort());
-		datagram.data.assign(static_cast<const u8 *>(data),
-			static_cast<const u8 *>(data) + size);
-		{
-			std::lock_guard<std::mutex> lock(target->mutex);
-			if (target->closed)
+		if (in_process) {
+			if (!target) {
+				warningstream << "Loopback UDP send to port "
+					<< destination.getPort()
+					<< " dropped (no socket bound yet)" << std::endl;
 				return;
-			if (target->receive_queue.size() >= 1024)
-				target->receive_queue.pop_front();
-			target->receive_queue.emplace_back(std::move(datagram));
+			}
+			QueuedDatagram datagram;
+			// Always stamp loopback as 127.0.0.1 + the real bound port.
+			// Using bind_address.getPort() can disagree with 0.0.0.0 binds and
+			// makes the receiver drop the packet as "different address".
+			datagram.sender = Address(127, 0, 0, 1, m_bound_port);
+			datagram.data.assign(static_cast<const u8 *>(data),
+				static_cast<const u8 *>(data) + size);
+			{
+				std::lock_guard<std::mutex> lock(target->mutex);
+				if (target->closed)
+					return;
+				if (target->receive_queue.size() >= 1024)
+					target->receive_queue.pop_front();
+				target->receive_queue.emplace_back(std::move(datagram));
+			}
+			target->event.notify_one();
+			static std::atomic<int> loopback_sends{0};
+			int n = loopback_sends.fetch_add(1, std::memory_order_relaxed);
+			if (n < 8) {
+				actionstream << "Loopback UDP " << m_bound_port
+					<< " -> " << destination.getPort()
+					<< " (" << size << " bytes)" << std::endl;
+			}
+			return;
 		}
-		target->event.notify_one();
-		return;
 	}
 
 	// Remote multiplayer destination: route packet through the WebSocket proxy bridge
@@ -446,6 +464,7 @@ void UDPSocket::Bind(Address addr)
 			<< SOCKET_ERR_STR(LAST_SOCKET_ERR()) << std::endl;
 		throw SocketException("Failed to bind socket");
 	}
+	m_bound_port = addr.getPort();
 }
 
 void UDPSocket::Send(const Address &destination, const void *data, int size)

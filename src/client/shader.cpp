@@ -707,13 +707,13 @@ void ShaderSource::generateShader(ShaderInfo &shaderinfo)
 				precision mediump sampler2D;
 				#endif
 			)";
+			// GLSL ES 3 default precision statements only allow float, int, and
+			// sampler types — not uint (unsigned integers inherit int precision).
 			if (use_glsl3) {
 				shaders_header << R"(
 					#ifdef GL_FRAGMENT_PRECISION_HIGH
-					precision highp uint;
 					precision highp sampler2DArray;
 					#else
-					precision mediump uint;
 					precision mediump sampler2DArray;
 					#endif
 				)";

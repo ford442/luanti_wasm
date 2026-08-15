@@ -610,6 +610,11 @@ void COpenGL3DriverBase::drawBuffers(const scene::IVertexBuffer *vb,
 		GL.BindBuffer(GL_ARRAY_BUFFER, 0);
 	}
 
+	// Apply materials before binding VBOs. OnSetMaterial/OnRender can upload
+	// other buffers and leave GL_ARRAY_BUFFER unbound; WebGL then rejects
+	// vertexAttribIPointer with a non-zero offset (EVA_AUX).
+	setRenderStates3DMode();
+
 	const void *vertices = vb->getData();
 	if (hwvert) {
 		assert(hwvert->Vbo.exists());
@@ -620,12 +625,22 @@ void COpenGL3DriverBase::drawBuffers(const scene::IVertexBuffer *vb,
 	const void *indexList = ib->getData();
 	if (hwidx) {
 		assert(hwidx->Vbo.exists());
-		GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, hwidx->Vbo.getName());
-		indexList = nullptr;
+		if (hwvert && hwvert->Vbo.getName() == hwidx->Vbo.getName()) {
+			os::Printer::log(
+				"WebGL: vertex and index data share one buffer object; "
+				"drawing without ELEMENT_ARRAY VBO", ELL_WARNING);
+			indexList = ib->getData();
+		} else {
+			GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, hwidx->Vbo.getName());
+			indexList = nullptr;
+		}
 	}
 
+	const bool prev_lock = LockRenderStateMode;
+	LockRenderStateMode = true;
 	drawVertexPrimitiveList(vertices, vb->getCount(), indexList,
 		PrimitiveCount, vb->getType(), PrimitiveType, ib->getType());
+	LockRenderStateMode = prev_lock;
 
 	if (hw_weights) {
 		GL.DisableVertexAttribArray(EVA_WEIGHTS);
@@ -1062,6 +1077,15 @@ void COpenGL3DriverBase::beginDraw(const VertexType &vertexType, uintptr_t verti
 			GL.VertexAttribPointer(attr.Index, attr.ComponentCount, attr.ComponentType, GL_TRUE, vertexType.VertexSize, reinterpret_cast<void *>(verticesBase + attr.Offset));
 			break;
 		case VertexAttribute::Mode::Integer:
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+			// WebGL forbids vertexAttribIPointer without ARRAY_BUFFER when
+			// the offset is non-zero. Client-memory draws pass a CPU pointer
+			// as the "base"; skip integer attribs (shader default is 0).
+			if (verticesBase != 0) {
+				GL.DisableVertexAttribArray(attr.Index);
+				break;
+			}
+#endif
 			GL.VertexAttribIPointer(attr.Index, attr.ComponentCount, attr.ComponentType, vertexType.VertexSize, reinterpret_cast<void *>(verticesBase + attr.Offset));
 			break;
 		}

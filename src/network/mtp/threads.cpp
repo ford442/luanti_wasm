@@ -525,6 +525,8 @@ void ConnectionSendThread::serve(Address bind_address)
 	try {
 		m_connection->m_udpSocket.Bind(bind_address);
 		m_connection->SetPeerID(PEER_ID_SERVER);
+		actionstream << "UDP socket bound for serve on port "
+			<< m_connection->m_udpSocket.getBoundPort() << std::endl;
 	}
 	catch (SocketException &e) {
 		// Create event
@@ -550,6 +552,10 @@ void ConnectionSendThread::connect(Address address)
 		bind_addr.setAddress(static_cast<u32>(0));
 
 	m_connection->m_udpSocket.Bind(bind_addr);
+	actionstream << "UDP socket bound for connect on local port "
+		<< m_connection->m_udpSocket.getBoundPort()
+		<< " -> " << address.serializeString() << ":" << address.getPort()
+		<< std::endl;
 
 	// Send a dummy packet to server with peer_id = PEER_ID_INEXISTENT
 	m_connection->SetPeerID(PEER_ID_INEXISTENT);
@@ -1029,12 +1035,26 @@ void ConnectionReceiveThread::receive(SharedBuffer<u8> &packetdata,
 		}
 
 		// Validate peer address
-
 		if (sender != peer->getAddress()) {
-			LOG(derr_con << m_connection->getDesc()
-				<< " Peer " << peer_id << " sending from different address."
-				" Ignoring." << std::endl);
-			return;
+#ifdef __EMSCRIPTEN__
+			// In-process singleplayer stamps 127.0.0.1; the peer may still be
+			// stored as 0.0.0.0 or the same loopback with a matching port.
+			const Address &expected = peer->getAddress();
+			const bool loopback_ok =
+				sender.getPort() == expected.getPort() &&
+				(sender.isLocalhost() || sender.isAny()) &&
+				(expected.isLocalhost() || expected.isAny());
+			if (!loopback_ok)
+#endif
+			{
+				actionstream << m_connection->getDesc()
+					<< " Ignoring packet from unexpected address "
+					<< sender.serializeString() << ":" << sender.getPort()
+					<< " (peer " << peer_id << " is "
+					<< peer->getAddress().serializeString() << ":"
+					<< peer->getAddress().getPort() << ")" << std::endl;
+				return;
+			}
 		}
 
 		if (knew_peer_id) {

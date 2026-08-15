@@ -493,6 +493,7 @@ void Game::run()
 
 	set_light_curve(g_settings->getFloat("display_gamma"));
 	porting::emscripten_report_status("World ready", 100, "playing");
+	actionstream << "World ready; entering game loop" << std::endl;
 
 	m_touch_simulate_aux1 = g_settings->getBool("fast_move")
 			&& client->checkPrivilege("fast");
@@ -751,25 +752,24 @@ bool Game::createServer(const std::string &map_dir,
 {
 	showOverlayMessage(N_("Creating server..."), 0, 5);
 
-	std::string bind_str;
-	if (simple_singleplayer_mode) {
-		// Make the simple singleplayer server only accept connections from localhost,
-		// which also makes Windows Defender not show a warning.
-		bind_str = "127.0.0.1";
-	} else {
-		bind_str = g_settings->get("bind_address");
-	}
-
 	Address bind_addr(0, 0, 0, 0, port);
 
-	if (g_settings->getBool("ipv6_server"))
-		bind_addr.setAddress(static_cast<IPv6AddressBytes*>(nullptr));
-	try {
-		bind_addr.Resolve(bind_str.c_str());
-	} catch (const ResolveError &e) {
-		warningstream << "Resolving bind address \"" << bind_str
-			<< "\" failed: " << e.what()
-			<< " -- Listening on all addresses." << std::endl;
+	if (simple_singleplayer_mode) {
+		// Bind loopback by numeric address (no DNS). On Emscripten,
+		// getaddrinfo("127.0.0.1") with AI_ADDRCONFIG fails and we used to
+		// fall back to 0.0.0.0, which breaks in-process singleplayer connect.
+		bind_addr = Address(127, 0, 0, 1, port);
+	} else {
+		std::string bind_str = g_settings->get("bind_address");
+		if (g_settings->getBool("ipv6_server"))
+			bind_addr.setAddress(static_cast<IPv6AddressBytes*>(nullptr));
+		try {
+			bind_addr.Resolve(bind_str.c_str());
+		} catch (const ResolveError &e) {
+			warningstream << "Resolving bind address \"" << bind_str
+				<< "\" failed: " << e.what()
+				<< " -- Listening on all addresses." << std::endl;
+		}
 	}
 	if (bind_addr.isIPv6() && !g_settings->getBool("enable_ipv6")) {
 		errordata->setError(fmtgettext("Unable to listen on %s because IPv6 is disabled",
@@ -780,6 +780,25 @@ bool Game::createServer(const std::string &map_dir,
 	server = new Server(map_dir, gamespec, simple_singleplayer_mode, bind_addr,
 			false, nullptr, &(errordata->message));
 
+#ifdef __EMSCRIPTEN__
+	// Under PROXY_TO_PTHREAD, booting the internal server on a helper thread
+	// while the application worker keeps issuing proxied WebGL frames can
+	// stall (browser main is contended by GL proxy + MAIN_THREAD_EM_ASM).
+	// Sequential start on the application worker is slower to paint but
+	// reliably finishes; status text is pushed via emscripten_report_status.
+	try {
+		porting::emscripten_report_status("Creating server…", 5, "loading");
+		server->start();
+		porting::emscripten_report_status("Caching media…", 12, "loading");
+		copyServerClientCache();
+		porting::emscripten_report_status("Server ready", 15, "loading");
+	} catch (const std::exception &e) {
+		errordata->setError(std::string("Failed to start server: ") + e.what());
+		errorstream << errordata->message << std::endl;
+		return false;
+	}
+	return true;
+#else
 	auto start_thread = runInThread([=] {
 		server->start();
 		copyServerClientCache();
@@ -806,6 +825,7 @@ bool Game::createServer(const std::string &map_dir,
 	start_thread->rethrow();
 
 	return success;
+#endif
 }
 
 void Game::copyServerClientCache()
@@ -833,6 +853,11 @@ bool Game::createClient(const GameStartData &start_data)
 	std::string *error_message = &(errordata->message);
 
 	showOverlayMessage(N_("Creating client..."), 0, 10);
+	actionstream << "Creating client, connecting to internal server on port "
+		<< start_data.socket_port << std::endl;
+#ifdef __EMSCRIPTEN__
+	porting::emscripten_report_status("Connecting to local server…", 16, "loading");
+#endif
 
 	draw_control = new MapDrawControl();
 	if (!draw_control)
@@ -1051,11 +1076,21 @@ bool Game::connectToServer(const GameStartData &start_data,
 
 		auto framemarker = FrameMarker("Game::connectToServer()-frame").started();
 
-		while (m_rendering_engine->run()) {
-
+		while (true) {
+#ifdef __EMSCRIPTEN__
+			// HELLO/auth arrive on the connection event queue. Do not wait on
+			// RenderingEngine::run() first — proxied WebGL can stall and leave
+			// those events unprocessed (server already sent TOCLIENT_HELLO).
+			porting::emscripten_service_browser_frame();
+			dtime = 0.05f;
+			sleep_ms(50);
+#else
+			if (!m_rendering_engine->run())
+				break;
 			framemarker.end();
 			fps_control.limit(device, &dtime);
 			framemarker.start();
+#endif
 
 			// Update client and server
 			step(dtime);
@@ -1063,6 +1098,10 @@ bool Game::connectToServer(const GameStartData &start_data,
 			// End condition
 			if (client->getState() == LC_Init) {
 				*connect_ok = true;
+				actionstream << "Connected to internal server" << std::endl;
+#ifdef __EMSCRIPTEN__
+				porting::emscripten_report_status("Connected, loading content…", 20, "loading");
+#endif
 				break;
 			}
 
@@ -1080,6 +1119,15 @@ bool Game::connectToServer(const GameStartData &start_data,
 			}
 
 			wait_time += dtime;
+			if (server) {
+				int waited = (int)wait_time;
+				if (waited > 0 && waited % 3 == 0 &&
+						waited != (int)(wait_time - dtime)) {
+					actionstream << "Waiting for internal server handshake "
+						<< "(client state=" << (int)client->getState()
+						<< ", t=" << waited << "s)" << std::endl;
+				}
+			}
 			if (server) {
 				// never time out
 			} else if (wait_time > GAME_FALLBACK_TIMEOUT && !did_fallback) {
@@ -1115,10 +1163,20 @@ bool Game::getServerContent(bool *aborted)
 	fps_control.reset();
 
 	auto framemarker = FrameMarker("Game::getServerContent()-frame").started();
-	while (m_rendering_engine->run()) {
+	while (true) {
+#ifdef __EMSCRIPTEN__
+		// Handshake is done; pump the real frame loop so the canvas resizes
+		// and load-screen / first world frames are actually presented.
+		if (!m_rendering_engine->run())
+			return false;
+		dtime = 0.05f;
+#else
+		if (!m_rendering_engine->run())
+			return false;
 		framemarker.end();
 		fps_control.limit(device, &dtime);
 		framemarker.start();
+#endif
 
 		// Update client and server
 		step(dtime);

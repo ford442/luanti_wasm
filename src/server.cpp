@@ -535,14 +535,17 @@ void Server::init()
 	m_script->loadBuiltin();
 
 	m_gamespec.checkAndLog();
+	porting::emscripten_report_status("Loading mods…", 6, "loading");
 	m_modmgr->loadMods(*m_script);
 
 	m_script->saveGlobals();
 
 	// Read Textures and calculate sha1 sums
+	porting::emscripten_report_status("Hashing media…", 8, "loading");
 	fillMediaCache();
 
 	// Apply item aliases in the node definition manager
+	porting::emscripten_report_status("Initializing world…", 11, "loading");
 	m_nodedef->updateAliases(m_itemdef);
 
 	// Apply texture overrides from texturepack/override.txt
@@ -2737,7 +2740,7 @@ bool Server::addMediaFile(const std::string &filename,
 
 void Server::fillMediaCache()
 {
-	infostream << "Server: Calculating media file checksums" << std::endl;
+	actionstream << "Server: Calculating media file checksums" << std::endl;
 
 	// Collect all media file paths
 	std::vector<std::string> paths;
@@ -2751,6 +2754,7 @@ void Server::fillMediaCache()
 	m_modmgr->getModsMediaPaths(paths);
 
 	// Collect media file information from paths into cache
+	u32 considered = 0;
 	for (const std::string &mediapath : paths) {
 		std::vector<fs::DirListNode> dirlist = fs::GetDirListing(mediapath);
 		for (const auto &dln : dirlist) {
@@ -2764,10 +2768,19 @@ void Server::fillMediaCache()
 			std::string filepath = mediapath;
 			filepath.append(DIR_DELIM).append(filename);
 			addMediaFile(filename, filepath);
+			++considered;
+			if ((considered % 50) == 0) {
+				actionstream << "Server: hashed " << m_media.size()
+					<< " media files…" << std::endl;
+				porting::emscripten_report_status(
+					"Hashing media (" + std::to_string(m_media.size()) + " files)…",
+					8, "loading");
+			}
 		}
 	}
 
-	infostream << "Server: " << m_media.size() << " media files collected" << std::endl;
+	actionstream << "Server: " << m_media.size() << " media files collected"
+		<< std::endl;
 }
 
 void Server::sendMediaAnnouncement(session_t peer_id, const std::string &lang_code)

@@ -35,6 +35,7 @@ public:
 
 	// Debugging purposes only
 	int GetHandle() const { return m_handle; };
+	u16 getBoundPort() const { return m_bound_port; }
 
 private:
 #ifdef __EMSCRIPTEN__
@@ -43,4 +44,5 @@ private:
 	int m_handle = -1;
 	int m_timeout_ms = -1;
 	unsigned short m_addr_family = 0;
+	u16 m_bound_port = 0;
 };

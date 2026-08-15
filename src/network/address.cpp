@@ -90,6 +90,41 @@ void Address::Resolve(const char *name, Address *fallback)
 		return;
 	}
 
+	// Prefer numeric parse — avoids DNS and browser resolver quirks for
+	// loopback / any-address strings used by singleplayer.
+	struct in_addr v4 {};
+	if (inet_pton(AF_INET, name, &v4) == 1) {
+		m_addr_family = AF_INET;
+		m_address.ipv4 = v4;
+		websocket_proxy_register_hostname(serializeString().c_str(), name);
+		if (fallback)
+			*fallback = Address();
+		return;
+	}
+	if (g_settings->getBool("enable_ipv6")) {
+		struct in6_addr v6 {};
+		if (inet_pton(AF_INET6, name, &v6) == 1) {
+			m_addr_family = AF_INET6;
+			m_address.ipv6 = v6;
+			websocket_proxy_register_hostname(serializeString().c_str(), name);
+			if (fallback)
+				*fallback = Address();
+			return;
+		}
+	}
+
+#ifdef __EMSCRIPTEN__
+	// Emscripten getaddrinfo often cannot resolve "localhost" the same way
+	// desktop resolvers do; map it explicitly for in-process singleplayer.
+	if (strcmp(name, "localhost") == 0) {
+		setAddress(127, 0, 0, 1);
+		websocket_proxy_register_hostname(serializeString().c_str(), name);
+		if (fallback)
+			*fallback = Address();
+		return;
+	}
+#endif
+
 	const auto &copy_from_ai = [] (const struct addrinfo *ai, Address *to) {
 		if (ai->ai_family == AF_INET) {
 			struct sockaddr_in *t = (struct sockaddr_in *)ai->ai_addr;
@@ -115,7 +150,14 @@ void Address::Resolve(const char *name, Address *fallback)
 	} else {
 		hints.ai_family = AF_INET;
 	}
+#ifdef __EMSCRIPTEN__
+	// AI_ADDRCONFIG rejects 127.0.0.1 / localhost / 0.0.0.0 in the browser
+	// because there is no "configured" non-loopback interface ("Name does
+	// not resolve"). That broke singleplayer bind and connect.
+	hints.ai_flags = 0;
+#else
 	hints.ai_flags = AI_ADDRCONFIG;
+#endif
 
 	// Do getaddrinfo()
 	struct addrinfo *resolved = nullptr;

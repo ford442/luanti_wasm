@@ -29,6 +29,22 @@ self.addEventListener("activate", function(event) {
 	event.waitUntil(self.clients.claim());
 });
 
+function withIsolationHeaders(response) {
+	// Cached/network responses must keep COOP+COEP so pthreads keep working.
+	// Rebuild the Response so navigation answers always expose a single value.
+	if (!response || !response.status)
+		return response;
+	var headers = new Headers(response.headers);
+	headers.set("Cross-Origin-Opener-Policy", "same-origin");
+	headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+	headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: headers
+	});
+}
+
 self.addEventListener("fetch", function(event) {
 	if (event.request.method !== "GET")
 		return;
@@ -38,7 +54,7 @@ self.addEventListener("fetch", function(event) {
 		return;
 	event.respondWith(caches.match(event.request).then(function(cached) {
 		if (cached)
-			return cached;
+			return withIsolationHeaders(cached);
 		return fetch(event.request).then(function(response) {
 			if (response.ok) {
 				var copy = response.clone();
@@ -46,7 +62,7 @@ self.addEventListener("fetch", function(event) {
 					cache.put(event.request, copy);
 				});
 			}
-			return response;
+			return withIsolationHeaders(response);
 		});
 	}));
 });

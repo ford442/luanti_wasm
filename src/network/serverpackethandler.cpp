@@ -190,7 +190,7 @@ void Server::handleCommand_Init(NetworkPacket* pkt)
 		}
 	}
 
-	infostream << "Server: New connection: \"" << playerName << "\" from " <<
+	actionstream << "Server: New connection: \"" << playerName << "\" from " <<
 		addr_s << " (peer_id=" << peer_id << ")" << std::endl;
 
 	// Early check for user limit, so the client doesn't need to run

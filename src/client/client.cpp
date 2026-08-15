@@ -1073,7 +1073,7 @@ void Client::ProcessData(NetworkPacket *pkt)
 		system to know the ids
 	*/
 	if (pkt->getPeerId() != PEER_ID_SERVER) {
-		infostream << "Client::ProcessData(): Discarding data not "
+		actionstream << "Client::ProcessData(): Discarding data not "
 			"coming from server: peer_id=" << static_cast<int>(pkt->getPeerId())
 			<< " command=" << static_cast<unsigned>(command) << std::endl;
 		return;

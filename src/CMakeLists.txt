@@ -861,6 +861,7 @@ if(BUILD_CLIENT)
 			${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
 			${CMAKE_SOURCE_DIR}/client/web/service-worker.js
 			${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
+			${CMAKE_SOURCE_DIR}/client/web/.htaccess
 		)
 		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -870,6 +871,7 @@ if(BUILD_CLIENT)
 				${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
 				${CMAKE_SOURCE_DIR}/client/web/service-worker.js
 				${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
+				${CMAKE_SOURCE_DIR}/client/web/.htaccess
 				$<TARGET_FILE_DIR:${PROJECT_NAME}>
 			COMMENT "Copying Luanti web launcher and PWA assets"
 		)

@@ -767,9 +767,11 @@ static bool init_common(const Settings &cmd_args, int argc, char *argv[])
 {
 	startup_message();
 
-#ifndef __EMSCRIPTEN__
+	// WASM uses the in-process UDP queue (and optional WSS proxy). sockets_init()
+	// only flips the initialized flag there; it is required so UDPSocket::init()
+	// does not silently fail and later abort ConnectionSend with
+	// "Socket is not initialized".
 	sockets_init();
-#endif
 
 	// Initialize g_settings
 	set_default_settings();

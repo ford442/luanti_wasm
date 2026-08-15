@@ -32,6 +32,7 @@
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
 #include <emscripten.h>
+#include <emscripten/html5.h>
 #include <emscripten/html5_webgl.h>
 #endif
 
@@ -666,6 +667,12 @@ bool CIrrDeviceSDL::createWindowWithContext()
 	SDL_GL_ResetAttributes();
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	double css_w = 0, css_h = 0;
+	emscripten_get_element_css_size("#canvas", &css_w, &css_h);
+	if (css_w >= 2 && css_h >= 2) {
+		Width = (u32)css_w;
+		Height = (u32)css_h;
+	}
 	if (Width != 0 || Height != 0)
 		emscripten_set_canvas_element_size("#canvas", Width, Height);
 	else {
@@ -709,6 +716,8 @@ bool CIrrDeviceSDL::createWindowWithContext()
 	// entry points during shader setup, which map to WebGL 2.
 	attributes.majorVersion = 2;
 	attributes.enableExtensionsByDefault = true;
+	// PROXY_TO_PTHREAD never returns to the browser event loop, so frames
+	// only appear if we commit explicitly (see SwapWindow).
 	attributes.explicitSwapControl = true;
 	attributes.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_FALLBACK;
 
@@ -1277,6 +1286,20 @@ bool CIrrDeviceSDL::run()
 
 void CIrrDeviceSDL::updateSizeAndScale()
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	double css_w = 0, css_h = 0;
+	emscripten_get_element_css_size("#canvas", &css_w, &css_h);
+	if (css_w >= 2 && css_h >= 2) {
+		const int pw = (int)css_w;
+		const int ph = (int)css_h;
+		emscripten_set_canvas_element_size("#canvas", pw, ph);
+		Width = pw;
+		Height = ph;
+		ScaleX = 1.f;
+		ScaleY = 1.f;
+		return;
+	}
+#endif
 	int window_w, window_h;
 	SDL_GetWindowSize(Window, &window_w, &window_h);
 
@@ -1329,7 +1352,18 @@ float CIrrDeviceSDL::getDisplayDensity() const
 void CIrrDeviceSDL::SwapWindow()
 {
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-	emscripten_webgl_commit_frame();
+	if (Context) {
+		emscripten_webgl_make_context_current(
+			reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context));
+	}
+	const EMSCRIPTEN_RESULT rc = emscripten_webgl_commit_frame();
+	if (rc != EMSCRIPTEN_RESULT_SUCCESS) {
+		static bool logged = false;
+		if (!logged) {
+			logged = true;
+			os::Printer::log("emscripten_webgl_commit_frame failed", ELL_ERROR);
+		}
+	}
 #else
 	SDL_GL_SwapWindow(Window);
 #endif
@@ -1549,11 +1583,26 @@ bool CIrrDeviceSDL::isWindowMinimized() const
 
 bool CIrrDeviceSDL::showErrorMessageBox(SDL_Window *window, const char *title, const char *message)
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// PROXY_TO_PTHREAD runs the engine off the browser UI thread. SDL's
+	// Emscripten message box ends up calling alert(), which is missing in
+	// workers and aborts the process after the real error is logged.
+	MAIN_THREAD_EM_ASM({
+		const title = UTF8ToString($0);
+		const message = UTF8ToString($1);
+		const text = title + "\n\n" + message;
+		console.error(text);
+		if (typeof alert === "function")
+			alert(text);
+	}, title, message);
+	return true;
+#else
 	auto ret = SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message, window);
 #ifdef _IRR_USE_SDL3_
 	return ret;
 #else
 	return ret == 0;
+#endif
 #endif
 }
 

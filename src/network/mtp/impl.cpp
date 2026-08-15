@@ -1424,6 +1424,15 @@ void Connection::putCommand(ConnectionCommandPtr c)
 void Connection::Serve(Address bind_addr)
 {
 	putCommand(ConnectionCommand::serve(bind_addr));
+#ifdef __EMSCRIPTEN__
+	// Bind runs on ConnectionSend. Do not advertise "listening" or start the
+	// in-process client until the socket is actually registered, or the first
+	// handshake datagrams are dropped.
+	for (int i = 0; i < 400 && m_udpSocket.getBoundPort() == 0; ++i)
+		sleep_ms(5);
+	if (m_udpSocket.getBoundPort() == 0)
+		throw ConnectionBindFailed("Failed to bind socket (timeout waiting for bind)");
+#endif
 }
 
 void Connection::Connect(Address address)

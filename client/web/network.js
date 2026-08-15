@@ -294,7 +294,12 @@
 		},
 		"_send": function(handle, pointer, length, address, port) {
 			var link = links.get(handle);
-			if (!link || !configuredUrl)
+			if (!link) {
+				link = {"handle": handle, "port": 0, "state": "idle",
+					"ws": null, "queue": []};
+				links.set(handle, link);
+			}
+			if (!configuredUrl)
 				return false;
 			try {
 				var bytes = new Uint8Array(length);

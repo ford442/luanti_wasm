@@ -15,6 +15,7 @@ class OGLBufferObject
 public:
 	enum Target : GLenum {
 		TARGET_VBO = GL_ARRAY_BUFFER,
+		TARGET_IBO = GL_ELEMENT_ARRAY_BUFFER,
 		TARGET_UBO = GL_UNIFORM_BUFFER,
 	};
 
