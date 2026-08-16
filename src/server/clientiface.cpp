@@ -107,8 +107,13 @@ void RemoteClient::GetNextBlocks (
 		m_nearest_unsent_d = 0;
 	}
 
-	if (m_nothing_to_send_pause_timer >= 0)
+	// Only a *positive* remaining pause blocks sending. The default is 0.0f
+	// meaning "not paused". Using >= 0 made every dtime=0 server step (common
+	// on WASM when the clock/receive path yields 0) skip all mapblock sends.
+	if (m_nothing_to_send_pause_timer > 0.0f)
 		return;
+	if (m_nothing_to_send_pause_timer < 0.0f)
+		m_nothing_to_send_pause_timer = 0.0f;
 
 	RemotePlayer *player = env->getPlayer(peer_id);
 	// This can happen sometimes; clients and players are not in perfect sync.
@@ -630,7 +635,13 @@ void RemoteClient::setEncryptedPassword(const std::string& pwd)
 
 u64 RemoteClient::uptime() const
 {
-	return porting::getTimeS() - m_connection_time;
+	const u64 now = porting::getTimeS();
+	// Guard against clock underflow (seen under Emscripten pthreads when
+	// CLOCK_MONOTONIC samples regress slightly across threads). A wrapped
+	// u64 would look like "lingering for centuries" and disconnect Hello.
+	if (now < m_connection_time)
+		return 0;
+	return now - m_connection_time;
 }
 
 void RemoteClient::setVersionInfo(u8 major, u8 minor, u8 patch, const std::string &full)
@@ -715,6 +726,14 @@ void ClientInterface::step(float dtime)
 		auto state = it.second->getState();
 		if (state >= CS_InitDone)
 			continue;
+#ifdef __EMSCRIPTEN__
+		// In-browser singleplayer handshakes race the linger sweeper: the
+		// client can still be HelloSent while the application worker is busy
+		// booting content. Never cull pre-Active peers on WASM.
+		if (state == CS_Created || state == CS_HelloSent ||
+				state == CS_AwaitingInit2 || state == CS_DefinitionsSent)
+			continue;
+#endif
 		if (it.second->uptime() <= LINGER_TIMEOUT)
 			continue;
 		// Complain louder if this situation is unexpected
@@ -724,7 +743,8 @@ void ClientInterface::step(float dtime)
 			Address addr = m_con->GetPeerAddress(it.second->peer_id);
 			os << "Disconnecting lingering client from "
 				<< addr.serializeString() << " peer_id=" << it.second->peer_id
-				<< " (" << state2Name(state) << ")" << std::endl;
+				<< " (" << state2Name(state) << ") uptime="
+				<< it.second->uptime() << "s" << std::endl;
 			m_con->DisconnectPeer(it.second->peer_id);
 		} catch (con::PeerNotFoundException &e) {
 		}

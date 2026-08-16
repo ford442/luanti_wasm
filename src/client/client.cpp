@@ -647,6 +647,11 @@ void Client::step(float dtime)
 		Replace updated meshes
 	*/
 	{
+#ifdef __EMSCRIPTEN__
+		// Mesh worker pthreads often stall under PROXY_TO_PTHREAD. Generate a
+		// few meshes on the application worker so blocks get ACKed and drawn.
+		m_mesh_update_manager->processOnThisThread(4);
+#endif
 		int num_processed_meshes = 0;
 		std::vector<v3s16> blocks_to_ack;
 		bool force_update_shadows = false;
@@ -724,6 +729,21 @@ void Client::step(float dtime)
 
 		if (num_processed_meshes > 0)
 			g_profiler->graphAdd("num_processed_meshes", num_processed_meshes);
+
+#ifdef __EMSCRIPTEN__
+		{
+			static u32 s_dbg_frames = 0;
+			static u32 s_dbg_meshes = 0;
+			s_dbg_meshes += num_processed_meshes;
+			if ((++s_dbg_frames % 120) == 0) {
+				actionstream << "WASM map step: meshes_this_period="
+					<< s_dbg_meshes
+					<< " client_state=" << (int)m_state
+					<< std::endl;
+				s_dbg_meshes = 0;
+			}
+		}
+#endif
 
 		if (force_update_shadows && !g_settings->getFlag("performance_tradeoffs")) {
 			auto shadow = RenderingEngine::get_shadow_renderer();

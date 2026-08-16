@@ -134,7 +134,10 @@ void *ServerThread::run()
 	}
 	framemarker.end();
 
-	float dtime = 0.0f;
+	// Start with a positive step so the first AsyncRunStep is not a no-op.
+	// Under Emscripten, a zero dtime combined with the old
+	// m_nothing_to_send_pause_timer >= 0 check prevented all mapblock sends.
+	float dtime = 0.05f;
 
 	while (!stopRequested()) {
 		framemarker.start();
@@ -150,11 +153,19 @@ void *ServerThread::run()
 			if (dtime > step_settings.steplen + 0.001f)
 				m_server->yieldToOtherThreads(dtime);
 
-			m_server->AsyncRunStep(step_settings.pause ? 0.0f : dtime);
+			const float step_dtime = step_settings.pause ? 0.0f :
+					std::max(dtime, 1e-4f);
+			m_server->AsyncRunStep(step_dtime);
 
 			const float remaining_time = step_settings.steplen
 					- 1e-6f * (porting::getTimeUs() - t0);
+#ifdef __EMSCRIPTEN__
+			// Guarantee a minimum wait so the server thread cannot busy-spin
+			// when socket Receive() returns immediately with dtime≈0.
+			m_server->Receive(std::max(remaining_time, 0.005f));
+#else
 			m_server->Receive(remaining_time);
+#endif
 
 		} catch (con::PeerNotFoundException &e) {
 			infostream<<"Server: PeerNotFoundException"<<std::endl;
@@ -169,6 +180,8 @@ void *ServerThread::run()
 		}
 
 		dtime = 1e-6f * (porting::getTimeUs() - t0);
+		if (dtime <= 0.0f)
+			dtime = step_settings.steplen > 0.0f ? step_settings.steplen : 0.05f;
 		framemarker.end();
 	}
 
@@ -2611,6 +2624,22 @@ void Server::SendBlocks(float dtime)
 			unique_clients += queue.size() > old_count ? 1 : 0;
 		}
 	}
+#ifdef __EMSCRIPTEN__
+	{
+		static u32 s_log_i = 0;
+		if ((++s_log_i % 60) == 1) {
+			const auto all_clients = m_clients.getClientIDs(CS_Created);
+			const auto active = m_clients.getClientIDs(CS_Active);
+			actionstream << "WASM SendBlocks: dtime=" << dtime
+				<< " clients_all=" << all_clients.size()
+				<< " clients_active=" << active.size()
+				<< " queue=" << queue.size()
+				<< " sending=" << total_sending
+				<< " emerge_q=" << (m_emerge ? m_emerge->getQueueSize() : 0)
+				<< std::endl;
+		}
+	}
+#endif
 
 	// Sort.
 	// Lowest priority number comes first.

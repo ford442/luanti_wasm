@@ -820,11 +820,11 @@ if(BUILD_CLIENT)
 			-sFULL_ES2=1
 			-sMAX_WEBGL_VERSION=2
 			# Keep Luanti's synchronous launcher/game stack off the browser UI
-			# thread. Transfer the canvas to that worker where supported, with
-			# OFFSCREEN_FRAMEBUFFER retaining Emscripten's main-thread proxy as
-			# the fallback path.
+			# thread. GL is proxied to the browser main thread; OFFSCREEN_FRAMEBUFFER
+			# supplies the intermediate FBO that commit_frame presents. Do not
+			# enable OFFSCREENCANVAS_SUPPORT — transferring #canvas blanked the
+			# game under PROXY_TO_PTHREAD in practice.
 			-sPROXY_TO_PTHREAD=1
-			-sOFFSCREENCANVAS_SUPPORT=1
 			-sOFFSCREEN_FRAMEBUFFER=1
 			-sALLOW_MEMORY_GROWTH=1
 			-sINITIAL_MEMORY=268435456  # 256 MB

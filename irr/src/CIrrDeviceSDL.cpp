@@ -723,7 +723,11 @@ bool CIrrDeviceSDL::createWindowWithContext()
 	// PROXY_TO_PTHREAD never returns to the browser event loop, so frames
 	// only appear if we commit explicitly (see SwapWindow).
 	attributes.explicitSwapControl = true;
-	attributes.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_FALLBACK;
+	// Prefer main-thread WebGL proxy + OFFSCREEN_FRAMEBUFFER over transferring
+	// #canvas to an OffscreenCanvas. Transfer leaves a blank composited
+	// surface under headless/Chrome when Irrlicht binds FBO 0 directly.
+	attributes.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_ALWAYS;
+	attributes.renderViaOffscreenBackBuffer = true;
 
 	const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_context =
 		emscripten_webgl_create_context("#canvas", &attributes);
@@ -1368,23 +1372,36 @@ float CIrrDeviceSDL::getDisplayDensity() const
 void CIrrDeviceSDL::SwapWindow()
 {
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-	if (Context) {
-		emscripten_webgl_make_context_current(
-			reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context));
-	}
-	// Luanti's render pipeline may leave an intermediate FBO bound. Emscripten's
-	// offscreen commit only blits the default canvas framebuffer.
+	// Context was created with emscripten_webgl_create_context +
+	// explicitSwapControl. SDL_GL_SwapWindow does not present that path;
+	// emscripten_webgl_commit_frame must blit the default framebuffer.
+	const auto webgl = reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context);
+	if (webgl)
+		emscripten_webgl_make_context_current(webgl);
+
+	// Render pipeline steps may leave an intermediate FBO bound. Commit only
+	// presents the default canvas framebuffer.
 	if (VideoDriver)
 		VideoDriver->setRenderTargetEx(nullptr, video::ECBF_NONE);
-	SDL_GL_SwapWindow(Window);
-	// Chrome composes OFFSCREEN_FRAMEBUFFER only after the worker yields.
-	emscripten_thread_sleep(16);
-	MAIN_THREAD_EM_ASM({
-		var loading = document.getElementById("luanti-loading");
-		if (loading) {
-			loading.style.opacity = "0";
-			loading.style.pointerEvents = "none";
+
+	const EMSCRIPTEN_RESULT rc = emscripten_webgl_commit_frame();
+	if (rc != EMSCRIPTEN_RESULT_SUCCESS) {
+		static bool logged = false;
+		if (!logged) {
+			logged = true;
+			os::Printer::log("emscripten_webgl_commit_frame failed", ELL_ERROR);
 		}
+	}
+
+	// Yield so the browser main thread can composite OFFSCREEN_FRAMEBUFFER
+	// and run launcher status hooks. Keep this short — the game loop already
+	// runs on the application worker.
+	emscripten_thread_sleep(1);
+
+	// Only the launcher decides when to hide the loading shell (after the
+	// first gameplay frame). Do not force opacity here — that hid load
+	// progress and fought prepareCompositor.
+	MAIN_THREAD_EM_ASM({
 		var launcher = Module["luantiLauncher"];
 		if (launcher && typeof launcher["notifyFramePresented"] === "function")
 			launcher["notifyFramePresented"]();

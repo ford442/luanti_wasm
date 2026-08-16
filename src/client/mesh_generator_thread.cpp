@@ -288,7 +288,8 @@ void MeshUpdateWorkerThread::doUpdate()
 */
 
 MeshUpdateManager::MeshUpdateManager(Client *client):
-	m_queue_in(client)
+	m_queue_in(client),
+	m_client(client)
 {
 	int number_of_threads = rangelim(g_settings->getS32("mesh_generation_threads"), 0, 8);
 
@@ -298,6 +299,10 @@ MeshUpdateManager::MeshUpdateManager(Client *client):
 
 	// use at least one thread
 	number_of_threads = std::max(1, number_of_threads);
+#ifdef __EMSCRIPTEN__
+	// One worker is enough; main-thread processOnThisThread() is the safety net.
+	number_of_threads = 1;
+#endif
 	infostream << "MeshUpdateManager: using " << number_of_threads << " threads" << std::endl;
 
 	for (int i = 0; i < number_of_threads; i++)
@@ -406,4 +411,46 @@ bool MeshUpdateManager::isRunning()
 		if (thread->isRunning())
 			return true;
 	return false;
+}
+
+int MeshUpdateManager::processOneUnlocked()
+{
+	QueuedMeshUpdate *q = m_queue_in.pop();
+	if (!q)
+		return 0;
+
+	// Same path as MeshUpdateWorkerThread::doUpdate (without sleep).
+	MapBlockMesh *mesh_new = new MapBlockMesh(m_client, q->data);
+
+	MeshUpdateResult r;
+	r.p = q->p;
+	r.mesh = std::unique_ptr<MapBlockMesh>(mesh_new);
+	r.solid_sides = get_solid_sides(q->data);
+	r.ack_list = std::move(q->ack_list);
+	r.urgent = q->urgent;
+	r.map_blocks = std::move(q->map_blocks);
+
+	putResult(std::move(r));
+	m_queue_in.done(q->p);
+	delete q;
+	return 1;
+}
+
+int MeshUpdateManager::processOnThisThread(int max_items)
+{
+	int processed = 0;
+	max_items = std::max(0, max_items);
+	while (processed < max_items) {
+		if (!processOneUnlocked())
+			break;
+		processed++;
+	}
+	return processed;
+}
+
+size_t MeshUpdateManager::queuedCount() const
+{
+	// MeshUpdateQueue has no public size; approximate via try-pop is unsafe.
+	// Expose 0 here; diagnostics use process/result counters instead.
+	return 0;
 }

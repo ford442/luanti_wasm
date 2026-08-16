@@ -165,14 +165,23 @@ public:
 
 	bool isRunning();
 
+	// Process up to max_items mesh jobs on the calling thread. Used on
+	// Emscripten when worker mesh threads stall under PROXY_TO_PTHREAD.
+	int processOnThisThread(int max_items);
+
+	// Queue depth for diagnostics (approximate, lock-free best effort).
+	size_t queuedCount() const;
+
 private:
 	typedef MutexedQueue<MeshUpdateResult> ResultQueue;
 
 	void deferUpdate();
+	int processOneUnlocked();
 
 	MeshUpdateQueue m_queue_in;
 	ResultQueue m_queue_out;
 	ResultQueue m_queue_out_urgent;
 
 	std::vector<std::unique_ptr<MeshUpdateWorkerThread>> m_workers;
+	Client *m_client;
 };

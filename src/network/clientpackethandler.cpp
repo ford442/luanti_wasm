@@ -34,6 +34,7 @@
 #include "gettext.h"
 #include "skyparams.h"
 #include "particles.h"
+#include <atomic>
 #include <memory>
 #include <sstream>
 
@@ -340,6 +341,16 @@ void Client::handleCommand_BlockData(NetworkPacket* pkt)
 		Add it to mesh update queue and set it to be acknowledged after update.
 	*/
 	addUpdateMeshTaskWithEdge(p, true);
+
+#ifdef __EMSCRIPTEN__
+	{
+		static std::atomic<u32> s_blocks_received{0};
+		const u32 n = s_blocks_received.fetch_add(1) + 1;
+		if (n <= 8 || (n % 50) == 0)
+			actionstream << "WASM received mapblock " << p << " (total=" << n << ")"
+				<< std::endl;
+	}
+#endif
 }
 
 void Client::handleCommand_Inventory(NetworkPacket* pkt)

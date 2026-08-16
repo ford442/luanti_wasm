@@ -51,6 +51,8 @@ bool CSDLManager::activateContext(const SExposedVideoData &videoData, bool resto
 void *CSDLManager::getProcAddress(const std::string &procName)
 {
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// Returns Emscripten's GL wrappers (not raw WebGL), which remap FBO 0 to
+	// the OFFSCREEN_FRAMEBUFFER backing store when that path is active.
 	return emscripten_webgl_get_proc_address(procName.c_str());
 #else
 	return (void *)SDL_GL_GetProcAddress(procName.c_str());

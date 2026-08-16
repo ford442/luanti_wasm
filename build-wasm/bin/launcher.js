@@ -13,6 +13,7 @@
 	var activePhase = "assets";
 	var currentSession = null;
 	var hadPointerLock = false;
+	var loadingShellDismissed = false;
 	var logs = [];
 
 	function element(id) {
@@ -94,6 +95,24 @@
 		ui.loadingProgress.style.width = Math.max(2, Math.min(100, value)) + "%";
 	}
 
+	function dismissLoadingShell() {
+		if (!ui.loading || loadingShellDismissed)
+			return;
+		loadingShellDismissed = true;
+		// Keep the node in the layout tree (OFFSCREEN_FRAMEBUFFER compositing)
+		// but never cover the canvas again for this session.
+		ui.loading.style.opacity = "0";
+		ui.loading.style.pointerEvents = "none";
+	}
+
+	function showLoadingShell() {
+		if (!ui.loading || loadingShellDismissed)
+			return;
+		ui.loading.hidden = false;
+		ui.loading.style.opacity = "1";
+		ui.loading.style.pointerEvents = "";
+	}
+
 	function reportStatus(message, percent, phase) {
 		if (phase)
 			activePhase = phase;
@@ -103,21 +122,25 @@
 			"engine": "Starting engine",
 			"menu": "Main menu",
 			"loading": "Loading world",
-			"playing": "World ready"
+			"playing": "Entering world"
 		};
-		ui.loadingPhase.textContent = phaseLabels[activePhase] || activePhase;
-		if (message)
-			ui.loadingStatus.textContent = message;
-		setProgress(percent);
+		if (!loadingShellDismissed) {
+			ui.loadingPhase.textContent = phaseLabels[activePhase] || activePhase;
+			if (message)
+				ui.loadingStatus.textContent = message;
+			setProgress(percent);
+		}
 		if (started && (activePhase === "engine" || activePhase === "loading"))
-			ui.loading.hidden = false;
+			showLoadingShell();
 		if (activePhase === "menu") {
 			ui.loading.hidden = true;
 			ui.share.hidden = true;
 		}
 		if (activePhase === "playing") {
-			// Defer hiding until the engine reports its first presented frame.
-			// Hiding immediately breaks OFFSCREEN_FRAMEBUFFER compositing on Chrome.
+			// Dismiss as soon as the engine enters the game loop. Waiting for
+			// the first GL commit left a full-screen "World ready" panel that
+			// flickered against the canvas whenever status/frame hooks raced.
+			dismissLoadingShell();
 			ui.share.hidden = false;
 			ui.share.textContent = currentSession && currentSession.mode === "remote" ?
 				"Copy invite link" : "Copy launcher link";
@@ -127,26 +150,21 @@
 	Module["luantiLauncher"] = {
 		"reportEngineStatus": reportStatus,
 		"prepareCompositor": function(percent) {
-			if (ui.loading) {
-				ui.loading.hidden = false;
-				ui.loading.style.opacity = "1";
-			}
-			setProgress(percent);
+			// Never re-show the shell. Progress only.
+			if (!loadingShellDismissed)
+				setProgress(percent);
 		},
 		"notifyFramePresented": function() {
-			if (started && activePhase === "playing" && ui.loading) {
-				// Keep the element in the layout tree for Chrome's offscreen
-				// compositor, but make it invisible to the player.
-				ui.loading.style.opacity = "0";
-				ui.loading.style.pointerEvents = "none";
-			}
+			if (started && activePhase === "playing")
+				dismissLoadingShell();
 		},
 		"getState": function() {
 			return {
 				"runtimeReady": runtimeReady,
 				"started": started,
 				"phase": activePhase,
-				"mode": currentSession ? currentSession.mode : activeMode
+				"mode": currentSession ? currentSession.mode : activeMode,
+				"loadingDismissed": loadingShellDismissed
 			};
 		}
 	};
@@ -497,7 +515,12 @@
 
 	if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
 		window.addEventListener("load", function() {
-			navigator.serviceWorker.register("service-worker.js", {scope: "./"}).catch(function(error) {
+			navigator.serviceWorker.register("service-worker.js", {scope: "./"}).then(function(registration) {
+				// Pull a fresh worker so network-first engine assets can replace
+				// an older cache-first registration from prior builds.
+				if (registration && registration.update)
+					registration.update();
+			}).catch(function(error) {
 				appendLog("service-worker", [error]);
 			});
 		});

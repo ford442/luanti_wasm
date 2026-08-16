@@ -87,28 +87,14 @@ void emscripten_service_browser_frame()
 
 void emscripten_prepare_canvas_present()
 {
-	static std::uint64_t frame = 0;
-	const int percent = static_cast<int>((++frame % 98) + 2);
-	MAIN_THREAD_EM_ASM({
-		var loading = document.getElementById("luanti-loading");
-		if (loading) {
-			loading.hidden = false;
-			loading.style.opacity = "1";
-		}
-		var launcher = Module["luantiLauncher"];
-		if (launcher && typeof launcher["prepareCompositor"] === "function")
-			launcher["prepareCompositor"]($0);
-	}, percent);
+	// Intentionally empty. Re-showing the loading shell every frame fought
+	// frame presentation and left the UI stuck on "World ready". Commit happens
+	// in CIrrDeviceSDL::SwapWindow via emscripten_webgl_commit_frame().
 }
 
 void emscripten_finish_canvas_present()
 {
 	MAIN_THREAD_EM_ASM({
-		var loading = document.getElementById("luanti-loading");
-		if (loading) {
-			loading.style.opacity = "0";
-			loading.style.pointerEvents = "none";
-		}
 		var launcher = Module["luantiLauncher"];
 		if (launcher && typeof launcher["notifyFramePresented"] === "function")
 			launcher["notifyFramePresented"]();

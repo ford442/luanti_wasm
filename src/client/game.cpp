@@ -492,7 +492,7 @@ void Game::run()
 	draw_times.reset();
 
 	set_light_curve(g_settings->getFloat("display_gamma"));
-	porting::emscripten_report_status("World ready", 100, "playing");
+	porting::emscripten_report_status("Entering world…", 100, "playing");
 	actionstream << "World ready; entering game loop" << std::endl;
 
 	m_touch_simulate_aux1 = g_settings->getBool("fast_move")
@@ -3700,10 +3700,6 @@ void Game::drawScene(ProfilerGraph *graph, RunStats *stats)
 	const video::SColor fog_color = this->sky->getFogColor();
 	const video::SColor sky_color = this->sky->getSkyColor();
 
-#ifdef __EMSCRIPTEN__
-	porting::emscripten_prepare_canvas_present();
-	this->driver->setFog(sky_color);
-#else
 	/*
 		Fog
 	*/
@@ -3728,7 +3724,6 @@ void Game::drawScene(ProfilerGraph *graph, RunStats *stats)
 				false // range fog
 		);
 	}
-#endif
 
 	/*
 		Drawing

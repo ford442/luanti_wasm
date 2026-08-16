@@ -22,8 +22,8 @@ enum class EmscriptenPersistenceReason : std::uint8_t {
 // application worker. Fail early if the browser build contract regresses.
 void emscripten_validate_main_loop();
 void emscripten_service_browser_frame();
-// Chrome only composites OFFSCREEN_FRAMEBUFFER commits while the loading shell
-// participates in the main-thread render pass. Call once per frame before drawing.
+// Legacy hooks kept for call sites. Presentation is handled in
+// CIrrDeviceSDL::SwapWindow (emscripten_webgl_commit_frame + launcher notify).
 void emscripten_prepare_canvas_present();
 void emscripten_finish_canvas_present();
 // Send human-readable engine loading state to the browser launcher. Phase is a

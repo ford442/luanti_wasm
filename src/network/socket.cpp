@@ -237,14 +237,22 @@ void UDPSocket::Send(const Address &destination, const void *data, int size)
 				std::lock_guard<std::mutex> lock(target->mutex);
 				if (target->closed)
 					return;
-				if (target->receive_queue.size() >= 1024)
+				// Mapblock traffic needs headroom; 1024 was too small and
+				// silently dropped reliable fragments under load.
+				constexpr size_t kMaxQueue = 16384;
+				if (target->receive_queue.size() >= kMaxQueue) {
 					target->receive_queue.pop_front();
+					static std::atomic<int> drops{0};
+					if (drops.fetch_add(1) < 8)
+						warningstream << "Loopback UDP receive queue full; dropping oldest"
+							<< std::endl;
+				}
 				target->receive_queue.emplace_back(std::move(datagram));
 			}
 			target->event.notify_one();
 			static std::atomic<int> loopback_sends{0};
 			int n = loopback_sends.fetch_add(1, std::memory_order_relaxed);
-			if (n < 8) {
+			if (n < 16) {
 				actionstream << "Loopback UDP " << m_bound_port
 					<< " -> " << destination.getPort()
 					<< " (" << size << " bytes)" << std::endl;
