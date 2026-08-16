@@ -302,11 +302,17 @@ protected:
 	void drawArrays(GLenum primitiveType, const VertexType &vertexType, const void *vertices, int vertexCount);
 	void drawElements(GLenum primitiveType, const VertexType &vertexType, const void *vertices, int vertexCount, const u16 *indices, int indexCount);
 
-	void drawGeneric(const void *vertices, const void *indexList, u32 primitiveCount,
+	void drawGeneric(const void *vertices, u32 vertexCount, const void *indexList, u32 primitiveCount,
 		E_VERTEX_TYPE vType, scene::E_PRIMITIVE_TYPE pType, E_INDEX_TYPE iType);
 
 	void beginDraw(const VertexType &vertexType, uintptr_t verticesBase);
 	void endDraw(const VertexType &vertexType);
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	void bindClientVertexBuffer(const void *vertices, u32 vertexCount, u32 vertexSize);
+	void bindClientIndexBuffer(const void *indices, u32 indexCount, GLenum indexType);
+	void resetVertexInputState();
+#endif
 
 	COpenGL3CacheHandler *CacheHandler;
 	core::stringc Name;
@@ -359,6 +365,11 @@ private:
 	OGLBufferObject QuadIndexVBO = OGLBufferObject(OGLBufferObject::TARGET_IBO);
 	std::vector<u16> QuadsIndices;
 	void initQuadsIndices(u32 max_vertex_count = 65536);
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	OGLBufferObject ClientVertexVBO = OGLBufferObject(OGLBufferObject::TARGET_VBO);
+	OGLBufferObject ClientIndexVBO = OGLBufferObject(OGLBufferObject::TARGET_IBO);
+#endif
 
 	u16 MaxJointTransforms = 0;
 	void initMaxJointTransforms();
