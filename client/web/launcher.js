@@ -513,9 +513,22 @@
 
 	if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
 		window.addEventListener("load", function() {
-			navigator.serviceWorker.register("service-worker.js", {scope: "./"}).then(function(registration) {
-				// Pull a fresh worker so network-first engine assets can replace
-				// an older cache-first registration from prior builds.
+			// Drop every previous registration/cache first. An older worker
+			// intercepted index.html + luanti.wasm and, on fetch failure,
+			// replayed a stale engine (6f0f902 + WASM SendBlocks logs).
+			var ready = navigator.serviceWorker.getRegistrations().then(function(regs) {
+				return Promise.all(regs.map(function(reg) { return reg.unregister(); }));
+			}).then(function() {
+				if (!window.caches || !caches.keys)
+					return;
+				return caches.keys().then(function(keys) {
+					return Promise.all(keys.map(function(key) { return caches.delete(key); }));
+				});
+			});
+			ready.then(function() {
+				return navigator.serviceWorker.register(
+					"service-worker.js?v=20260816g", {scope: "./"});
+			}).then(function(registration) {
 				if (registration && registration.update)
 					registration.update();
 			}).catch(function(error) {

@@ -730,21 +730,6 @@ void Client::step(float dtime)
 		if (num_processed_meshes > 0)
 			g_profiler->graphAdd("num_processed_meshes", num_processed_meshes);
 
-#ifdef __EMSCRIPTEN__
-		{
-			static u32 s_dbg_frames = 0;
-			static u32 s_dbg_meshes = 0;
-			s_dbg_meshes += num_processed_meshes;
-			if ((++s_dbg_frames % 120) == 0) {
-				actionstream << "WASM map step: meshes_this_period="
-					<< s_dbg_meshes
-					<< " client_state=" << (int)m_state
-					<< std::endl;
-				s_dbg_meshes = 0;
-			}
-		}
-#endif
-
 		if (force_update_shadows && !g_settings->getFlag("performance_tradeoffs")) {
 			auto shadow = RenderingEngine::get_shadow_renderer();
 			if (shadow)

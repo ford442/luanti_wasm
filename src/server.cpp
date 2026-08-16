@@ -2624,23 +2624,6 @@ void Server::SendBlocks(float dtime)
 			unique_clients += queue.size() > old_count ? 1 : 0;
 		}
 	}
-#ifdef __EMSCRIPTEN__
-	{
-		static u32 s_log_i = 0;
-		if ((++s_log_i % 60) == 1) {
-			const auto all_clients = m_clients.getClientIDs(CS_Created);
-			const auto active = m_clients.getClientIDs(CS_Active);
-			actionstream << "WASM SendBlocks: dtime=" << dtime
-				<< " clients_all=" << all_clients.size()
-				<< " clients_active=" << active.size()
-				<< " queue=" << queue.size()
-				<< " sending=" << total_sending
-				<< " emerge_q=" << (m_emerge ? m_emerge->getQueueSize() : 0)
-				<< std::endl;
-		}
-	}
-#endif
-
 	// Sort.
 	// Lowest priority number comes first.
 	// Lowest is most important.

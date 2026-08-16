@@ -47,6 +47,7 @@
 #endif
 
 #ifdef __EMSCRIPTEN__
+#include <emscripten.h>
 #include <emscripten/threading.h>
 #undef sleep_ms
 #undef sleep_us
@@ -158,6 +159,17 @@ inline u64 getTimeS() { return os_get_time(1); }
 inline u64 getTimeMs() { return os_get_time(1000); }
 inline u64 getTimeUs() { return os_get_time(1000*1000); }
 inline u64 getTimeNs() { return os_get_time(1000*1000*1000); }
+
+#elif defined(__EMSCRIPTEN__)
+
+// clock_gettime(CLOCK_MONOTONIC_RAW) is defined but not reliable on
+// Emscripten pthreads: it can fail (uninitialized timespec) or jump
+// between worker clocks. That makes TimeTaker report multi-year ABM
+// durations and sends shader animationTimer through the roof.
+inline u64 getTimeS() { return (u64)(emscripten_get_now() / 1000.0); }
+inline u64 getTimeMs() { return (u64)emscripten_get_now(); }
+inline u64 getTimeUs() { return (u64)(emscripten_get_now() * 1000.0); }
+inline u64 getTimeNs() { return (u64)(emscripten_get_now() * 1000000.0); }
 
 #else // POSIX
 

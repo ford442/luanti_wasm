@@ -78,6 +78,10 @@ void emscripten_validate_main_loop()
 
 	emscripten_log(EM_LOG_CONSOLE,
 			"Luanti: synchronous engine loop running on an application worker");
+	emscripten_log(EM_LOG_CONSOLE,
+			"Luanti: clock=emscripten_get_now t_ms=%.3f getTimeMs=%llu",
+			emscripten_get_now(),
+			(unsigned long long)porting::getTimeMs());
 }
 
 void emscripten_service_browser_frame()
