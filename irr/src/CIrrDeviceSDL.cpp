@@ -968,35 +968,40 @@ bool CIrrDeviceSDL::run()
 			irrevent.MouseInput.Event = EMIE_MOUSE_MOVED;
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-			// SDL-emscripten scales xrel/yrel by window/css independently on
-			// each axis. Undo that so yaw and pitch share CSS-pixel units.
-			int window_w = 0, window_h = 0;
-			SDL_GetWindowSize(Window, &window_w, &window_h);
-			const f32 undo_x = (window_w > 0) ? ((f32)Width / (f32)window_w) : 1.f;
-			const f32 undo_y = (window_h > 0) ? ((f32)Height / (f32)window_h) : 1.f;
-			MouseXRel = static_cast<s32>(SDL_event.motion.xrel * undo_x);
-			MouseYRel = static_cast<s32>(SDL_event.motion.yrel * undo_y);
+			// Pointer-lock movementX/Y is already in CSS pixels, matching
+			// Width/Height. Do not rescale by SDL window size: CreateWindow
+			// often keeps a 1024×600 window while the canvas CSS box is the
+			// full viewport, which multiplied yaw/pitch by ~2×.
+			MouseXRel = SDL_event.motion.xrel;
+			MouseYRel = SDL_event.motion.yrel;
+			EmscriptenPointerlockChangeEvent pointerlock{};
+			const bool pointer_locked =
+					emscripten_get_pointerlock_status(&pointerlock) ==
+							EMSCRIPTEN_RESULT_SUCCESS &&
+					pointerlock.isActive;
+			if (pointer_locked || SDL_GetRelativeMouseMode()) {
+				MouseX += MouseXRel;
+				MouseY += MouseYRel;
+			} else {
+				MouseX = SDL_event.motion.x;
+				MouseY = SDL_event.motion.y;
+			}
 #else
 			MouseXRel = static_cast<s32>(SDL_event.motion.xrel * ScaleX);
 			MouseYRel = static_cast<s32>(SDL_event.motion.yrel * ScaleY);
-#endif
 #ifdef _IRR_USE_SDL3_
 			if (!SDL_GetWindowRelativeMouseMode(Window))
 #else
 			if (!SDL_GetRelativeMouseMode())
 #endif
 			{
-#ifdef _IRR_EMSCRIPTEN_PLATFORM_
-				MouseX = static_cast<s32>(SDL_event.motion.x * undo_x);
-				MouseY = static_cast<s32>(SDL_event.motion.y * undo_y);
-#else
 				MouseX = static_cast<s32>(SDL_event.motion.x * ScaleX);
 				MouseY = static_cast<s32>(SDL_event.motion.y * ScaleY);
-#endif
 			} else {
 				MouseX += MouseXRel;
 				MouseY += MouseYRel;
 			}
+#endif
 			irrevent.MouseInput.X = MouseX;
 			irrevent.MouseInput.Y = MouseY;
 

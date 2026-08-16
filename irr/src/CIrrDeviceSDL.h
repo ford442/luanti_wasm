@@ -176,28 +176,36 @@ public:
 		//! Sets the new position of the cursor.
 		void setPosition(s32 x, s32 y) override
 		{
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(_IRR_EMSCRIPTEN_PLATFORM_)
 			// On Android, this somehow results in a camera jump when enabling
 			// relative mouse mode and it isn't supported anyway.
+			// On Emscripten, pointer lock has no cursor to warp; SDL_WarpMouse
+			// injects a huge relative mousemove (CSS box → center) that the
+			// look code then applies on top of the real movementX delta.
 			SDL_WarpMouseInWindow(Device->Window,
 					static_cast<int>(x / Device->ScaleX),
 					static_cast<int>(y / Device->ScaleY));
 #endif
-#ifdef _IRR_USE_SDL3_
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+			// Always record the warp. getPosition(true) copies MouseX/Y over
+			// CursorPos, so only updating CursorPos left the previous offset
+			// in place and look was re-applied every game-loop iteration.
+			Device->MouseX = x;
+			Device->MouseY = y;
+			CursorPos.X = x;
+			CursorPos.Y = y;
+#elif defined(_IRR_USE_SDL3_)
 			if (SDL_GetWindowRelativeMouseMode(Device->Window)) {
-#else
-			if (SDL_GetRelativeMouseMode()) {
-#endif
 				// There won't be an event for this warp (details on libsdl-org/SDL/issues/6034)
 				Device->MouseX = x;
 				Device->MouseY = y;
 			}
-#ifdef _IRR_EMSCRIPTEN_PLATFORM_
-			// Pointer-lock look warps to the screen center each frame. The
-			// Emscripten cursor path must follow that warp or pitch/yaw keep
-			// the previous CSS-box offset (aspect-ratio "crossed" sensitivity).
-			CursorPos.X = x;
-			CursorPos.Y = y;
+#else
+			if (SDL_GetRelativeMouseMode()) {
+				// There won't be an event for this warp (details on libsdl-org/SDL/issues/6034)
+				Device->MouseX = x;
+				Device->MouseY = y;
+			}
 #endif
 		}
 
