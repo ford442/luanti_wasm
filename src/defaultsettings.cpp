@@ -316,7 +316,13 @@ void set_default_settings()
 	settings->setDefault("minimap_double_scan_height", "true");
 
 	// Effects
+#ifndef __EMSCRIPTEN__
 	settings->setDefault("enable_post_processing", "true");
+#else
+	// PP render targets are not reliably presented through Emscripten's
+	// offscreen framebuffer commit path yet.
+	settings->setDefault("enable_post_processing", "false");
+#endif
 	settings->setDefault("post_processing_texture_bits", "10");
 	settings->setDefault("directional_colored_fog", "true");
 	settings->setDefault("inventory_items_animations", "false");

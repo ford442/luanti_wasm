@@ -116,16 +116,31 @@
 			ui.share.hidden = true;
 		}
 		if (activePhase === "playing") {
-			ui.loading.hidden = true;
+			// Defer hiding until the engine reports its first presented frame.
+			// Hiding immediately breaks OFFSCREEN_FRAMEBUFFER compositing on Chrome.
 			ui.share.hidden = false;
 			ui.share.textContent = currentSession && currentSession.mode === "remote" ?
 				"Copy invite link" : "Copy launcher link";
-			Module.canvas.focus();
 		}
 	}
 
 	Module["luantiLauncher"] = {
 		"reportEngineStatus": reportStatus,
+		"prepareCompositor": function(percent) {
+			if (ui.loading) {
+				ui.loading.hidden = false;
+				ui.loading.style.opacity = "1";
+			}
+			setProgress(percent);
+		},
+		"notifyFramePresented": function() {
+			if (started && activePhase === "playing" && ui.loading) {
+				// Keep the element in the layout tree for Chrome's offscreen
+				// compositor, but make it invisible to the player.
+				ui.loading.style.opacity = "0";
+				ui.loading.style.pointerEvents = "none";
+			}
+		},
 		"getState": function() {
 			return {
 				"runtimeReady": runtimeReady,
@@ -288,6 +303,26 @@
 		return args;
 	}
 
+	function syncCanvasBackingStore() {
+		var canvas = Module.canvas;
+		if (!canvas)
+			return;
+		var rect = canvas.getBoundingClientRect();
+		var width = Math.max(1, Math.round(rect.width));
+		var height = Math.max(1, Math.round(rect.height));
+
+		// OFFSCREEN_FRAMEBUFFER + PROXY_TO_PTHREAD transfers the canvas to a
+		// worker. The main thread must not touch canvas.width/height afterward;
+		// CIrrDeviceSDL resizes via emscripten_set_canvas_element_size().
+		if (canvas.controlTransferredOffscreen)
+			return;
+
+		if (canvas.width !== width || canvas.height !== height) {
+			canvas.width = width;
+			canvas.height = height;
+		}
+	}
+
 	function unlockAudio() {
 		try {
 			if (typeof window.AudioContext !== "undefined" || typeof window.webkitAudioContext !== "undefined") {
@@ -324,6 +359,7 @@
 			ui.play.disabled = true;
 			ui.launcher.hidden = true;
 			ui.gameShell.hidden = false;
+			syncCanvasBackingStore();
 			reportStatus("Starting Luanti…", 4, "engine");
 			Module["callMain"](argumentsForSession(session));
 		} catch (error) {
@@ -432,6 +468,8 @@
 			ui.resume.hidden = false;
 		}
 	});
+
+	window.addEventListener("resize", syncCanvasBackingStore);
 
 	Module.canvas.addEventListener("click", function() {
 		unlockAudio();

@@ -46,6 +46,14 @@
 	#define sleep_us(x) usleep(x)
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/threading.h>
+#undef sleep_ms
+#undef sleep_us
+#define sleep_ms(x) emscripten_thread_sleep(x)
+#define sleep_us(x) emscripten_thread_sleep(((x) + 999) / 1000)
+#endif
+
 #ifdef _MSC_VER
 	#define strtok_r(x, y, z) strtok_s(x, y, z)
 	#define strtof(x, y) (float)strtod(x, y)
@@ -231,6 +239,11 @@ inline void preciseSleepUs(u64 sleep_time)
 {
 	if (sleep_time > 0)
 	{
+#ifdef __EMSCRIPTEN__
+		// Busy-waiting for monotonic time can stall forever on the
+		// PROXY_TO_PTHREAD application worker after WebGL presentation.
+		sleep_us(sleep_time);
+#else
 		u64 target_time = porting::getTimeUs() + sleep_time;
 		if (sleep_time > SLEEP_ACCURACY_US)
 			sleep_us(sleep_time - SLEEP_ACCURACY_US);
@@ -239,6 +252,7 @@ inline void preciseSleepUs(u64 sleep_time)
 		// The target - now > 0 construct will handle overflow gracefully (even though it should
 		// never happen)
 		while ((s64)(target_time - porting::getTimeUs()) > 0) {}
+#endif
 	}
 }
 

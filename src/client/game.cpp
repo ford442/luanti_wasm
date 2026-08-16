@@ -520,7 +520,11 @@ void Game::run()
 		// Calculate dtime =
 		//    m_rendering_engine->run() from this iteration
 		//  + Sleep time until the wanted FPS are reached
+#ifdef __EMSCRIPTEN__
+		dtime = 0.016f;
+#else
 		draw_times.limit(device, &dtime);
+#endif
 
 		framemarker.start();
 
@@ -3696,6 +3700,10 @@ void Game::drawScene(ProfilerGraph *graph, RunStats *stats)
 	const video::SColor fog_color = this->sky->getFogColor();
 	const video::SColor sky_color = this->sky->getSkyColor();
 
+#ifdef __EMSCRIPTEN__
+	porting::emscripten_prepare_canvas_present();
+	this->driver->setFog(sky_color);
+#else
 	/*
 		Fog
 	*/
@@ -3720,6 +3728,7 @@ void Game::drawScene(ProfilerGraph *graph, RunStats *stats)
 				false // range fog
 		);
 	}
+#endif
 
 	/*
 		Drawing
@@ -3761,6 +3770,10 @@ void Game::drawScene(ProfilerGraph *graph, RunStats *stats)
 					core::rect<s32>(0, 0, screensize.X, screensize.Y),
 					NULL);
 	}
+
+#ifdef __EMSCRIPTEN__
+	this->driver->setRenderTargetEx(nullptr, video::ECBF_NONE);
+#endif
 
 	this->driver->endScene();
 

@@ -85,6 +85,36 @@ void emscripten_service_browser_frame()
 	emscripten_service_persistence();
 }
 
+void emscripten_prepare_canvas_present()
+{
+	static std::uint64_t frame = 0;
+	const int percent = static_cast<int>((++frame % 98) + 2);
+	MAIN_THREAD_EM_ASM({
+		var loading = document.getElementById("luanti-loading");
+		if (loading) {
+			loading.hidden = false;
+			loading.style.opacity = "1";
+		}
+		var launcher = Module["luantiLauncher"];
+		if (launcher && typeof launcher["prepareCompositor"] === "function")
+			launcher["prepareCompositor"]($0);
+	}, percent);
+}
+
+void emscripten_finish_canvas_present()
+{
+	MAIN_THREAD_EM_ASM({
+		var loading = document.getElementById("luanti-loading");
+		if (loading) {
+			loading.style.opacity = "0";
+			loading.style.pointerEvents = "none";
+		}
+		var launcher = Module["luantiLauncher"];
+		if (launcher && typeof launcher["notifyFramePresented"] === "function")
+			launcher["notifyFramePresented"]();
+	});
+}
+
 void emscripten_report_status(const std::string &message, int percent,
 		const char *phase)
 {

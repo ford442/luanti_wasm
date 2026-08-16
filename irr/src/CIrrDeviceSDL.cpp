@@ -34,6 +34,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <emscripten/html5_webgl.h>
+#include <emscripten/threading.h>
 #endif
 
 #include "CSDLManager.h"
@@ -673,9 +674,12 @@ bool CIrrDeviceSDL::createWindowWithContext()
 		Width = (u32)css_w;
 		Height = (u32)css_h;
 	}
-	if (Width != 0 || Height != 0)
-		emscripten_set_canvas_element_size("#canvas", Width, Height);
-	else {
+	if (Width != 0 || Height != 0) {
+		int canvas_w = 0, canvas_h = 0;
+		emscripten_get_canvas_element_size("#canvas", &canvas_w, &canvas_h);
+		if (canvas_w != (int)Width || canvas_h != (int)Height)
+			emscripten_set_canvas_element_size("#canvas", Width, Height);
+	} else {
 		int w, h;
 		emscripten_get_canvas_element_size("#canvas", &w, &h);
 		Width = w;
@@ -889,6 +893,16 @@ static int wrap_PollEvent(SDL_Event *ev)
 bool CIrrDeviceSDL::run()
 {
 	os::Timer::tick();
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// The canvas backing store tracks CSS size; resize can happen after the
+	// WebGL context is created (launcher shell reveal, window resize).
+	const u32 old_w = Width;
+	const u32 old_h = Height;
+	updateSizeAndScale();
+	if (VideoDriver && (old_w != Width || old_h != Height))
+		VideoDriver->OnResize(core::dimension2d<u32>(Width, Height));
+#endif
 
 	SEvent irrevent;
 	SDL_Event SDL_event;
@@ -1292,9 +1306,11 @@ void CIrrDeviceSDL::updateSizeAndScale()
 	if (css_w >= 2 && css_h >= 2) {
 		const int pw = (int)css_w;
 		const int ph = (int)css_h;
-		emscripten_set_canvas_element_size("#canvas", pw, ph);
-		Width = pw;
-		Height = ph;
+		if (pw != (int)Width || ph != (int)Height) {
+			emscripten_set_canvas_element_size("#canvas", pw, ph);
+			Width = pw;
+			Height = ph;
+		}
 		ScaleX = 1.f;
 		ScaleY = 1.f;
 		return;
@@ -1356,14 +1372,23 @@ void CIrrDeviceSDL::SwapWindow()
 		emscripten_webgl_make_context_current(
 			reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context));
 	}
-	const EMSCRIPTEN_RESULT rc = emscripten_webgl_commit_frame();
-	if (rc != EMSCRIPTEN_RESULT_SUCCESS) {
-		static bool logged = false;
-		if (!logged) {
-			logged = true;
-			os::Printer::log("emscripten_webgl_commit_frame failed", ELL_ERROR);
+	// Luanti's render pipeline may leave an intermediate FBO bound. Emscripten's
+	// offscreen commit only blits the default canvas framebuffer.
+	if (VideoDriver)
+		VideoDriver->setRenderTargetEx(nullptr, video::ECBF_NONE);
+	SDL_GL_SwapWindow(Window);
+	// Chrome composes OFFSCREEN_FRAMEBUFFER only after the worker yields.
+	emscripten_thread_sleep(16);
+	MAIN_THREAD_EM_ASM({
+		var loading = document.getElementById("luanti-loading");
+		if (loading) {
+			loading.style.opacity = "0";
+			loading.style.pointerEvents = "none";
 		}
-	}
+		var launcher = Module["luantiLauncher"];
+		if (launcher && typeof launcher["notifyFramePresented"] === "function")
+			launcher["notifyFramePresented"]();
+	});
 #else
 	SDL_GL_SwapWindow(Window);
 #endif
@@ -1540,7 +1565,17 @@ bool CIrrDeviceSDL::setFullscreen(bool fullscreen)
 
 bool CIrrDeviceSDL::isWindowVisible() const
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// SDL's background events are unreliable in browsers and can leave
+	// IsInBackground set while the tab is still visible. Game::run() skips
+	// all drawing when this returns false, which leaves a blank canvas.
+	EmscriptenVisibilityChangeEvent emVisibility;
+	if (emscripten_get_visibility_status(&emVisibility) == EMSCRIPTEN_RESULT_SUCCESS)
+		return !emVisibility.hidden;
+	return true;
+#else
 	return !IsInBackground;
+#endif
 }
 
 //! Checks if the Irrlicht device supports touch events.
