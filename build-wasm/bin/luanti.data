@@ -146365,7 +146365,263 @@ devtest_dungeon_mossycobble (Generate mossy cobblestone) bool false
 
 # If enabled, some very basic biomes will be registered.
 devtest_register_biomes (Register biomes) bool true
+title = Flower Island
+description = A small grassy island in the ocean. Plants on the lawn form a six-petal flower.
+default_mapgen = singlenode
+disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
+-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- A self-contained singlenode island. Surface plants are laid out as a
+-- six-petal flower (center apples, petal grass, a short stem).
+
+core.register_alias("mapgen_singlenode", "air")
+core.register_alias("mapgen_stone", "flower_island:stone")
+core.register_alias("mapgen_water_source", "flower_island:water")
+core.register_alias("mapgen_dirt", "flower_island:dirt")
+core.register_alias("mapgen_dirt_with_grass", "flower_island:dirt_with_grass")
+core.register_alias("mapgen_sand", "flower_island:sand")
+
+core.register_node("flower_island:stone", {
+	description = "Stone",
+	tiles = {"default_stone.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("flower_island:dirt", {
+	description = "Dirt",
+	tiles = {"default_dirt.png"},
+	groups = {crumbly = 3, soil = 1},
+})
+
+core.register_node("flower_island:dirt_with_grass", {
+	description = "Dirt with Grass",
+	tiles = {
+		"default_grass.png",
+		"default_dirt.png",
+		{name = "default_grass_side.png", tileable_vertical = false},
+	},
+	groups = {crumbly = 3, soil = 1},
+})
+
+core.register_node("flower_island:sand", {
+	description = "Sand",
+	tiles = {"default_sand.png"},
+	groups = {crumbly = 3},
+})
+
+core.register_node("flower_island:water", {
+	description = "Water",
+	drawtype = "liquid",
+	waving = 3,
+	tiles = {"default_water.png^[opacity:160"},
+	special_tiles = {
+		{name = "default_water.png^[opacity:160", backface_culling = false},
+		{name = "default_water.png^[opacity:160", backface_culling = true},
+	},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = true,
+	is_ground_content = false,
+	drowning = 1,
+	liquidtype = "source",
+	liquid_alternative_source = "flower_island:water",
+	liquid_alternative_flowing = "flower_island:water",
+	liquid_viscosity = 1,
+	liquid_renewable = false,
+	liquid_range = 0,
+	post_effect_color = {a = 64, r = 100, g = 100, b = 200},
+	groups = {water = 3, liquid = 3},
+})
+
+core.register_node("flower_island:plant", {
+	description = "Island Grass",
+	drawtype = "plantlike",
+	waving = 1,
+	tiles = {"default_junglegrass.png"},
+	inventory_image = "default_junglegrass.png",
+	wield_image = "default_junglegrass.png",
+	paramtype = "light",
+	sunlight_propagates = true,
+	walkable = false,
+	buildable_to = true,
+	groups = {snappy = 3, attached_node = 1, flora = 1},
+	selection_box = {
+		type = "fixed",
+		fixed = {-0.3, -0.5, -0.3, 0.3, 0.4, 0.3},
+	},
+})
+
+core.register_node("flower_island:blossom", {
+	description = "Island Blossom",
+	drawtype = "plantlike",
+	waving = 1,
+	tiles = {"default_apple.png"},
+	inventory_image = "default_apple.png",
+	wield_image = "default_apple.png",
+	paramtype = "light",
+	sunlight_propagates = true,
+	walkable = false,
+	buildable_to = true,
+	groups = {snappy = 3, attached_node = 1, flora = 1},
+	selection_box = {
+		type = "fixed",
+		fixed = {-0.2, -0.5, -0.2, 0.2, 0.2, 0.2},
+	},
+})
+
+core.register_node("flower_island:leaves", {
+	description = "Leaves",
+	drawtype = "allfaces_optional",
+	tiles = {"default_leaves.png"},
+	paramtype = "light",
+	is_ground_content = false,
+	groups = {snappy = 3},
+})
+
+local SURFACE_Y = 8
+local WATER_Y = 7
+local ISLAND_R = 20
+local BEACH_R = 16
+local GEN_MIN = {x = -24, y = 0, z = -24}
+local GEN_MAX = {x = 24, y = 12, z = 24}
+
+local function overlaps(minp, maxp)
+	return not (maxp.x < GEN_MIN.x or minp.x > GEN_MAX.x
+		or maxp.y < GEN_MIN.y or minp.y > GEN_MAX.y
+		or maxp.z < GEN_MIN.z or minp.z > GEN_MAX.z)
+end
+
+-- Six-petal flower in XZ, plus a short stem pointing -Z.
+local function plant_at(x, z)
+	local r2 = x * x + z * z
+	if r2 <= 4 then
+		return "center"
+	end
+	-- Stem
+	if math.abs(x) <= 1 and z <= -3 and z >= -11 then
+		return "stem"
+	end
+	local r = math.sqrt(r2)
+	if r < 3 or r > 12 then
+		return nil
+	end
+	local ang = math.atan2(z, x)
+	-- Rose curve: petals where cos(6Î¸) is high
+	local petal = 4 + 8 * math.max(0, math.cos(6 * ang))
+	if r <= petal then
+		return "petal"
+	end
+	return nil
+end
+
+core.register_on_generated(function(minp, maxp, _seed)
+	if not overlaps(minp, maxp) then
+		return
+	end
+
+	local vm, emin, emax = core.get_mapgen_object("voxelmanip")
+	local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+	local data = vm:get_data()
+
+	local c_air = core.get_content_id("air")
+	local c_stone = core.get_content_id("flower_island:stone")
+	local c_dirt = core.get_content_id("flower_island:dirt")
+	local c_grass = core.get_content_id("flower_island:dirt_with_grass")
+	local c_sand = core.get_content_id("flower_island:sand")
+	local c_water = core.get_content_id("flower_island:water")
+	local c_plant = core.get_content_id("flower_island:plant")
+	local c_blossom = core.get_content_id("flower_island:blossom")
+
+	for z = minp.z, maxp.z do
+		for x = minp.x, maxp.x do
+			local dist = math.sqrt(x * x + z * z)
+			local on_island = dist <= ISLAND_R
+			for y = minp.y, maxp.y do
+				local vi = area:index(x, y, z)
+				if on_island then
+					if y < SURFACE_Y - 3 then
+						data[vi] = c_stone
+					elseif y < SURFACE_Y then
+						data[vi] = (dist > BEACH_R) and c_sand or c_dirt
+					elseif y == SURFACE_Y then
+						data[vi] = (dist > BEACH_R) and c_sand or c_grass
+					elseif y == SURFACE_Y + 1 and dist <= BEACH_R then
+						local kind = plant_at(x, z)
+						if kind == "center" then
+							data[vi] = c_blossom
+						elseif kind == "petal" or kind == "stem" then
+							data[vi] = c_plant
+						else
+							data[vi] = c_air
+						end
+					elseif y <= WATER_Y then
+						data[vi] = c_water
+					else
+						data[vi] = c_air
+					end
+				else
+					if y <= WATER_Y then
+						data[vi] = c_water
+					else
+						data[vi] = c_air
+					end
+				end
+			end
+		end
+	end
+
+	vm:set_data(data)
+	vm:calc_lighting()
+	vm:write_to_map()
+	vm:update_liquids()
+end)
+
+core.settings:set("static_spawnpoint", "0," .. (SURFACE_Y + 2) .. ",0")
+core.settings:set("mg_name", "singlenode")
+
+core.register_on_newplayer(function(player)
+	player:set_pos({x = 0, y = SURFACE_Y + 2, z = 0})
+	player:get_inventory():add_item("main", "flower_island:plant 32")
+	player:get_inventory():add_item("main", "flower_island:blossom 16")
+end)
+name = flower_island
+description = Island terrain and the flower-shaped plant pattern
 ‰PNG
+
+   IHDR         óÿa   -IDATxcÖ`¨Õ3üGÂŒdB‰#ş#c²4ÿça2iFàál å±  X`?×>Ít    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ÕIDAT(S%iOa…ß˜º F+0ÈVE¡ €(²àÈ°ƒ8lEPÁad„H•J«±QÓÔôs?ôg¶CLNNÜÜœ›sA]ˆûxˆJf@Ö%ÂíüvØÆÎL­‹Åv¾ÿâHG?$,«IãxØÈ|#dµ¢œvTß*FNĞIÇ37ÿeÜwÚuÇp+Ç…Í\9µĞ”(ÏŸ†Crò®:pOõkÉ«RF9TyÛdd¾nÑr–mÅOlÚáíš˜¤KHQò+\Hç5ŠÇgò:?—,>õDLıZó¦MË÷—v7¯dÊb‹–u”çÕS¿H3…³Cª™ “­ÅÆU‚÷ø±·ßÖş„PtşL÷®<Ö¾ş¼=;Ú@dU­–´Úì® Sœ°óo«:—6ˆ_nk¾ èrté³Ê>›E³Ÿ}`æ•Í
+K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:r5k Ö¡5)°nˆ”ÒÙ:¹Ï
+Õå>.üœç"ËE¬¿M´âO÷+°0„2@Á½îv0#{«:C.<¾ZığˆpL­ï|(ôúéNAKUœ¹ØD/giûú? hÑÿİ3MD]“'˜Èé6#iåzmsDCBÅ•…¨ø±d.øÀ…°éí›âyÌ¾
+)oÒ»5½¬U6áÃµ?3ê™©—ïáJe;'¶ ĞÍjß.|Ã”´W›Îç>6ŠÈLò^SJó]Ãğ‡õÈhF–hŠ»:Z.ûÈi]ŸJhïv#´Gz›oCpá¿Q§::uN&i¨…¡ë'ŒH~ÅÁ‹[ÚÑÚYÌ
+Š¸úâPSÏò{9¶+?qrq¯ğk~ÔZŞW‹2³±´—qn$ÑÍÊ¾â?fà™pÕZ    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  €IDATxbÌn6T<×
+ÒÛ  „e¡e^Ó1_˜¡·Á·Nú0Ã‚ieÙ2H¹¿œn>ÏwyDgc‰µ´‘ºxsT3·˜Ğzµy{?=\mîïo
+˜ù3Ô Ó w=;9ÅÕL«Çº\m¥œ˜K6ò®Úv`œ%˜Xb3Úˆ½qÒÉi63BìêªÈöBîMMÑ7UDq”ç~ìàQ H!ÛÑ”eWek0äJ|¾,tñÅ›Á<ƒ¢«›^Ê>U!´euãøøTf¤Ü}~’çoæÔ—F¤“Cì2©³7Bü¸ì&pwS‰vÎ²ûüÃÙ(4ÏsÙôƒ®fëF—¦Dßüt¾Ÿ‡UÑŠî-—„ªrkÄ<)—PÂ!V;‚İ(Â}øy¦¡‰ãŒàIª–ÙÖ0›£ä|Ô³hÚÃ4!6»¿kşû§çq·Å¤¤VªÓ=Àcè˜Ñúë¯¿úºÜÏ½|wÿúË­4õÜaÆØBØvôjSÙ>~|ì"Ÿº†mYV}×İ&{Äl»n˜áø½OÓë+¹Û£Ó(pİÀç“i-€®~“£eÔ,ã>ÃAÖ*Îc0·¸íe/Å”­¬u]‹IØœ@¥2–M²./ÏSÃĞÍõ
+.ïUºğÓ0¬×âi³šôĞKàPïì$“óø²A™¼“ï_ı¾v™¦Çqü*l‰ßÕ(qè´5—7%[ıÏ¿ü'›éï^0ÙQ‚¾øîXª	Û#BÄóh”RÊpWÉŒ6ğ8wÀØõZ­‹R„©….>‰ÄÙÛb¨Å4ß éo–R—¯ÇBùçó (ëÿ@÷rW‘ïÑ    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ãIDATxbÌn6”DÈÛ`ş$Ëá¤ÌÌt ÷n‡Ëü˜Ÿ)ÙV5Ó¡Ÿawu‡øK‡Iª§Ïµ©›·?x‰¡›ğ…K5Ï<>ß“/m_1ş5×)rójÌ$gP‡dOˆÃ›//ğÅíí3]9òx[=©ë7´y®¯ÈB-‘ëİeªçÏryóı×iLã¤',Ÿ¥ì^4£‘2m)ó–d¹f¹ß¯ÔPt¤qN:#qÌPvB+‰/,6±ÏCZ!Ce %L¤&~¼h©ëyŸŞ›Ä,Í0p{—ÓëÇ¹¿«yëƒ=NÔsÿP¢,›Æ­C—ÀêÌ·ÔíCËÊÃW9Õib·[àj·¾Ø=¡;‹išÈÊGAS¸<•3™ÎPƒã°N¸¹,p<‹İ2äÁ¶\¸<++Gö+í€5iÛ’·^{ÙÙÔ-iU‰ıK{Ç6>’¬İ4‰mòšPc$êb‡å’U¼àé©¿şt%ÎnÎDÕeÈc:Š®éº†¹E¨Y	%¡ÁŸşI[d¼´Ø¿ğ’8ÿıY„¾`»W6n`z•°P^À<,˜u+£Ã2vL“kj5YŞÒ4—l^´	—Z64ıˆeû¨O¿Ùr~VóPyõ%I’Ä>£>!°8ûµfÚ@ªY|&ÙSëı¦êÔšÂÂ&Ú*æNğTTc…çÛÈ@òªy¹ÓÏ	È¤wŞÚ¢]‹‹óGäÃuÇv³],(*îç¶†À‰xóõõ4`^Æ¶mÆ^qØ¿ÄÙoO„®FêV±^ÿŸğ$¬61Ma±	Æ£&Šö”™ËCÚòıÿR—#ısƒáƒİ«¬o¿{ºQŞ€eÙfÀa¹up\E“Ã¨<"|?€¡¡;ÒÒ±PÀzûë57w%–Á†iO~_1š8JvËåÍM×ñÎ{kªªgˆˆı„4+øíŸwÜ#j³    IEND®B`‚‰PNG
+
+   IHDR         íİâR   PLTE ol$HY(>e0xÑ-J   tRNS @æØf   hIDATÁ„ EÁÇrt!ÀÈj ûgºp9XtËtâ„†~*JZfgÃX5zT<€äzs±_»b•`×ˆg¸H«ÎÏ®Æ=z©Ùù{ÊyLc›á‚¹¯ã²í4½”—_Øş    IEND®B`‚‰PNG
+
+   IHDR         óÿa  :IDATx%““c‰Å/yaÛ'mÛ¶ôØ¶mÛ¶gŠ¬·¸ş\g_Í”náêˆé§¦vınWç$¢N{\Úõ±Fµñ¦®æR±¢	h;‚º÷ûµø,SuëÓå…ª58ôG†f˜Š¿6ŞÜ¨ÊFS±…dJã'PÕf»†Ï%[4T¼ÒPz*˜u«x4M5[Íÿµkè:ÔlrÓyÚFQÜFlÆ¦ü.äë7pªy·SE3N¬e¬¹ŞDë.È+uæ†ñshô,¼…œ>îr¨kC¾"SBc¨|]E-*ŠCÍNØöC©
+«²™ğ(şQ*ñ<]Å5íJÖÜkÔËÀ 2œ¢â)Bv…&mê<NûI”_—¦À"´,õAÉ‚›e_¬Í¿¢ÄC}‚Ó(<fªdÚ‹/êÖšÏiª<„
+ª3é:ê¡|.M­=ÊF$¹túŸ6ÿiráïBoÂĞ‰L‹<Có^·¥2z0HëQ'#×`é;Ôt5´+<…hÜo2t-~4uì÷t­}ŸÉèñlõO¢å *kKW¨Å­ğ4€ì)´ä¹_»rè?ã…Ø¬“â5†V}B37¼
+Ï­´‚¦íÉòÇ\JoAƒÆ_ó0y6ÿßÍĞ%7T®C#÷ Ğja^bƒ¯—ëÖA÷)ˆT¤¨l·‹ĞRƒØê<fSÏ·ºö9)[p‰Ê¦ˆFnÙYöÖ¥®3–+’növiğ”©ºŸ:&Óh-+¶Ì@õÛÍ?óAŒ?2UÑ,»*0i¨qc’
+†RO¹Ô}Ô©–©\Ë™v/·)¼EæªÙÊ×@`1}Ş§¢åPw*ÔkWı^´æMTé•Ğy{£Ê¨tQ½ÅP´hÒ°ÁKJÂ#ônôkà²è,š½èS¸ÍIáR»"ı.åV¸›CU«LŠælò…²8£f£³©¬DF1øŠRXû&ÀÚgQ²š¿eÀ‚á£yZş$[YòÕØÉjûFzv‘åÌjKF k¦Ì†ü§|ùz°È2hÚÙÕ†¢^›ÑË¦ÊV£±«)J­Eå	şÈé6Dª™	H    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ñIDATxb|yĞ"U%8C13†{ô½á`9Xãªğ¾Å²ÀşGÑ·9ŸÏLpJiÊ•s>§Ãá`ŒišFJYJÙî"å|Y×Zë0mÛşí¶Rg5©‹×××œ3şã(„ Î””J) )%@ÏÏÏŞÌårâœƒ~ŒúØS*e@çMÛ*­çiî<Ï!­ `«±~·İÄY¾ApÖÖR–8Wë¤$”µ…0ñù±ùÀÙeÈÉñã]	d1`š@¾¾¾  $°‹­SŠæ|˜F×uE0ÆÖpÕul[–E ì8M¦C +¦¨•®äZ+D0×eµÎ¢nĞ„óViIº„”L%E0!5÷mÏ%EEİS‹­apÁ¦iÖÖH.¡ø÷·EÓµåæêt:-óŒ XÿşşÎëÙ[KŒ"³µî†gF¯K`Î#­´äS¸ŞÃ8N1G¥äÛÛ{.d<(úNV·Ayß¼·]Ã(]×¢qkM±”Ú{ÿ=ŒŞÓkë1i©°èšFH¹ªá-¼ c<¥"€¤˜ûÍÀØµ>ûg Â*†^¯“K¼Sv8óğ‰6Q?¸ÌkıB`c`¸K£¾k·Û.Ëì½Ÿ¦	‰q¼¼¼à™à-Gôöx¹p~q?Š    IEND®B`‚‰PNG
+
+   IHDR          :˜ ½   IDATxÊC‚c Àw·ÙLÛ¶'ß¶Û6.Ø]ë‚LLÊT»:†Êz»ÃwQÊ1gšº½0O#)øde1õ“eí'i†nH$ŸÉ/Ò/b»±˜ç7@ã…•óê_KŠiT®õØb!„o»‰)«ÖŸ×ŸhâCŒ»¯Wo 6®¸¹¨~ìPÄ-jbÍ9ƒù´U(åyñƒÛJ€LÛáÛ¯”[èÒUğKĞĞ¾šQhV1|Àr‰TÊ~bƒ;Ùâë­ !\GÍkXG×>±ı/är¬Í÷°ô’Q”q<Ë±aÍÎœ#W!9iBì€]ÉoÏÙD`ˆZş«&ì
+_¶    IEND®B`‚‰PNG
+
+   IHDR         (-S   KPLTE'Bj(Bj(Bk)Cl)El*Fm+Eo+Fn+Gn+Go,Ho,Hp-Iq1Ov1Qx3Ry3Sy4Sz4Tz5S{5U{6U|6W|<\ƒ=]…uYOi   IDATW5ËrÃ0Ä¶‚•–HZê#ùÿ/íÁí^ÁÌJj@Gí]ãõ™A33¯…2ë{"2Æz=¾«º„ÍœÏ& F…ã‘W8Ê8Àfe8x¤ ùªkO0“Ô×{xåß„GM033SÆi7/÷¸½kšùİ•8¯¯ I^1ªNøxĞ eõÖ+œñ^=2ìŒ¬ŸòÒÿqğªC¿ç	48ú0›    IEND®B`‚‰PNG
 
    IHDR         óÿa   HIDAT8cèŞùó?KSÀ†PÅ$šºà?ĞÏÿ‘ ºi¢\EŒF¼.Àf Q6âsŞ0 Ç ¬® ÅC$%o™4 ğ¼à‰Ø,    IEND®B`‚‰PNG
 

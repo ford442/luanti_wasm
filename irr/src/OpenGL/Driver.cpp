@@ -477,6 +477,14 @@ bool COpenGL3DriverBase::beginScene(u16 clearFlag, SColor clearColor, f32 clearD
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
 	resetVertexInputState();
+	// emscripten_webgl_commit_frame() blits via a scratch triangle and
+	// leaves FrontFace/cull/depth/program in the WebGL default state.
+	// Irrlicht only sets FrontFace(GL_CW) at init; after the first present
+	// the cache still believes CW is set, so every face is drawn with
+	// inverted winding (dark interior triangles).
+	GL.FrontFace(GL_CW);
+	if (CacheHandler)
+		CacheHandler->invalidateCachedState();
 #endif
 
 	clearBuffers(clearFlag, clearColor, clearDepth, clearStencil);

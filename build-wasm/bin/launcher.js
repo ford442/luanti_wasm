@@ -277,7 +277,7 @@
 	ui.address.value = valueFromQuery("address", "");
 	ui.port.value = valueFromQuery("port", "30000");
 	ui.name.value = valueFromQuery("name", safeStorageGet("luanti.playerName"));
-	ui.game.value = valueFromQuery("game", "devtest");
+	ui.game.value = valueFromQuery("game", "flower_island");
 	ui.language.value = valueFromQuery("language", safeStorageGet("luanti.language"));
 	if (["60", "100", "160"].indexOf(query.get("view")) !== -1)
 		ui.quality.value = query.get("view");
@@ -304,7 +304,7 @@
 			address: address,
 			port: port,
 			name: name,
-			game: ui.game.value || "devtest",
+			game: ui.game.value || "flower_island",
 			view: ui.quality.value,
 			language: ui.language.value
 		};
@@ -317,7 +317,8 @@
 		if (session.mode === "remote")
 			args.push("--address", session.address, "--port", String(session.port), "--name", session.name);
 		else
-			args.push("--gameid", session.game);
+			args.push("--gameid", session.game,
+				"--world", "/home/web_user/.luanti/worlds/" + session.game);
 		return args;
 	}
 

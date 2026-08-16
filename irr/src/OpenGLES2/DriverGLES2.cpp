@@ -20,11 +20,16 @@ OpenGLVersion COpenGLES2Driver::getVersionFromOpenGL() const
 {
 	auto version_string = reinterpret_cast<const char *>(GL.GetString(GL_VERSION));
 	int major = 0, minor = 0;
-	if (sscanf(version_string, "OpenGL ES %d.%d", &major, &minor) != 2) {
-		os::Printer::log("Failed to parse OpenGL ES version string", version_string, ELL_ERROR);
-		return {OpenGLSpec::ES, 0, 0, 0};
+	if (sscanf(version_string, "OpenGL ES %d.%d", &major, &minor) == 2)
+		return {OpenGLSpec::ES, (u8)major, (u8)minor, 0};
+	// Emscripten/WebGL: "WebGL 2.0 (OpenGL ES 3.0 ...)"
+	if (sscanf(version_string, "WebGL %d.%d", &major, &minor) == 2) {
+		if (major >= 2)
+			return {OpenGLSpec::ES, 3, 0, 0};
+		return {OpenGLSpec::ES, 2, 0, 0};
 	}
-	return {OpenGLSpec::ES, (u8)major, (u8)minor, 0};
+	os::Printer::log("Failed to parse OpenGL ES version string", version_string, ELL_ERROR);
+	return {OpenGLSpec::ES, 0, 0, 0};
 }
 
 void COpenGLES2Driver::initFeatures()

@@ -213,7 +213,12 @@ RenderingEngine::RenderingEngine(MyEventReceiver *receiver)
 	verbosestream << "Using the " << getVideoDriverName(driver->getDriverType()) << " video driver" << std::endl;
 
 	// This changes the minimum allowed number of vertices in a VBO. Default is 500.
+	// WebGL forbids client-memory vertex arrays; keep every mesh on a VBO.
+#ifdef __EMSCRIPTEN__
+	driver->setMinHardwareBufferVertexCount(1);
+#else
 	driver->setMinHardwareBufferVertexCount(4);
+#endif
 
 	m_receiver = receiver;
 

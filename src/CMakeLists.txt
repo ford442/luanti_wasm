@@ -844,6 +844,7 @@ if(BUILD_CLIENT)
 			# Asset preloading — paths are relative to CMAKE_SOURCE_DIR at build time
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/builtin@/builtin"
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/devtest@/games/devtest"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/flower_island@/games/flower_island"
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/textures@/textures"
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/fonts@/fonts"
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/client/shaders@/client/shaders"
