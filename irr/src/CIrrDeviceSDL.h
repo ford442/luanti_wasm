@@ -192,6 +192,13 @@ public:
 				Device->MouseX = x;
 				Device->MouseY = y;
 			}
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+			// Pointer-lock look warps to the screen center each frame. The
+			// Emscripten cursor path must follow that warp or pitch/yaw keep
+			// the previous CSS-box offset (aspect-ratio "crossed" sensitivity).
+			CursorPos.X = x;
+			CursorPos.Y = y;
+#endif
 		}
 
 		//! Returns the current position of the mouse cursor.
@@ -248,23 +255,8 @@ public:
 	private:
 		void updateCursorPos()
 		{
-#ifdef _IRR_EMSCRIPTEN_PLATFORM_
-			EmscriptenPointerlockChangeEvent pointerlockStatus; // let's hope that test is not expensive ...
-			if (emscripten_get_pointerlock_status(&pointerlockStatus) == EMSCRIPTEN_RESULT_SUCCESS) {
-				if (pointerlockStatus.isActive) {
-					CursorPos.X += Device->MouseXRel;
-					CursorPos.Y += Device->MouseYRel;
-					Device->MouseXRel = 0;
-					Device->MouseYRel = 0;
-				} else {
-					CursorPos.X = Device->MouseX;
-					CursorPos.Y = Device->MouseY;
-				}
-			}
-#else
 			CursorPos.X = Device->MouseX;
 			CursorPos.Y = Device->MouseY;
-#endif
 		}
 
 		void initCursors();

@@ -325,16 +325,14 @@
 		var canvas = Module.canvas;
 		if (!canvas)
 			return;
+		// After the engine owns the WebGL context, only CIrrDeviceSDL may
+		// change canvas.width/height. Direct assignment here would desync the
+		// OFFSCREEN_FRAMEBUFFER backing store from the CSS box.
+		if (started)
+			return;
 		var rect = canvas.getBoundingClientRect();
 		var width = Math.max(1, Math.round(rect.width));
 		var height = Math.max(1, Math.round(rect.height));
-
-		// OFFSCREEN_FRAMEBUFFER + PROXY_TO_PTHREAD transfers the canvas to a
-		// worker. The main thread must not touch canvas.width/height afterward;
-		// CIrrDeviceSDL resizes via emscripten_set_canvas_element_size().
-		if (canvas.controlTransferredOffscreen)
-			return;
-
 		if (canvas.width !== width || canvas.height !== height) {
 			canvas.width = width;
 			canvas.height = height;
@@ -373,11 +371,11 @@
 			safeStorageSet("luanti.playerName", session.name);
 			safeStorageSet("luanti.language", session.language);
 			safeStorageSet("luanti.viewDistance", session.view);
-			started = true;
 			ui.play.disabled = true;
 			ui.launcher.hidden = true;
 			ui.gameShell.hidden = false;
 			syncCanvasBackingStore();
+			started = true;
 			reportStatus("Starting Luanti…", 4, "engine");
 			Module["callMain"](argumentsForSession(session));
 		} catch (error) {

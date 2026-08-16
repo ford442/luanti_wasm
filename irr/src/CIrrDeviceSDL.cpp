@@ -649,10 +649,38 @@ bool CIrrDeviceSDL::createWindow()
 	return false;
 }
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+// CSS box and backing store of #canvas in one main-thread hop so width/height
+// cannot tear, and so we never assign canvas.width unless it actually changed
+// (that assignment resets the WebGL drawing buffer).
+static bool queryCanvasLayoutSize(int *css_w, int *css_h, int *canvas_w, int *canvas_h)
+{
+	int cw = 0, ch = 0, bw = 0, bh = 0;
+	MAIN_THREAD_EM_ASM({
+		var c = Module['canvas'];
+		HEAP32[$0 >> 2] = c ? (c.clientWidth | 0) : 0;
+		HEAP32[$1 >> 2] = c ? (c.clientHeight | 0) : 0;
+		HEAP32[$2 >> 2] = c ? (c.width | 0) : 0;
+		HEAP32[$3 >> 2] = c ? (c.height | 0) : 0;
+	}, &cw, &ch, &bw, &bh);
+	if (cw < 2 || ch < 2)
+		return false;
+	*css_w = cw;
+	*css_h = ch;
+	*canvas_w = bw;
+	*canvas_h = bh;
+	return true;
+}
+#endif
+
 bool CIrrDeviceSDL::createWindowWithContext()
 {
 	u32 SDL_Flags = 0;
+	// HiDPI backing stores make SDL scale mouse X/Y by window/CSS ratios that
+	// differ per axis. Keep CSS pixels, backing store, and mouse deltas 1:1.
+#ifndef _IRR_EMSCRIPTEN_PLATFORM_
 	SDL_Flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#endif
 
 #ifndef _IRR_USE_SDL3_
 	SDL_Flags |= getFullscreenFlag(CreationParams.Fullscreen);
@@ -668,19 +696,9 @@ bool CIrrDeviceSDL::createWindowWithContext()
 	SDL_GL_ResetAttributes();
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-	double css_w = 0, css_h = 0;
-	emscripten_get_element_css_size("#canvas", &css_w, &css_h);
-	if (css_w >= 2 && css_h >= 2) {
-		Width = (u32)css_w;
-		Height = (u32)css_h;
-	}
-	if (Width != 0 || Height != 0) {
-		int canvas_w = 0, canvas_h = 0;
-		emscripten_get_canvas_element_size("#canvas", &canvas_w, &canvas_h);
-		if (canvas_w != (int)Width || canvas_h != (int)Height)
-			emscripten_set_canvas_element_size("#canvas", Width, Height);
-	} else {
-		int w, h;
+	updateSizeAndScale();
+	if (Width < 2 || Height < 2) {
+		int w = 0, h = 0;
 		emscripten_get_canvas_element_size("#canvas", &w, &h);
 		Width = w;
 		Height = h;
@@ -755,6 +773,11 @@ bool CIrrDeviceSDL::createWindowWithContext()
 #ifndef _IRR_EMSCRIPTEN_PLATFORM_
 	logAttributes();
 #endif
+
+	// SDL_CreateWindow probes CSS by temporarily setting the canvas to 1x1.
+	// Re-apply the layout size now that the WebGL context (and offscreen FBO)
+	// exist so viewport, backing store, and mouse space stay aligned.
+	updateSizeAndScale();
 
 	// "#canvas" is for the opengl context
 	emscripten_set_mousedown_callback("#canvas", (void *)this, true, MouseUpDownCallback);
@@ -899,8 +922,9 @@ bool CIrrDeviceSDL::run()
 	os::Timer::tick();
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-	// The canvas backing store tracks CSS size; resize can happen after the
-	// WebGL context is created (launcher shell reveal, window resize).
+	// Align CSS size with the engine. updateSizeAndScale must not assign
+	// canvas.width unless the backing store actually changed — that reset
+	// clears the offscreen FBO and flickers 2D quads (HUD text).
 	const u32 old_w = Width;
 	const u32 old_h = Height;
 	updateSizeAndScale();
@@ -943,16 +967,32 @@ bool CIrrDeviceSDL::run()
 			irrevent.EventType = EET_MOUSE_INPUT_EVENT;
 			irrevent.MouseInput.Event = EMIE_MOUSE_MOVED;
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+			// SDL-emscripten scales xrel/yrel by window/css independently on
+			// each axis. Undo that so yaw and pitch share CSS-pixel units.
+			int window_w = 0, window_h = 0;
+			SDL_GetWindowSize(Window, &window_w, &window_h);
+			const f32 undo_x = (window_w > 0) ? ((f32)Width / (f32)window_w) : 1.f;
+			const f32 undo_y = (window_h > 0) ? ((f32)Height / (f32)window_h) : 1.f;
+			MouseXRel = static_cast<s32>(SDL_event.motion.xrel * undo_x);
+			MouseYRel = static_cast<s32>(SDL_event.motion.yrel * undo_y);
+#else
 			MouseXRel = static_cast<s32>(SDL_event.motion.xrel * ScaleX);
 			MouseYRel = static_cast<s32>(SDL_event.motion.yrel * ScaleY);
+#endif
 #ifdef _IRR_USE_SDL3_
 			if (!SDL_GetWindowRelativeMouseMode(Window))
 #else
 			if (!SDL_GetRelativeMouseMode())
 #endif
 			{
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+				MouseX = static_cast<s32>(SDL_event.motion.x * undo_x);
+				MouseY = static_cast<s32>(SDL_event.motion.y * undo_y);
+#else
 				MouseX = static_cast<s32>(SDL_event.motion.x * ScaleX);
 				MouseY = static_cast<s32>(SDL_event.motion.y * ScaleY);
+#endif
 			} else {
 				MouseX += MouseXRel;
 				MouseY += MouseYRel;
@@ -1305,18 +1345,35 @@ bool CIrrDeviceSDL::run()
 void CIrrDeviceSDL::updateSizeAndScale()
 {
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-	double css_w = 0, css_h = 0;
-	emscripten_get_element_css_size("#canvas", &css_w, &css_h);
-	if (css_w >= 2 && css_h >= 2) {
-		const int pw = (int)css_w;
-		const int ph = (int)css_h;
-		if (pw != (int)Width || ph != (int)Height) {
-			emscripten_set_canvas_element_size("#canvas", pw, ph);
-			Width = pw;
-			Height = ph;
-		}
+	int css_w = 0, css_h = 0, canvas_w = 0, canvas_h = 0;
+	if (queryCanvasLayoutSize(&css_w, &css_h, &canvas_w, &canvas_h)) {
 		ScaleX = 1.f;
 		ScaleY = 1.f;
+		// Subpixel CSS layout can report clientWidth off by 1px. Treating
+		// that as a resize assigns canvas.width and clears the FBO.
+		auto close = [](int a, int b) {
+			return a == b || a == b - 1 || a == b + 1;
+		};
+		const bool engine_matches = close(css_w, (int)Width) && close(css_h, (int)Height);
+		const bool backing_matches = close(canvas_w, css_w) && close(canvas_h, css_h);
+		if (engine_matches && backing_matches)
+			return;
+		Width = static_cast<u32>(css_w);
+		Height = static_cast<u32>(css_h);
+		if (backing_matches)
+			return;
+		// One resize path only. SDL_SetWindowSize also assigns canvas.width,
+		// so calling both would clear the drawing buffer twice.
+		if (Window) {
+			int window_w = 0, window_h = 0;
+			SDL_GetWindowSize(Window, &window_w, &window_h);
+			if (window_w != css_w || window_h != css_h)
+				SDL_SetWindowSize(Window, css_w, css_h);
+			else
+				emscripten_set_canvas_element_size("#canvas", css_w, css_h);
+		} else {
+			emscripten_set_canvas_element_size("#canvas", css_w, css_h);
+		}
 		return;
 	}
 #endif

@@ -90,7 +90,12 @@ def main() -> int:
 					launcher: Module.luantiLauncher.getState(),
 					serviceWorkerControlled: !!navigator.serviceWorker.controller,
 					ticks: window.luantiResponsivenessTicks,
-					canvas: {width: Module.canvas.width, height: Module.canvas.height}
+					canvas: {
+						width: Module.canvas.width,
+						height: Module.canvas.height,
+						clientWidth: Module.canvas.clientWidth,
+						clientHeight: Module.canvas.clientHeight
+					}
 				})""")
 				if args.screenshot:
 					page.screenshot(path=args.screenshot)
@@ -113,6 +118,9 @@ def main() -> int:
 	assert state["serviceWorkerControlled"], state
 	assert state["ticks"] >= 20, state
 	assert state["canvas"]["width"] > 0 and state["canvas"]["height"] > 0, state
+	assert state["canvas"]["width"] == state["canvas"]["clientWidth"], state
+	assert state["canvas"]["height"] == state["canvas"]["clientHeight"], state
+	assert abs(state["canvas"]["width"] / state["canvas"]["height"] - 1280 / 720) < 0.05, state
 	assert any("application worker" in message for message in messages), {
 		"state": state, "console": messages[-30:]}
 	print("generated Luanti browser startup passed:", state)

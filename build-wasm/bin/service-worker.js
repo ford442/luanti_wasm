@@ -6,7 +6,7 @@
 
 // Bump when packaging a new engine/shell so activate() drops stale caches.
 // Development rebuilds also rely on network-first for mutable binaries below.
-var CACHE_VERSION = "5.17.0-dev-20260816c";
+var CACHE_VERSION = "5.17.0-dev-20260816e";
 var CACHE_NAME = "luanti-web:" + CACHE_VERSION + ":" + self.registration.scope;
 
 var PRECACHE = [
