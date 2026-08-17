@@ -8,8 +8,10 @@
     "lib": "lib"
   },
   "scripts": {
+    "build": "bash -lc 'source \"${EMSDK:-/root/emsdk}/emsdk_env.sh\" && cmake --preset Emscripten -B build-wasm && cmake --build build-wasm --parallel $(($(nproc) + 1))'",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ford442/luanti_wasm.git"
