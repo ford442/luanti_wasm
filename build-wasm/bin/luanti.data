@@ -146621,7 +146621,2712 @@ K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:r5k Ö¡5)°nˆ”ÒÙ:¹Ï
    IHDR          :˜ ½   IDATxÊC‚c Àw·ÙLÛ¶'ß¶Û6.Ø]ë‚LLÊT»:†Êz»ÃwQÊ1gšº½0O#)øde1õ“eí'i†nH$ŸÉ/Ò/b»±˜ç7@ã…•óê_KŠiT®õØb!„o»‰)«ÖŸ×ŸhâCŒ»¯Wo 6®¸¹¨~ìPÄ-jbÍ9ƒù´U(åyñƒÛJ€LÛáÛ¯”[èÒUğKĞĞ¾šQhV1|Àr‰TÊ~bƒ;Ùâë­ !\GÍkXG×>±ı/är¬Í÷°ô’Q”q<Ë±aÍÎœ#W!9iBì€]ÉoÏÙD`ˆZş«&ì
 _¶    IEND®B`‚‰PNG
 
+   IHDR         (-S   KPLTE'Bj(Bj(Bk)Cl)El*Fm+Eo+Fn+Gn+Go,Ho,Hp-Iq1Ov1Qx3Ry3Sy4Sz4Tz5S{5U{6U|6W|<\ƒ=]…uYOi   IDATW5ËrÃ0Ä¶‚•–HZê#ùÿ/íÁí^ÁÌJj@Gí]ãõ™A33¯…2ë{"2Æz=¾«º„ÍœÏ& F…ã‘W8Ê8Àfe8x¤ ùªkO0“Ô×{xåß„GM033SÆi7/÷¸½kšùİ•8¯¯ I^1ªNøxĞ eõÖ+œñ^=2ìŒ¬ŸòÒÿqğªC¿ç	48ú0›    IEND®B`‚title = Log Ride Flume
+description = A wooden water flume through the jungle. Ride the log boat down the slide.
+default_mapgen = singlenode
+disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
+-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- Log Ride: wooden flume segments, rideable log boats, jungle waterslide map.
+
+core.register_alias("mapgen_singlenode", "air")
+core.register_alias("mapgen_stone", "log_ride:stone")
+core.register_alias("mapgen_water_source", "log_ride:water")
+core.register_alias("mapgen_dirt", "log_ride:dirt")
+core.register_alias("mapgen_dirt_with_grass", "log_ride:dirt_with_grass")
+core.register_alias("mapgen_sand", "log_ride:sand")
+
+--------------------------------------------------------------------
+-- Terrain
+--------------------------------------------------------------------
+
+core.register_node("log_ride:stone", {
+	description = "Stone",
+	tiles = {"lr_stone.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("log_ride:dirt", {
+	description = "Dirt",
+	tiles = {"lr_dirt.png"},
+	groups = {crumbly = 3, soil = 1},
+})
+
+core.register_node("log_ride:dirt_with_grass", {
+	description = "Dirt with Grass",
+	tiles = {
+		"lr_grass.png",
+		"lr_dirt.png",
+		{name = "default_grass_side.png", tileable_vertical = false},
+	},
+	groups = {crumbly = 3, soil = 1},
+})
+
+core.register_node("log_ride:sand", {
+	description = "Sand",
+	tiles = {"default_sand.png"},
+	groups = {crumbly = 3},
+})
+
+core.register_node("log_ride:water", {
+	description = "Water",
+	drawtype = "liquid",
+	waving = 3,
+	tiles = {"lr_water.png"},
+	special_tiles = {
+		{name = "lr_water.png", backface_culling = false},
+		{name = "lr_water.png", backface_culling = true},
+	},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = true,
+	is_ground_content = false,
+	drowning = 1,
+	liquidtype = "source",
+	liquid_alternative_source = "log_ride:water",
+	liquid_alternative_flowing = "log_ride:water",
+	liquid_viscosity = 1,
+	liquid_renewable = false,
+	liquid_range = 0,
+	post_effect_color = {a = 80, r = 40, g = 90, b = 160},
+	groups = {water = 3, liquid = 3, cools_lava = 1},
+})
+
+core.register_node("log_ride:leaves", {
+	description = "Jungle Leaves",
+	drawtype = "allfaces_optional",
+	tiles = {"lr_leaf.png"},
+	paramtype = "light",
+	is_ground_content = false,
+	groups = {snappy = 3},
+})
+
+core.register_node("log_ride:tree", {
+	description = "Jungle Tree",
+	tiles = {"default_tree_top.png", "default_tree_top.png", "default_tree.png"},
+	paramtype2 = "facedir",
+	is_ground_content = false,
+	groups = {choppy = 2, oddly_breakable_by_hand = 1, tree = 1},
+})
+
+--------------------------------------------------------------------
+-- Flume / track segments
+--------------------------------------------------------------------
+
+local flume_groups = {
+	choppy = 2,
+	oddly_breakable_by_hand = 1,
+	lr_flume = 1,
+}
+
+-- U-shaped wooden channel (floor + two walls)
+local flume_box = {
+	type = "fixed",
+	fixed = {
+		{-0.5, -0.5, -0.5, 0.5, -0.25, 0.5}, -- floor
+		{-0.5, -0.25, -0.5, -0.30, 0.35, 0.5}, -- left wall
+		{0.30, -0.25, -0.5, 0.5, 0.35, 0.5}, -- right wall
+	},
+}
+
+core.register_node("log_ride:flume_straight", {
+	description = "Flume Segment (Straight)",
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	tiles = {
+		"lr_wood.png",
+		"lr_wood_dark.png",
+		"lr_flume.png",
+	},
+	node_box = flume_box,
+	selection_box = flume_box,
+	groups = flume_groups,
+	is_ground_content = false,
+})
+
+core.register_node("log_ride:flume_curve", {
+	description = "Flume Segment (Curve)",
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	tiles = {"lr_wood.png", "lr_wood_dark.png", "lr_flume.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.5, -0.5, -0.5, 0.5, -0.25, 0.15},
+			{-0.15, -0.5, -0.5, 0.5, -0.25, 0.5},
+			{-0.5, -0.25, -0.5, -0.30, 0.35, 0.15},
+			{0.30, -0.25, -0.5, 0.5, 0.35, 0.15},
+			{-0.15, -0.25, 0.30, 0.5, 0.35, 0.5},
+			{-0.15, -0.25, -0.5, 0.15, 0.35, -0.30},
+		},
+	},
+	groups = flume_groups,
+	is_ground_content = false,
+})
+
+core.register_node("log_ride:flume_ramp", {
+	description = "Flume Segment (Ramp / Drop)",
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	tiles = {"lr_wood.png", "lr_wood_dark.png", "lr_flume.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.5, -0.5, -0.5, 0.5, -0.15, -0.1},
+			{-0.5, -0.35, -0.1, 0.5, 0.0, 0.2},
+			{-0.5, -0.2, 0.2, 0.5, 0.2, 0.5},
+			{-0.5, -0.15, -0.5, -0.30, 0.25, -0.1},
+			{0.30, -0.15, -0.5, 0.5, 0.25, -0.1},
+			{-0.5, 0.2, 0.2, -0.30, 0.55, 0.5},
+			{0.30, 0.2, 0.2, 0.5, 0.55, 0.5},
+		},
+	},
+	groups = flume_groups,
+	is_ground_content = false,
+})
+
+core.register_node("log_ride:flume_water", {
+	description = "Flume Water",
+	drawtype = "nodebox",
+	paramtype = "light",
+	tiles = {"lr_water.png"},
+	use_texture_alpha = "blend",
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = true,
+	node_box = {
+		type = "fixed",
+		fixed = {-0.28, -0.45, -0.5, 0.28, -0.2, 0.5},
+	},
+	groups = {not_in_creative_inventory = 1, water = 1},
+	post_effect_color = {a = 40, r = 50, g = 110, b = 180},
+})
+
+core.register_node("log_ride:splash", {
+	description = "Splash Pad",
+	drawtype = "nodebox",
+	paramtype = "light",
+	tiles = {"lr_splash.png", "lr_wood.png"},
+	use_texture_alpha = "blend",
+	walkable = false,
+	node_box = {
+		type = "fixed",
+		fixed = {-0.5, -0.5, -0.5, 0.5, -0.35, 0.5},
+	},
+	groups = {choppy = 3, oddly_breakable_by_hand = 1},
+	is_ground_content = false,
+})
+
+core.register_node("log_ride:dock", {
+	description = "Boarding Dock",
+	tiles = {"lr_dock.png", "lr_wood_dark.png"},
+	groups = {choppy = 2, oddly_breakable_by_hand = 1},
+})
+
+core.register_node("log_ride:support", {
+	description = "Flume Support",
+	drawtype = "nodebox",
+	paramtype = "light",
+	tiles = {"lr_wood_dark.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.12, -0.5, -0.12, 0.12, 0.5, 0.12},
+			{-0.3, 0.35, -0.3, 0.3, 0.5, 0.3},
+		},
+	},
+	groups = {choppy = 2, oddly_breakable_by_hand = 1},
+	is_ground_content = false,
+	sunlight_propagates = true,
+})
+
+core.register_node("log_ride:station", {
+	description = "Log Ride Station (spawn boat on right-click)",
+	tiles = {
+		"lr_dock.png",
+		"lr_wood_dark.png",
+		"lr_wood.png",
+	},
+	groups = {choppy = 2},
+	on_rightclick = function(pos, _node, clicker)
+		if not clicker or not clicker:is_player() then
+			return
+		end
+		local boat_pos = vector.add(pos, {x = 0, y = 0.8, z = 2})
+		local obj = core.add_entity(boat_pos, "log_ride:log_boat")
+		if obj then
+			local ent = obj:get_luaentity()
+			if ent then
+				ent:set_path("jungle_flume", 1)
+			end
+			core.chat_send_player(clicker:get_player_name(),
+				"Log boat ready! Right-click it to ride the flume.")
+		end
+	end,
+})
+
+--------------------------------------------------------------------
+-- Path: jungle flume waterslide
+--------------------------------------------------------------------
+
+local function densify(points, step)
+	step = step or 0.65
+	local out = {}
+	for i = 1, #points - 1 do
+		local a = points[i]
+		local b = points[i + 1]
+		local d = vector.distance(a, b)
+		local n = math.max(1, math.floor(d / step))
+		for k = 0, n - 1 do
+			local t = k / n
+			out[#out + 1] = {
+				x = a.x + (b.x - a.x) * t,
+				y = a.y + (b.y - a.y) * t,
+				z = a.z + (b.z - a.z) * t,
+			}
+		end
+	end
+	out[#out + 1] = vector.copy(points[#points])
+	return out
+end
+
+-- Boarding dock â†’ slow channel â†’ climb chain-lift style (slow rise) â†’
+-- big drop â†’ winding canyon â†’ splash pool â†’ lazy river home.
+local function build_jungle_flume()
+	local controls = {
+		-- Boarding
+		{x = 0, y = 9.2, z = 0},
+		{x = 0, y = 9.2, z = 5},
+		{x = 0, y = 9.3, z = 10},
+		-- Gentle meander
+		{x = 3, y = 9.5, z = 14},
+		{x = 7, y = 10, z = 16},
+		{x = 10, y = 10.5, z = 14},
+		-- Lift hill (slow rise)
+		{x = 12, y = 12, z = 10},
+		{x = 12, y = 14, z = 6},
+		{x = 12, y = 16, z = 2},
+		{x = 12, y = 18, z = -2},
+		{x = 10, y = 19, z = -6},
+		-- Crest
+		{x = 6, y = 19.5, z = -8},
+		{x = 2, y = 19, z = -8},
+		-- Big drop
+		{x = -2, y = 16, z = -7},
+		{x = -6, y = 13, z = -5},
+		{x = -8, y = 11, z = -1},
+		{x = -8, y = 10, z = 4},
+		-- Banked curve into canyon
+		{x = -6, y = 9.5, z = 9},
+		{x = -2, y = 9.2, z = 13},
+		{x = 4, y = 9.0, z = 16},
+		{x = 10, y = 8.8, z = 18},
+		{x = 16, y = 8.6, z = 16},
+		{x = 18, y = 8.5, z = 10},
+		-- Twist through trees
+		{x = 16, y = 8.5, z = 4},
+		{x = 12, y = 8.4, z = 0},
+		{x = 8, y = 8.3, z = -4},
+		{x = 4, y = 8.2, z = -8},
+		{x = -2, y = 8.2, z = -10},
+		{x = -8, y = 8.3, z = -8},
+		{x = -12, y = 8.5, z = -2},
+		-- Splash pool approach
+		{x = -14, y = 8.2, z = 4},
+		{x = -12, y = 7.5, z = 10},
+		{x = -8, y = 7.2, z = 14},
+		{x = -2, y = 7.2, z = 16},
+		-- Lazy river back toward dock
+		{x = 4, y = 7.5, z = 14},
+		{x = 8, y = 8.0, z = 10},
+		{x = 6, y = 8.5, z = 5},
+		{x = 2, y = 9.0, z = 2},
+		{x = 0, y = 9.2, z = 0},
+	}
+	return densify(controls, 0.6)
+end
+
+local PATHS = {
+	jungle_flume = build_jungle_flume(),
+}
+
+--------------------------------------------------------------------
+-- Log boat entity
+--------------------------------------------------------------------
+
+-- Slightly slower than the coaster; "faster" on drops via pitch boost optional
+local BOAT_SPEED = 5.5
+
+local function yaw_from_dir(dir)
+	return math.atan2(dir.z, dir.x) - math.pi / 2
+end
+
+local function pitch_from_dir(dir)
+	local horiz = math.sqrt(dir.x * dir.x + dir.z * dir.z)
+	if horiz < 1e-4 then
+		return dir.y > 0 and -math.pi / 2 or math.pi / 2
+	end
+	return -math.atan2(dir.y, horiz)
+end
+
+core.register_entity("log_ride:log_boat", {
+	initial_properties = {
+		physical = false,
+		collide_with_objects = false,
+		collisionbox = {-0.55, -0.25, -0.9, 0.55, 0.55, 0.9},
+		selectionbox = {-0.55, -0.25, -0.9, 0.55, 0.55, 0.9},
+		visual = "cube",
+		visual_size = {x = 1.0, y = 0.5, z = 1.6},
+		textures = {
+			"lr_log.png",
+			"lr_log.png",
+			"lr_log_end.png",
+			"lr_log_end.png",
+			"lr_log.png",
+			"lr_log.png",
+		},
+		static_save = true,
+	},
+
+	_path_name = "jungle_flume",
+	_index = 1,
+	_progress = 0,
+	_rider = nil,
+
+	set_path = function(self, name, index)
+		if PATHS[name] then
+			self._path_name = name
+			self._index = index or 1
+			self._progress = 0
+		end
+	end,
+
+	get_staticdata = function(self)
+		return core.write_json({
+			path = self._path_name,
+			index = self._index,
+			progress = self._progress,
+		}) or ""
+	end,
+
+	on_activate = function(self, staticdata, _dtime_s)
+		self.object:set_armor_groups({immortal = 1})
+		if staticdata and staticdata ~= "" then
+			local data = core.parse_json(staticdata)
+			if data then
+				self._path_name = data.path or self._path_name
+				self._index = data.index or 1
+				self._progress = data.progress or 0
+			end
+		end
+	end,
+
+	on_rightclick = function(self, clicker)
+		if not clicker or not clicker:is_player() then
+			return
+		end
+		local name = clicker:get_player_name()
+		local attached = clicker:get_attach()
+		if attached and attached == self.object then
+			clicker:set_detach()
+			clicker:set_eye_offset({x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0})
+			local pos = self.object:get_pos()
+			clicker:set_pos({x = pos.x + 1.4, y = pos.y + 0.6, z = pos.z})
+			if self._rider == name then
+				self._rider = nil
+			end
+			core.chat_send_player(name, "You hopped off the log.")
+			return
+		end
+		if self._rider and self._rider ~= name then
+			core.chat_send_player(name, "That log is full.")
+			return
+		end
+		clicker:set_attach(self.object, "", {x = 0, y = 3, z = 0}, {x = 0, y = 0, z = 0})
+		clicker:set_eye_offset({x = 0, y = -2, z = 0}, {x = 0, y = -2, z = 0})
+		self._rider = name
+		core.chat_send_player(name, "Hold on! Right-click again to get off.")
+	end,
+
+	on_step = function(self, dtime, _moveresult)
+		local path = PATHS[self._path_name]
+		if not path or #path < 2 then
+			return
+		end
+
+		if self._rider then
+			local player = core.get_player_by_name(self._rider)
+			if not player or player:get_attach() ~= self.object then
+				self._rider = nil
+			end
+		end
+
+		local i = self._index
+		if i >= #path then
+			self._index = 1
+			self._progress = 0
+			i = 1
+		end
+
+		local a = path[i]
+		local b = path[math.min(i + 1, #path)]
+		local dir = vector.direction(a, b)
+		-- Speed up on drops, slow on climbs
+		local speed = BOAT_SPEED
+		if dir.y < -0.15 then
+			speed = BOAT_SPEED * 1.7
+		elseif dir.y > 0.15 then
+			speed = BOAT_SPEED * 0.55
+		end
+
+		local seg_len = math.max(0.05, vector.distance(a, b))
+		self._progress = self._progress + (speed * dtime) / seg_len
+
+		while self._progress >= 1 do
+			self._progress = self._progress - 1
+			self._index = self._index + 1
+			if self._index >= #path then
+				self._index = 1
+			end
+			i = self._index
+			a = path[i]
+			b = path[math.min(i + 1, #path)]
+			seg_len = math.max(0.05, vector.distance(a, b))
+			dir = vector.direction(a, b)
+		end
+
+		local t = self._progress
+		local pos = {
+			x = a.x + (b.x - a.x) * t,
+			y = a.y + (b.y - a.y) * t,
+			z = a.z + (b.z - a.z) * t,
+		}
+		if vector.length(dir) < 1e-4 then
+			dir = {x = 0, y = 0, z = 1}
+		end
+		self.object:set_pos(pos)
+		self.object:set_rotation({
+			x = pitch_from_dir(dir) * 0.85,
+			y = yaw_from_dir(dir),
+			z = 0,
+		})
+	end,
+
+	on_punch = function(self, puncher)
+		if not puncher or not puncher:is_player() then
+			return
+		end
+		if self._rider then
+			local player = core.get_player_by_name(self._rider)
+			if player then
+				player:set_detach()
+				player:set_eye_offset({x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0})
+			end
+			self._rider = nil
+		end
+		self.object:remove()
+		puncher:get_inventory():add_item("main", "log_ride:log_boat_item")
+	end,
+})
+
+core.register_craftitem("log_ride:log_boat_item", {
+	description = "Log Boat",
+	inventory_image = "lr_log.png",
+	on_place = function(itemstack, placer, pointed_thing)
+		if pointed_thing.type ~= "node" then
+			return itemstack
+		end
+		local pos = vector.offset(pointed_thing.above, 0, 0.2, 0)
+		local obj = core.add_entity(pos, "log_ride:log_boat")
+		if obj then
+			local ent = obj:get_luaentity()
+			if ent then
+				local path = PATHS.jungle_flume
+				local best_i, best_d = 1, math.huge
+				for i, p in ipairs(path) do
+					local d = vector.distance(pos, p)
+					if d < best_d then
+						best_d = d
+						best_i = i
+					end
+				end
+				if best_d < 10 then
+					ent:set_path("jungle_flume", best_i)
+				else
+					ent:set_path("jungle_flume", 1)
+				end
+			end
+			if not core.is_creative_enabled(placer:get_player_name()) then
+				itemstack:take_item()
+			end
+		end
+		return itemstack
+	end,
+})
+
+--------------------------------------------------------------------
+-- Mapgen
+--------------------------------------------------------------------
+
+local GROUND_Y = 7
+local WATER_Y = 6
+local GEN_MIN = {x = -28, y = 0, z = -18}
+local GEN_MAX = {x = 28, y = 26, z = 28}
+
+local function overlaps(minp, maxp)
+	return not (maxp.x < GEN_MIN.x or minp.x > GEN_MAX.x
+		or maxp.y < GEN_MIN.y or minp.y > GEN_MAX.y
+		or maxp.z < GEN_MIN.z or minp.z > GEN_MAX.z)
+end
+
+local function facedir_from_dir(dx, dz)
+	if math.abs(dx) > math.abs(dz) then
+		return dx >= 0 and 1 or 3
+	end
+	return dz >= 0 and 0 or 2
+end
+
+local FLUME_CELLS = {}
+do
+	local path = PATHS.jungle_flume
+	local seen = {}
+	for i = 1, #path - 1 do
+		local p = path[i]
+		local n = path[i + 1]
+		local gx = math.floor(p.x + 0.5)
+		local gy = math.floor(p.y + 0.5)
+		local gz = math.floor(p.z + 0.5)
+		local key = gx .. "," .. gy .. "," .. gz
+		if not seen[key] then
+			seen[key] = true
+			local dx = n.x - p.x
+			local dy = n.y - p.y
+			local dz = n.z - p.z
+			local kind = "straight"
+			if math.abs(dy) > 0.3 then
+				kind = "ramp"
+			elseif i > 2 then
+				local prev = path[i - 1]
+				local d1x, d1z = p.x - prev.x, p.z - prev.z
+				local d2x, d2z = n.x - p.x, n.z - p.z
+				local cross = d1x * d2z - d1z * d2x
+				if math.abs(cross) > 0.2 then
+					kind = "curve"
+				end
+			end
+			FLUME_CELLS[#FLUME_CELLS + 1] = {
+				x = gx, y = gy, z = gz,
+				kind = kind,
+				param2 = facedir_from_dir(dx, dz),
+			}
+		end
+	end
+end
+
+-- Splash pool center
+local POOL_C = {x = -8, z = 12}
+local POOL_R = 5
+
+core.register_on_generated(function(minp, maxp, _seed)
+	if not overlaps(minp, maxp) then
+		return
+	end
+
+	local vm, emin, emax = core.get_mapgen_object("voxelmanip")
+	local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+	local data = vm:get_data()
+	local param2_data = vm:get_param2_data()
+
+	local c_air = core.get_content_id("air")
+	local c_stone = core.get_content_id("log_ride:stone")
+	local c_dirt = core.get_content_id("log_ride:dirt")
+	local c_grass = core.get_content_id("log_ride:dirt_with_grass")
+	local c_sand = core.get_content_id("log_ride:sand")
+	local c_water = core.get_content_id("log_ride:water")
+	local c_tree = core.get_content_id("log_ride:tree")
+	local c_leaves = core.get_content_id("log_ride:leaves")
+	local c_dock = core.get_content_id("log_ride:dock")
+	local c_support = core.get_content_id("log_ride:support")
+	local c_splash = core.get_content_id("log_ride:splash")
+	local c_straight = core.get_content_id("log_ride:flume_straight")
+	local c_curve = core.get_content_id("log_ride:flume_curve")
+	local c_ramp = core.get_content_id("log_ride:flume_ramp")
+	local c_station = core.get_content_id("log_ride:station")
+
+	for z = minp.z, maxp.z do
+		for x = minp.x, maxp.x do
+			local in_park = x >= GEN_MIN.x and x <= GEN_MAX.x
+				and z >= GEN_MIN.z and z <= GEN_MAX.z
+			local pdx = x - POOL_C.x
+			local pdz = z - POOL_C.z
+			local in_pool = (pdx * pdx + pdz * pdz) <= (POOL_R * POOL_R)
+			for y = minp.y, maxp.y do
+				local vi = area:index(x, y, z)
+				if in_park then
+					if in_pool then
+						if y < GROUND_Y - 2 then
+							data[vi] = c_stone
+						elseif y < GROUND_Y - 1 then
+							data[vi] = c_sand
+						elseif y <= GROUND_Y then
+							data[vi] = c_water
+						else
+							data[vi] = c_air
+						end
+					else
+						if y < GROUND_Y - 2 then
+							data[vi] = c_stone
+						elseif y < GROUND_Y then
+							data[vi] = c_dirt
+						elseif y == GROUND_Y then
+							data[vi] = c_grass
+						else
+							data[vi] = c_air
+						end
+					end
+				else
+					if y <= WATER_Y then
+						data[vi] = c_water
+					elseif y < GROUND_Y then
+						data[vi] = c_stone
+					else
+						data[vi] = c_air
+					end
+				end
+			end
+		end
+	end
+
+	-- Simple jungle trees (deterministic pseudo-random from position)
+	local function hash2(x, z)
+		return (x * 73856093 + z * 19349663) % 1000
+	end
+
+	for z = minp.z, maxp.z do
+		for x = minp.x, maxp.x do
+			if x >= GEN_MIN.x and x <= GEN_MAX.x
+				and z >= GEN_MIN.z and z <= GEN_MAX.z then
+				local h = hash2(x, z)
+				local pdx = x - POOL_C.x
+				local pdz = z - POOL_C.z
+				local in_pool = (pdx * pdx + pdz * pdz) <= ((POOL_R + 2) * (POOL_R + 2))
+				local near_dock = math.abs(x) <= 4 and math.abs(z) <= 4
+				if h < 18 and not in_pool and not near_dock then
+					local trunk_h = 4 + (h % 3)
+					for ty = GROUND_Y + 1, GROUND_Y + trunk_h do
+						if ty >= minp.y and ty <= maxp.y then
+							data[area:index(x, ty, z)] = c_tree
+						end
+					end
+					local top = GROUND_Y + trunk_h
+					for ly = top - 1, top + 2 do
+						for lx = x - 2, x + 2 do
+							for lz = z - 2, z + 2 do
+								if lx >= minp.x and lx <= maxp.x
+									and ly >= minp.y and ly <= maxp.y
+									and lz >= minp.z and lz <= maxp.z then
+									local dx = lx - x
+									local dy = ly - top
+									local dz = lz - z
+									if dx * dx + dy * dy + dz * dz <= 6 then
+										local vi = area:index(lx, ly, lz)
+										if data[vi] == c_air then
+											data[vi] = c_leaves
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- Boarding dock
+	for z = -2, 3 do
+		for x = -3, 3 do
+			local y = GROUND_Y
+			if x >= minp.x and x <= maxp.x
+				and y >= minp.y and y <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				data[area:index(x, y, z)] = c_dock
+			end
+			if math.abs(x) == 3 or z == -2 then
+				local wy = GROUND_Y + 1
+				if x >= minp.x and x <= maxp.x
+					and wy >= minp.y and wy <= maxp.y
+					and z >= minp.z and z <= maxp.z
+					and not (z == 3) then
+					-- low railing posts
+					if (x + z) % 2 == 0 then
+						data[area:index(x, wy, z)] = c_support
+					end
+				end
+			end
+		end
+	end
+
+	if 0 >= minp.x and 0 <= maxp.x
+		and (GROUND_Y + 1) >= minp.y and (GROUND_Y + 1) <= maxp.y
+		and (-1) >= minp.z and (-1) <= maxp.z then
+		data[area:index(0, GROUND_Y + 1, -1)] = c_station
+	end
+
+	-- Splash pads around pool edge
+	for z = POOL_C.z - POOL_R - 1, POOL_C.z + POOL_R + 1 do
+		for x = POOL_C.x - POOL_R - 1, POOL_C.x + POOL_R + 1 do
+			local pdx = x - POOL_C.x
+			local pdz = z - POOL_C.z
+			local r2 = pdx * pdx + pdz * pdz
+			if r2 >= (POOL_R * POOL_R) and r2 <= (POOL_R + 1) * (POOL_R + 1) then
+				local y = GROUND_Y + 1
+				if x >= minp.x and x <= maxp.x
+					and y >= minp.y and y <= maxp.y
+					and z >= minp.z and z <= maxp.z then
+					data[area:index(x, y, z)] = c_splash
+				end
+			end
+		end
+	end
+
+	-- Flume channel + water + supports
+	for _, cell in ipairs(FLUME_CELLS) do
+		local x, y, z = cell.x, cell.y, cell.z
+		if x >= minp.x and x <= maxp.x
+			and y >= minp.y and y <= maxp.y
+			and z >= minp.z and z <= maxp.z then
+			local vi = area:index(x, y, z)
+			local cid = c_straight
+			if cell.kind == "curve" then
+				cid = c_curve
+			elseif cell.kind == "ramp" then
+				cid = c_ramp
+			end
+			data[vi] = cid
+			param2_data[vi] = cell.param2
+		end
+		-- Supports under elevated sections
+		if y > GROUND_Y + 1 then
+			for sy = y - 1, GROUND_Y + 1, -1 do
+				if x >= minp.x and x <= maxp.x
+					and sy >= minp.y and sy <= maxp.y
+					and z >= minp.z and z <= maxp.z
+					and (x + z + y) % 2 == 0 then
+					local vi = area:index(x, sy, z)
+					if data[vi] == c_air then
+						data[vi] = c_support
+					end
+				end
+			end
+		end
+	end
+
+	vm:set_data(data)
+	vm:set_param2_data(param2_data)
+	vm:calc_lighting()
+	vm:write_to_map()
+	vm:update_liquids()
+end)
+
+--------------------------------------------------------------------
+-- Player setup
+--------------------------------------------------------------------
+
+local SPAWN = {x = 0, y = GROUND_Y + 2, z = -1}
+
+core.settings:set("static_spawnpoint",
+	SPAWN.x .. "," .. SPAWN.y .. "," .. SPAWN.z)
+core.settings:set("mg_name", "singlenode")
+
+local starter_items = {
+	"log_ride:log_boat_item 2",
+	"log_ride:flume_straight 64",
+	"log_ride:flume_curve 32",
+	"log_ride:flume_ramp 32",
+	"log_ride:support 48",
+	"log_ride:dock 24",
+	"log_ride:splash 16",
+	"log_ride:station 1",
+	"log_ride:tree 16",
+	"log_ride:leaves 32",
+}
+
+core.register_on_newplayer(function(player)
+	player:set_pos(SPAWN)
+	local inv = player:get_inventory()
+	for _, stack in ipairs(starter_items) do
+		inv:add_item("main", stack)
+	end
+	core.chat_send_player(player:get_player_name(),
+		"Welcome to the Log Ride! Right-click the station block on the dock "
+		.. "to spawn a log boat, then right-click the boat to ride the flume. "
+		.. "Build your own channels with flume segments.")
+end)
+
+core.register_on_joinplayer(function(player)
+	core.after(2, function()
+		if not player or not player:is_player() then
+			return
+		end
+		local p = {x = 0, y = 9.5, z = 2}
+		local objs = core.get_objects_inside_radius(p, 50)
+		for _, obj in ipairs(objs) do
+			local ent = obj:get_luaentity()
+			if ent and ent.name == "log_ride:log_boat" then
+				return
+			end
+		end
+		local obj = core.add_entity(p, "log_ride:log_boat")
+		if obj then
+			local ent = obj:get_luaentity()
+			if ent then
+				ent:set_path("jungle_flume", 1)
+			end
+		end
+	end)
+end)
+name = log_ride
+description = Flume segments, log boats, and a jungle waterslide layout
+‰PNG
+
+   IHDR          :˜ ½  IDATxïş ;K!FO¨F0…„¨‚ sª—ŒœŠ¦@A¢“c’”… r‘¨±zš²Xh‹°£…luh X¥y‚¤ °tvZ °¡“¤Y $Š´ZCi½<¹j„³ª‹q -i™ŸL~#_76¼‚: o¢“–­KA–T±œ)‰ƒ¹ ›‰§”xt‡™›'MY‡ {‚©—JJ„²´ÀY[‚_ ·¢›a¯¤hy–+¯«° =(¯„|‘aaDT;) Ó!“³±´ˆd²ÆÔÈÈµ ŸŒœ©º}€¤g«Œ€„¸ sETš´³p©•G™u†|¨ L=•fšxz/ˆ¦ Cs` ŒB°ª£|RHs63falYMˆÙ{6/”²    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ÕIDAT(S%iOa…ß˜º F+0ÈVE¡ €(²àÈ°ƒ8lEPÁad„H•J«±QÓÔôs?ôg¶CLNNÜÜœ›sA]ˆûxˆJf@Ö%ÂíüvØÆÎL­‹Åv¾ÿâHG?$,«IãxØÈ|#dµ¢œvTß*FNĞIÇ37ÿeÜwÚuÇp+Ç…Í\9µĞ”(ÏŸ†Crò®:pOõkÉ«RF9TyÛdd¾nÑr–mÅOlÚáíš˜¤KHQò+\Hç5ŠÇgò:?—,>õDLıZó¦MË÷—v7¯dÊb‹–u”çÕS¿H3…³Cª™ “­ÅÆU‚÷ø±·ßÖş„PtşL÷®<Ö¾ş¼=;Ú@dU­–´Úì® Sœ°óo«:—6ˆ_nk¾ èrté³Ê>›E³Ÿ}`æ•Í
+K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:r5k Ö¡5)°nˆ”ÒÙ:¹Ï
+Õå>.üœç"ËE¬¿M´âO÷+°0„2@Á½îv0#{«:C.<¾ZığˆpL­ï|(ôúéNAKUœ¹ØD/giûú? hÑÿİ3MD]“'˜Èé6#iåzmsDCBÅ•…¨ø±d.øÀ…°éí›âyÌ¾
+)oÒ»5½¬U6áÃµ?3ê™©—ïáJe;'¶ ĞÍjß.|Ã”´W›Îç>6ŠÈLò^SJó]Ãğ‡õÈhF–hŠ»:Z.ûÈi]ŸJhïv#´Gz›oCpá¿Q§::uN&i¨…¡ë'ŒH~ÅÁ‹[ÚÑÚYÌ
+Š¸úâPSÏò{9¶+?qrq¯ğk~ÔZŞW‹2³±´—qn$ÑÍÊ¾â?fà™pÕZ    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  €IDATxbÌn6T<×
+ÒÛ  „e¡e^Ó1_˜¡·Á·Nú0Ã‚ieÙ2H¹¿œn>ÏwyDgc‰µ´‘ºxsT3·˜Ğzµy{?=\mîïo
+˜ù3Ô Ó w=;9ÅÕL«Çº\m¥œ˜K6ò®Úv`œ%˜Xb3Úˆ½qÒÉi63BìêªÈöBîMMÑ7UDq”ç~ìàQ H!ÛÑ”eWek0äJ|¾,tñÅ›Á<ƒ¢«›^Ê>U!´euãøøTf¤Ü}~’çoæÔ—F¤“Cì2©³7Bü¸ì&pwS‰vÎ²ûüÃÙ(4ÏsÙôƒ®fëF—¦Dßüt¾Ÿ‡UÑŠî-—„ªrkÄ<)—PÂ!V;‚İ(Â}øy¦¡‰ãŒàIª–ÙÖ0›£ä|Ô³hÚÃ4!6»¿kşû§çq·Å¤¤VªÓ=Àcè˜Ñúë¯¿úºÜÏ½|wÿúË­4õÜaÆØBØvôjSÙ>~|ì"Ÿº†mYV}×İ&{Äl»n˜áø½OÓë+¹Û£Ó(pİÀç“i-€®~“£eÔ,ã>ÃAÖ*Îc0·¸íe/Å”­¬u]‹IØœ@¥2–M²./ÏSÃĞÍõ
+.ïUºğÓ0¬×âi³šôĞKàPïì$“óø²A™¼“ï_ı¾v™¦Çqü*l‰ßÕ(qè´5—7%[ıÏ¿ü'›éï^0ÙQ‚¾øîXª	Û#BÄóh”RÊpWÉŒ6ğ8wÀØõZ­‹R„©….>‰ÄÙÛb¨Å4ß éo–R—¯ÇBùçó (ëÿ@÷rW‘ïÑ    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ãIDATxbÌn6”DÈÛ`ş$Ëá¤ÌÌt ÷n‡Ëü˜Ÿ)ÙV5Ó¡Ÿawu‡øK‡Iª§Ïµ©›·?x‰¡›ğ…K5Ï<>ß“/m_1ş5×)rójÌ$gP‡dOˆÃ›//ğÅíí3]9òx[=©ë7´y®¯ÈB-‘ëİeªçÏryóı×iLã¤',Ÿ¥ì^4£‘2m)ó–d¹f¹ß¯ÔPt¤qN:#qÌPvB+‰/,6±ÏCZ!Ce %L¤&~¼h©ëyŸŞ›Ä,Í0p{—ÓëÇ¹¿«yëƒ=NÔsÿP¢,›Æ­C—ÀêÌ·ÔíCËÊÃW9Õib·[àj·¾Ø=¡;‹išÈÊGAS¸<•3™ÎPƒã°N¸¹,p<‹İ2äÁ¶\¸<++Gö+í€5iÛ’·^{ÙÙÔ-iU‰ıK{Ç6>’¬İ4‰mòšPc$êb‡å’U¼àé©¿şt%ÎnÎDÕeÈc:Š®éº†¹E¨Y	%¡ÁŸşI[d¼´Ø¿ğ’8ÿıY„¾`»W6n`z•°P^À<,˜u+£Ã2vL“kj5YŞÒ4—l^´	—Z64ıˆeû¨O¿Ùr~VóPyõ%I’Ä>£>!°8ûµfÚ@ªY|&ÙSëı¦êÔšÂÂ&Ú*æNğTTc…çÛÈ@òªy¹ÓÏ	È¤wŞÚ¢]‹‹óGäÃuÇv³],(*îç¶†À‰xóõõ4`^Æ¶mÆ^qØ¿ÄÙoO„®FêV±^ÿŸğ$¬61Ma±	Æ£&Šö”™ËCÚòıÿR—#ısƒáƒİ«¬o¿{ºQŞ€eÙfÀa¹up\E“Ã¨<"|?€¡¡;ÒÒ±PÀzûë57w%–Á†iO~_1š8JvËåÍM×ñÎ{kªªgˆˆı„4+øíŸwÜ#j³    IEND®B`‚‰PNG
+
+   IHDR         bò   PLTEHA6-)$‰}pVOHëÍÊV   ZIDATxc;—ßÎp§Pt>ƒÜ}Çÿ:÷÷3˜îêŸÊ°^[ü'CNÏY3æB¾üÂ †ÚL³"†sŒ)}Î²–Å1Ê&WL,61ìÔÜWÏ0±§ñ8 ƒí#½d^Ì    IEND®B`‚‰PNG
+
+   IHDR         óÿa  :IDATx%““c‰Å/yaÛ'mÛ¶ôØ¶mÛ¶gŠ¬·¸ş\g_Í”náêˆé§¦vınWç$¢N{\Úõ±Fµñ¦®æR±¢	h;‚º÷ûµø,SuëÓå…ª58ôG†f˜Š¿6ŞÜ¨ÊFS±…dJã'PÕf»†Ï%[4T¼ÒPz*˜u«x4M5[Íÿµkè:ÔlrÓyÚFQÜFlÆ¦ü.äë7pªy·SE3N¬e¬¹ŞDë.È+uæ†ñshô,¼…œ>îr¨kC¾"SBc¨|]E-*ŠCÍNØöC©
+«²™ğ(şQ*ñ<]Å5íJÖÜkÔËÀ 2œ¢â)Bv…&mê<NûI”_—¦À"´,õAÉ‚›e_¬Í¿¢ÄC}‚Ó(<fªdÚ‹/êÖšÏiª<„
+ª3é:ê¡|.M­=ÊF$¹túŸ6ÿiráïBoÂĞ‰L‹<Có^·¥2z0HëQ'#×`é;Ôt5´+<…hÜo2t-~4uì÷t­}ŸÉèñlõO¢å *kKW¨Å­ğ4€ì)´ä¹_»rè?ã…Ø¬“â5†V}B37¼
+Ï­´‚¦íÉòÇ\JoAƒÆ_ó0y6ÿßÍĞ%7T®C#÷ Ğja^bƒ¯—ëÖA÷)ˆT¤¨l·‹ĞRƒØê<fSÏ·ºö9)[p‰Ê¦ˆFnÙYöÖ¥®3–+’növiğ”©ºŸ:&Óh-+¶Ì@õÛÍ?óAŒ?2UÑ,»*0i¨qc’
+†RO¹Ô}Ô©–©\Ë™v/·)¼EæªÙÊ×@`1}Ş§¢åPw*ÔkWı^´æMTé•Ğy{£Ê¨tQ½ÅP´hÒ°ÁKJÂ#ônôkà²è,š½èS¸ÍIáR»"ı.åV¸›CU«LŠælò…²8£f£³©¬DF1øŠRXû&ÀÚgQ²š¿eÀ‚á£yZş$[YòÕØÉjûFzv‘åÌjKF k¦Ì†ü§|ùz°È2hÚÙÕ†¢^›ÑË¦ÊV£±«)J­Eå	şÈé6Dª™	H    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ñIDATxb|yĞ"U%8C13†{ô½á`9Xãªğ¾Å²ÀşGÑ·9ŸÏLpJiÊ•s>§Ãá`ŒišFJYJÙî"å|Y×Zë0mÛşí¶Rg5©‹×××œ3şã(„ Î””J) )%@ÏÏÏŞÌårâœƒ~ŒúØS*e@çMÛ*­çiî<Ï!­ `«±~·İÄY¾ApÖÖR–8Wë¤$”µ…0ñù±ùÀÙeÈÉñã]	d1`š@¾¾¾  $°‹­SŠæ|˜F×uE0ÆÖpÕul[–E ì8M¦C +¦¨•®äZ+D0×eµÎ¢nĞ„óViIº„”L%E0!5÷mÏ%EEİS‹­apÁ¦iÖÖH.¡ø÷·EÓµåæêt:-óŒ XÿşşÎëÙ[KŒ"³µî†gF¯K`Î#­´äS¸ŞÃ8N1G¥äÛÛ{.d<(úNV·Ayß¼·]Ã(]×¢qkM±”Ú{ÿ=ŒŞÓkë1i©°èšFH¹ªá-¼ c<¥"€¤˜ûÍÀØµ>ûg Â*†^¯“K¼Sv8óğ‰6Q?¸ÌkıB`c`¸K£¾k·Û.Ëì½Ÿ¦	‰q¼¼¼à™à-Gôöx¹p~q?Š    IEND®B`‚‰PNG
+
+   IHDR          :˜ ½   IDATxÊC‚c Àw·ÙLÛ¶'ß¶Û6.Ø]ë‚LLÊT»:†Êz»ÃwQÊ1gšº½0O#)øde1õ“eí'i†nH$ŸÉ/Ò/b»±˜ç7@ã…•óê_KŠiT®õØb!„o»‰)«ÖŸ×ŸhâCŒ»¯Wo 6®¸¹¨~ìPÄ-jbÍ9ƒù´U(åyñƒÛJ€LÛáÛ¯”[èÒUğKĞĞ¾šQhV1|Àr‰TÊ~bƒ;Ùâë­ !\GÍkXG×>±ı/är¬Í÷°ô’Q”q<Ë±aÍÎœ#W!9iBì€]ÉoÏÙD`ˆZş«&ì
+_¶    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ZIDATxbó WYÎÛ` @¥OlÅÎÄñP™™»‚îÿœÂk™›<±${ïÂ¤Ü
+E¿¥„ÕËllw¸}Nƒ5,Íë€É7¿üİ/ÿu|wFL‹{rp£8ìÑ_ëŒü÷7ï£åˆˆßS "ŠN«Q>9@¥îïÙ®R_ß«’<„||hƒß„45;Dš¾×;Lmo­-ĞDVÆ=¹BŠL,8ä9ş:»`cJ,Ã“Äc[©¦ÀËŠêU¿"oùNC0œ‚b4r1„²ï5Á§ihøúÌ
+»Á0Î°KùÙåøğNSc]¼R©SŞèŸ½ÑzÏS©¤8’õïş9l|øa‚ìoïÓ_³ŠC4ÑõÎhÎ3Á4Š¶e7;€¿:9{íÇe°ädÄ¾´˜ –I¤Ò´%bßÕ­ —P­şó)ÑjÌü×éÒ6ìv§1ÖdZLĞæ<½ØÇW” ê6«"r4Û!û4™òÇ/'ˆ¢7ãC]›Ì†«›1ÕLÙŠ=i/7šq1…Œ!'l/^ùRúÿb©Ó›ZŞ?Ö	¤ZÖG‡f¦L8»J*ü¢ïgk/&Ìç"9zaÖ¿F¼æ§0/›'iOà¡Ö›×1O»œiIO“OŞŞIšäÈ&¨#Ç™OOe©3†öİNm%=RJŞÂ8K‘³ß0ò3¾@Ú+}9£s°põ×¤xÇéZPê˜Æ%4B >È8†°Î“–ñÌ6©¹÷…rãMÂ¹fU û/• @Ø¸%š#(†(}¨Ğ?ÏÛıAÿğJz¦ñq    IEND®B`‚‰PNG
+
+   IHDR         ‘h6   vIDATxc0P”"	A5ø©D@N¨b€±~T†Ğ Â…°h€˜ˆ€<6 vhÆCÈhWUœ0Í&`¦R/[	|~0TÃtv˜®_<V¸P–¯~{PÒ’"?t¨RCZâCh 	 Öx®-ÅJp    IEND®B`‚‰PNG
+
    IHDR         (-S   KPLTE'Bj(Bj(Bk)Cl)El*Fm+Eo+Fn+Gn+Go,Ho,Hp-Iq1Ov1Qx3Ry3Sy4Sz4Tz5S{5U{6U|6W|<\ƒ=]…uYOi   IDATW5ËrÃ0Ä¶‚•–HZê#ùÿ/íÁí^ÁÌJj@Gí]ãõ™A33¯…2ë{"2Æz=¾«º„ÍœÏ& F…ã‘W8Ê8Àfe8x¤ ùªkO0“Ô×{xåß„GM033SÆi7/÷¸½kšùİ•8¯¯ I^1ªNøxĞ eõÖ+œñ^=2ìŒ¬ŸòÒÿqğªC¿ç	48ú0›    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚcˆ²QşO	f5`Ô€Q†‹ c¸ö•Î    IEND®B`‚‰PNG
+
+   IHDR         óÿa   $IDATxÚchŠ2úO	f Ø€7åÿ”`ÊƒÑ00 $`ì9·Ìj    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚcpÓùO	f š)r$áQF®Xn ”§ĞëFh    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚc°é1úO	f5`Ô€Q†‹ ŸùÇ—9‰    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚcĞ¨0úO	f5`Ô€Q†‹ £ÑÑ£„’°    IEND®B`‚‰PNG
+
+   IHDR         óÿa   kIDATxÚ¥Ãíƒ  Ğû{Õú\«?%%MšéC$bb$bÆØû¿ÇİCÜÃÁoŒ©Äwˆ¨Ä§»R‰wR‰ãq¡û= [ãS‰WíQ‰õæR‰gåP‰¥´©Ä\œ©Ä”[TbÌL*Ñ§•h“•º8€pSVşË    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚcĞäúO	f\¸éŠ…G5€¶ÍÌ òa€³DÎM    IEND®B`‚‰PNG
+
+   IHDR         óÿa   #IDATxÚcHYpâ%˜Dl¹ôl9xÔ€QF ¶”` ‰ZÿO•Û‰Ê    IEND®B`‚‰PNG
+
+   IHDR         óÿa   (IDATxÚcHIÉüÃ¡pL¬8ÃÀ@&dñA`Àh,ŒÆÂ ˆ ^³—ÔG/w    IEND®B`‚‰PNG
+
+   IHDR         óÿa   uIDATxÚ¥ÃƒP àÿ8mj¶T¶ÙqfD"‘ˆDì8íiO¥RI2éD;ÄÿñAy3‡—˜˜8ÚåÈ„êÈ	Í­z&N^Ó1qöÛ–‰KĞ7LèáP3aDSÅ„Ï’	+Y¾L\Óµdâ–ı÷|û0ñxïóŒ*/ÌT>¥    IEND®B`‚‰PNG
+
+   IHDR         óÿa    IDATxÚc¨ĞøÂQæ’`L*ŸaÔ€QF.  WJÌ@XËC    IEND®B`‚‰PNG
+
+   IHDR         óÿa    IDATxÚc0’üÃæÊüpL¬8Ã¨£Œ0\  ¿í„0’nÜ    IEND®B`‚title = Rollercoaster Park
+description = Build track segments and ride carts on an ornate coaster. Right-click a cart to board.
+default_mapgen = singlenode
+disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
+-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- Rollercoaster Park: placeable track segments, rideable carts, ornate demo layout.
+
+core.register_alias("mapgen_singlenode", "air")
+core.register_alias("mapgen_stone", "rollercoaster:stone")
+core.register_alias("mapgen_water_source", "rollercoaster:water")
+core.register_alias("mapgen_dirt", "rollercoaster:dirt")
+core.register_alias("mapgen_dirt_with_grass", "rollercoaster:dirt_with_grass")
+core.register_alias("mapgen_sand", "rollercoaster:sand")
+
+--------------------------------------------------------------------
+-- Terrain nodes
+--------------------------------------------------------------------
+
+core.register_node("rollercoaster:stone", {
+	description = "Stone",
+	tiles = {"default_stone.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("rollercoaster:dirt", {
+	description = "Dirt",
+	tiles = {"default_dirt.png"},
+	groups = {crumbly = 3, soil = 1},
+})
+
+core.register_node("rollercoaster:dirt_with_grass", {
+	description = "Dirt with Grass",
+	tiles = {
+		"default_grass.png",
+		"default_dirt.png",
+		{name = "default_grass_side.png", tileable_vertical = false},
+	},
+	groups = {crumbly = 3, soil = 1},
+})
+
+core.register_node("rollercoaster:sand", {
+	description = "Sand",
+	tiles = {"default_sand.png"},
+	groups = {crumbly = 3},
+})
+
+core.register_node("rollercoaster:cobble", {
+	description = "Cobble",
+	tiles = {"default_cobble.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("rollercoaster:water", {
+	description = "Water",
+	drawtype = "liquid",
+	waving = 3,
+	tiles = {"default_water.png^[opacity:160"},
+	special_tiles = {
+		{name = "default_water.png^[opacity:160", backface_culling = false},
+		{name = "default_water.png^[opacity:160", backface_culling = true},
+	},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = true,
+	is_ground_content = false,
+	drowning = 1,
+	liquidtype = "source",
+	liquid_alternative_source = "rollercoaster:water",
+	liquid_alternative_flowing = "rollercoaster:water",
+	liquid_viscosity = 1,
+	liquid_renewable = false,
+	liquid_range = 0,
+	post_effect_color = {a = 64, r = 100, g = 100, b = 200},
+	groups = {water = 3, liquid = 3},
+})
+
+--------------------------------------------------------------------
+-- Track segments (placeable building pieces)
+--------------------------------------------------------------------
+
+local track_box = {
+	type = "fixed",
+	fixed = {
+		{-0.5, -0.15, -0.5, 0.5, 0.05, 0.5}, -- deck
+		{-0.45, 0.05, -0.5, -0.30, 0.22, 0.5}, -- left rail
+		{0.30, 0.05, -0.5, 0.45, 0.22, 0.5}, -- right rail
+	},
+}
+
+local track_groups = {
+	cracky = 2,
+	oddly_breakable_by_hand = 1,
+	rc_track = 1,
+}
+
+core.register_node("rollercoaster:track_straight", {
+	description = "Coaster Track (Straight)",
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	tiles = {
+		"rc_track_top.png",
+		"rc_track.png",
+		"rc_rail.png",
+		"rc_rail.png",
+		"rc_track.png",
+		"rc_track.png",
+	},
+	node_box = track_box,
+	selection_box = track_box,
+	groups = track_groups,
+	is_ground_content = false,
+	sunlight_propagates = true,
+})
+
+core.register_node("rollercoaster:track_curve", {
+	description = "Coaster Track (Curve)",
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	tiles = {
+		"rc_track_top.png",
+		"rc_track.png",
+		"rc_rail.png",
+	},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.5, -0.15, -0.5, 0.5, 0.05, 0.15},
+			{-0.15, -0.15, -0.5, 0.5, 0.05, 0.5},
+			{-0.45, 0.05, -0.5, -0.30, 0.22, 0.15},
+			{0.30, 0.05, -0.5, 0.45, 0.22, 0.15},
+			{-0.15, 0.05, 0.30, 0.5, 0.22, 0.45},
+			{-0.15, 0.05, -0.45, 0.15, 0.22, -0.30},
+		},
+	},
+	groups = track_groups,
+	is_ground_content = false,
+	sunlight_propagates = true,
+})
+
+core.register_node("rollercoaster:track_ramp", {
+	description = "Coaster Track (Ramp)",
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	tiles = {
+		"rc_track_top.png",
+		"rc_track.png",
+		"rc_rail.png",
+	},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.5, -0.5, -0.5, 0.5, -0.20, -0.15},
+			{-0.5, -0.35, -0.15, 0.5, -0.05, 0.15},
+			{-0.5, -0.15, 0.15, 0.5, 0.15, 0.5},
+			{-0.45, -0.20, -0.5, -0.30, 0.0, -0.15},
+			{0.30, -0.20, -0.5, 0.45, 0.0, -0.15},
+			{-0.45, 0.15, 0.15, -0.30, 0.35, 0.5},
+			{0.30, 0.15, 0.15, 0.45, 0.35, 0.5},
+		},
+	},
+	groups = track_groups,
+	is_ground_content = false,
+	sunlight_propagates = true,
+})
+
+core.register_node("rollercoaster:track_support", {
+	description = "Track Support",
+	drawtype = "nodebox",
+	paramtype = "light",
+	tiles = {"rc_support.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.15, -0.5, -0.15, 0.15, 0.5, 0.15},
+			{-0.35, 0.35, -0.35, 0.35, 0.5, 0.35},
+		},
+	},
+	groups = {cracky = 2, oddly_breakable_by_hand = 1},
+	is_ground_content = false,
+	sunlight_propagates = true,
+})
+
+core.register_node("rollercoaster:track_ornament", {
+	description = "Ornate Track Filigree",
+	drawtype = "nodebox",
+	paramtype = "light",
+	light_source = 6,
+	tiles = {"rc_ornament.png", "rc_gold.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.08, -0.5, -0.08, 0.08, 0.55, 0.08},
+			{-0.35, 0.35, -0.08, 0.35, 0.5, 0.08},
+			{-0.08, 0.35, -0.35, 0.08, 0.5, 0.35},
+			{-0.2, 0.5, -0.2, 0.2, 0.7, 0.2},
+		},
+	},
+	groups = {cracky = 2, oddly_breakable_by_hand = 1},
+	is_ground_content = false,
+	sunlight_propagates = true,
+})
+
+core.register_node("rollercoaster:station_brick", {
+	description = "Station Brick",
+	tiles = {"rc_brick.png"},
+	groups = {cracky = 2},
+})
+
+core.register_node("rollercoaster:platform", {
+	description = "Station Platform",
+	tiles = {"rc_platform.png"},
+	groups = {cracky = 2},
+})
+
+core.register_node("rollercoaster:station_block", {
+	description = "Coaster Station (spawn cart on right-click)",
+	tiles = {
+		"rc_station.png",
+		"rc_brick.png",
+		"rc_gold.png",
+		"rc_gold.png",
+		"rc_station.png",
+		"rc_station.png",
+	},
+	groups = {cracky = 2},
+	on_rightclick = function(pos, _node, clicker)
+		if not clicker or not clicker:is_player() then
+			return
+		end
+		local cart_pos = vector.add(pos, {x = 0, y = 1.2, z = 2})
+		local obj = core.add_entity(cart_pos, "rollercoaster:cart")
+		if obj then
+			local ent = obj:get_luaentity()
+			if ent then
+				ent:set_path("grand_loop", 1)
+			end
+			core.chat_send_player(clicker:get_player_name(),
+				"Cart ready! Right-click it to board.")
+		end
+	end,
+})
+
+--------------------------------------------------------------------
+-- Path definitions (waypoints for carts)
+--------------------------------------------------------------------
+
+-- Build a dense polyline from control points (Catmull-Rom-ish linear densify).
+local function densify(points, step)
+	step = step or 0.75
+	local out = {}
+	for i = 1, #points - 1 do
+		local a = points[i]
+		local b = points[i + 1]
+		local d = vector.distance(a, b)
+		local n = math.max(1, math.floor(d / step))
+		for k = 0, n - 1 do
+			local t = k / n
+			out[#out + 1] = {
+				x = a.x + (b.x - a.x) * t,
+				y = a.y + (b.y - a.y) * t,
+				z = a.z + (b.z - a.z) * t,
+			}
+		end
+	end
+	out[#out + 1] = vector.copy(points[#points])
+	return out
+end
+
+-- Ornate grand loop: station â†’ climb â†’ left loop â†’ helix climb â†’ drop â†’ figure-S â†’ home.
+local function build_grand_loop()
+	local controls = {
+		-- Station platform (heading +Z)
+		{x = 0, y = 10.5, z = 0},
+		{x = 0, y = 10.5, z = 6},
+		-- First climb
+		{x = 0, y = 12, z = 12},
+		{x = 0, y = 15, z = 18},
+		{x = 0, y = 18, z = 24},
+		-- High straight with ornament zone
+		{x = 0, y = 20, z = 30},
+		{x = 4, y = 20, z = 36},
+		-- Left bank curve
+		{x = 12, y = 19, z = 40},
+		{x = 20, y = 18, z = 38},
+		{x = 24, y = 17, z = 30},
+		-- Small loop-ish vertical oval (stylized)
+		{x = 24, y = 14, z = 24},
+		{x = 24, y = 12, z = 20},
+		{x = 24, y = 14, z = 16},
+		{x = 24, y = 18, z = 14},
+		{x = 24, y = 22, z = 16},
+		{x = 24, y = 24, z = 20},
+		{x = 24, y = 22, z = 24},
+		{x = 24, y = 18, z = 26},
+		-- Helix / spiral climb
+		{x = 18, y = 16, z = 28},
+		{x = 12, y = 17, z = 24},
+		{x = 10, y = 19, z = 16},
+		{x = 14, y = 21, z = 10},
+		{x = 20, y = 23, z = 8},
+		{x = 26, y = 24, z = 12},
+		{x = 28, y = 25, z = 18},
+		-- Peak and dramatic drop
+		{x = 26, y = 26, z = 24},
+		{x = 20, y = 22, z = 28},
+		{x = 12, y = 16, z = 28},
+		{x = 4, y = 12, z = 24},
+		{x = -4, y = 11, z = 16},
+		-- S-curve return over the park
+		{x = -10, y = 12, z = 8},
+		{x = -14, y = 14, z = 0},
+		{x = -12, y = 16, z = -8},
+		{x = -4, y = 14, z = -12},
+		{x = 4, y = 12, z = -10},
+		{x = 8, y = 11, z = -4},
+		-- Final approach into station
+		{x = 4, y = 10.5, z = 0},
+		{x = 0, y = 10.5, z = 0},
+	}
+	return densify(controls, 0.7)
+end
+
+local PATHS = {
+	grand_loop = build_grand_loop(),
+}
+
+--------------------------------------------------------------------
+-- Cart entity
+--------------------------------------------------------------------
+
+local CART_SPEED = 8 -- nodes per second along path
+
+local function yaw_from_dir(dir)
+	return math.atan2(dir.z, dir.x) - math.pi / 2
+end
+
+local function pitch_from_dir(dir)
+	local horiz = math.sqrt(dir.x * dir.x + dir.z * dir.z)
+	if horiz < 1e-4 then
+		return dir.y > 0 and -math.pi / 2 or math.pi / 2
+	end
+	return -math.atan2(dir.y, horiz)
+end
+
+core.register_entity("rollercoaster:cart", {
+	initial_properties = {
+		physical = false,
+		collide_with_objects = false,
+		collisionbox = {-0.45, -0.2, -0.45, 0.45, 0.7, 0.45},
+		selectionbox = {-0.45, -0.2, -0.45, 0.45, 0.7, 0.45},
+		visual = "cube",
+		visual_size = {x = 0.9, y = 0.55, z = 1.1},
+		textures = {
+			"rc_cart.png", -- top
+			"rc_cart_side.png", -- bottom
+			"rc_cart_side.png",
+			"rc_cart_side.png",
+			"rc_cart.png",
+			"rc_cart.png",
+		},
+		static_save = true,
+	},
+
+	_path_name = "grand_loop",
+	_index = 1,
+	_progress = 0, -- 0..1 between index and index+1
+	_rider = nil,
+
+	set_path = function(self, name, index)
+		if PATHS[name] then
+			self._path_name = name
+			self._index = index or 1
+			self._progress = 0
+		end
+	end,
+
+	get_staticdata = function(self)
+		return core.write_json({
+			path = self._path_name,
+			index = self._index,
+			progress = self._progress,
+		}) or ""
+	end,
+
+	on_activate = function(self, staticdata, _dtime_s)
+		self.object:set_armor_groups({immortal = 1})
+		if staticdata and staticdata ~= "" then
+			local data = core.parse_json(staticdata)
+			if data then
+				self._path_name = data.path or self._path_name
+				self._index = data.index or 1
+				self._progress = data.progress or 0
+			end
+		end
+	end,
+
+	on_rightclick = function(self, clicker)
+		if not clicker or not clicker:is_player() then
+			return
+		end
+		local name = clicker:get_player_name()
+		local attached = clicker:get_attach()
+		if attached and attached == self.object then
+			clicker:set_detach()
+			clicker:set_eye_offset({x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0})
+			local pos = self.object:get_pos()
+			clicker:set_pos({x = pos.x + 1.2, y = pos.y + 0.5, z = pos.z})
+			if self._rider == name then
+				self._rider = nil
+			end
+			core.chat_send_player(name, "You left the cart.")
+			return
+		end
+		if self._rider and self._rider ~= name then
+			core.chat_send_player(name, "That cart is occupied.")
+			return
+		end
+		clicker:set_attach(self.object, "", {x = 0, y = 2, z = 0}, {x = 0, y = 0, z = 0})
+		clicker:set_eye_offset({x = 0, y = -4, z = 0}, {x = 0, y = -4, z = 0})
+		self._rider = name
+		core.chat_send_player(name, "Riding! Right-click again to get off.")
+	end,
+
+	on_step = function(self, dtime, _moveresult)
+		local path = PATHS[self._path_name]
+		if not path or #path < 2 then
+			return
+		end
+
+		-- Drop rider reference if they disconnected or detached
+		if self._rider then
+			local player = core.get_player_by_name(self._rider)
+			if not player or player:get_attach() ~= self.object then
+				self._rider = nil
+			end
+		end
+
+		local i = self._index
+		if i >= #path then
+			self._index = 1
+			self._progress = 0
+			i = 1
+		end
+
+		local a = path[i]
+		local b = path[math.min(i + 1, #path)]
+		local seg_len = math.max(0.05, vector.distance(a, b))
+		self._progress = self._progress + (CART_SPEED * dtime) / seg_len
+
+		while self._progress >= 1 do
+			self._progress = self._progress - 1
+			self._index = self._index + 1
+			if self._index >= #path then
+				self._index = 1
+			end
+			i = self._index
+			a = path[i]
+			b = path[math.min(i + 1, #path)]
+			seg_len = math.max(0.05, vector.distance(a, b))
+		end
+
+		local t = self._progress
+		local pos = {
+			x = a.x + (b.x - a.x) * t,
+			y = a.y + (b.y - a.y) * t,
+			z = a.z + (b.z - a.z) * t,
+		}
+		local dir = vector.direction(a, b)
+		if vector.length(dir) < 1e-4 then
+			dir = {x = 0, y = 0, z = 1}
+		end
+		self.object:set_pos(pos)
+		-- set_rotation uses radians (x=pitch, y=yaw, z=roll)
+		self.object:set_rotation({
+			x = pitch_from_dir(dir),
+			y = yaw_from_dir(dir),
+			z = 0,
+		})
+	end,
+
+	on_punch = function(self, puncher)
+		if not puncher or not puncher:is_player() then
+			return
+		end
+		if self._rider then
+			local player = core.get_player_by_name(self._rider)
+			if player then
+				player:set_detach()
+				player:set_eye_offset({x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0})
+			end
+			self._rider = nil
+		end
+		self.object:remove()
+		puncher:get_inventory():add_item("main", "rollercoaster:cart_item")
+	end,
+})
+
+core.register_craftitem("rollercoaster:cart_item", {
+	description = "Rollercoaster Cart",
+	inventory_image = "rc_cart.png",
+	on_place = function(itemstack, placer, pointed_thing)
+		if pointed_thing.type ~= "node" then
+			return itemstack
+		end
+		local pos = vector.offset(pointed_thing.above, 0, 0.3, 0)
+		local obj = core.add_entity(pos, "rollercoaster:cart")
+		if obj then
+			local ent = obj:get_luaentity()
+			if ent then
+				-- Snap to nearest waypoint on grand_loop if nearby
+				local path = PATHS.grand_loop
+				local best_i, best_d = 1, math.huge
+				for i, p in ipairs(path) do
+					local d = vector.distance(pos, p)
+					if d < best_d then
+						best_d = d
+						best_i = i
+					end
+				end
+				if best_d < 8 then
+					ent:set_path("grand_loop", best_i)
+				else
+					-- Free cart still rides grand_loop from start
+					ent:set_path("grand_loop", 1)
+				end
+			end
+			if not core.is_creative_enabled(placer:get_player_name()) then
+				itemstack:take_item()
+			end
+		end
+		return itemstack
+	end,
+})
+
+--------------------------------------------------------------------
+-- Mapgen: park + ornate track along grand_loop
+--------------------------------------------------------------------
+
+local GROUND_Y = 8
+local WATER_Y = 6
+local GEN_MIN = {x = -36, y = 0, z = -24}
+local GEN_MAX = {x = 40, y = 32, z = 48}
+
+local function overlaps(minp, maxp)
+	return not (maxp.x < GEN_MIN.x or minp.x > GEN_MAX.x
+		or maxp.y < GEN_MIN.y or minp.y > GEN_MAX.y
+		or maxp.z < GEN_MIN.z or minp.z > GEN_MAX.z)
+end
+
+local function facedir_from_dir(dx, dz)
+	-- 0 = +Z, 1 = +X, 2 = -Z, 3 = -X
+	if math.abs(dx) > math.abs(dz) then
+		return dx >= 0 and 1 or 3
+	end
+	return dz >= 0 and 0 or 2
+end
+
+-- Precompute track cell placements from path
+local TRACK_CELLS = {}
+do
+	local path = PATHS.grand_loop
+	local seen = {}
+	for i = 1, #path - 1 do
+		local p = path[i]
+		local n = path[i + 1]
+		local gx = math.floor(p.x + 0.5)
+		local gy = math.floor(p.y + 0.5)
+		local gz = math.floor(p.z + 0.5)
+		local key = gx .. "," .. gy .. "," .. gz
+		if not seen[key] then
+			seen[key] = true
+			local dx = n.x - p.x
+			local dy = n.y - p.y
+			local dz = n.z - p.z
+			local kind = "straight"
+			if math.abs(dy) > 0.35 then
+				kind = "ramp"
+			elseif i > 2 then
+				local prev = path[i - 1]
+				local d1x, d1z = p.x - prev.x, p.z - prev.z
+				local d2x, d2z = n.x - p.x, n.z - p.z
+				local cross = d1x * d2z - d1z * d2x
+				if math.abs(cross) > 0.25 then
+					kind = "curve"
+				end
+			end
+			TRACK_CELLS[#TRACK_CELLS + 1] = {
+				x = gx, y = gy, z = gz,
+				kind = kind,
+				param2 = facedir_from_dir(dx, dz),
+			}
+		end
+	end
+end
+
+core.register_on_generated(function(minp, maxp, _seed)
+	if not overlaps(minp, maxp) then
+		return
+	end
+
+	local vm, emin, emax = core.get_mapgen_object("voxelmanip")
+	local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+	local data = vm:get_data()
+	local param2_data = vm:get_param2_data()
+
+	local c_air = core.get_content_id("air")
+	local c_stone = core.get_content_id("rollercoaster:stone")
+	local c_dirt = core.get_content_id("rollercoaster:dirt")
+	local c_grass = core.get_content_id("rollercoaster:dirt_with_grass")
+	local c_sand = core.get_content_id("rollercoaster:sand")
+	local c_water = core.get_content_id("rollercoaster:water")
+	local c_cobble = core.get_content_id("rollercoaster:cobble")
+	local c_platform = core.get_content_id("rollercoaster:platform")
+	local c_brick = core.get_content_id("rollercoaster:station_brick")
+	local c_support = core.get_content_id("rollercoaster:track_support")
+	local c_ornament = core.get_content_id("rollercoaster:track_ornament")
+	local c_straight = core.get_content_id("rollercoaster:track_straight")
+	local c_curve = core.get_content_id("rollercoaster:track_curve")
+	local c_ramp = core.get_content_id("rollercoaster:track_ramp")
+	local c_station = core.get_content_id("rollercoaster:station_block")
+
+	-- Base park terrain + pond
+	for z = minp.z, maxp.z do
+		for x = minp.x, maxp.x do
+			local in_park = x >= GEN_MIN.x and x <= GEN_MAX.x
+				and z >= GEN_MIN.z and z <= GEN_MAX.z
+			local pond = (x * x + (z - 8) * (z - 8)) <= 36
+			for y = minp.y, maxp.y do
+				local vi = area:index(x, y, z)
+				if in_park then
+					if y < GROUND_Y - 2 then
+						data[vi] = c_stone
+					elseif y < GROUND_Y then
+						data[vi] = pond and c_sand or c_dirt
+					elseif y == GROUND_Y then
+						if pond then
+							data[vi] = c_sand
+						else
+							data[vi] = c_grass
+						end
+					elseif pond and y <= WATER_Y + 1 and y > GROUND_Y then
+						-- shallow decorative pond only if ground cut â€” skip
+						data[vi] = c_air
+					else
+						data[vi] = c_air
+					end
+				else
+					if y <= WATER_Y then
+						data[vi] = c_water
+					elseif y < GROUND_Y then
+						data[vi] = c_stone
+					else
+						data[vi] = c_air
+					end
+				end
+			end
+			-- pond water on top of sand in a dip
+			if in_park and pond then
+				for y = math.max(minp.y, GROUND_Y - 1), math.min(maxp.y, GROUND_Y) do
+					local vi = area:index(x, y, z)
+					if y < GROUND_Y then
+						data[vi] = c_water
+					elseif y == GROUND_Y then
+						data[vi] = c_water
+					end
+				end
+			end
+		end
+	end
+
+	-- Station building around origin
+	for z = -3, 2 do
+		for x = -4, 4 do
+			for y = GROUND_Y + 1, GROUND_Y + 4 do
+				if x >= minp.x and x <= maxp.x
+					and y >= minp.y and y <= maxp.y
+					and z >= minp.z and z <= maxp.z then
+					local vi = area:index(x, y, z)
+					local wall = (x == -4 or x == 4 or z == -3 or z == 2)
+					local roof = (y == GROUND_Y + 4)
+					local door = (z == 2 and math.abs(x) <= 1 and y <= GROUND_Y + 2)
+					if roof then
+						data[vi] = c_brick
+					elseif wall and not door then
+						data[vi] = c_brick
+					elseif y == GROUND_Y + 1 and not wall then
+						data[vi] = c_platform
+					end
+				end
+			end
+			-- floor
+			local fy = GROUND_Y
+			if x >= minp.x and x <= maxp.x
+				and fy >= minp.y and fy <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				data[area:index(x, fy, z)] = c_platform
+			end
+		end
+	end
+
+	-- Station control block
+	if 0 >= minp.x and 0 <= maxp.x
+		and (GROUND_Y + 1) >= minp.y and (GROUND_Y + 1) <= maxp.y
+		and (-2) >= minp.z and (-2) <= maxp.z then
+		data[area:index(0, GROUND_Y + 1, -2)] = c_station
+	end
+
+	-- Path plaza
+	for z = 0, 6 do
+		for x = -1, 1 do
+			local y = GROUND_Y
+			if x >= minp.x and x <= maxp.x
+				and y >= minp.y and y <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				data[area:index(x, y, z)] = c_cobble
+			end
+		end
+	end
+
+	-- Track + supports + ornaments
+	for _, cell in ipairs(TRACK_CELLS) do
+		local x, y, z = cell.x, cell.y, cell.z
+		if x >= minp.x and x <= maxp.x
+			and y >= minp.y and y <= maxp.y
+			and z >= minp.z and z <= maxp.z then
+			local vi = area:index(x, y, z)
+			local cid = c_straight
+			if cell.kind == "curve" then
+				cid = c_curve
+			elseif cell.kind == "ramp" then
+				cid = c_ramp
+			end
+			data[vi] = cid
+			param2_data[vi] = cell.param2
+		end
+		-- supports down to ground
+		for sy = y - 1, GROUND_Y + 1, -1 do
+			if x >= minp.x and x <= maxp.x
+				and sy >= minp.y and sy <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				-- place support every other column for a lighter lattice
+				if (x + z) % 2 == 0 then
+					local vi = area:index(x, sy, z)
+					if data[vi] == c_air then
+						data[vi] = c_support
+					end
+				end
+			end
+		end
+		-- ornaments on high peaks
+		if y >= 22 and (x + z) % 3 == 0 then
+			local oy = y + 1
+			if x >= minp.x and x <= maxp.x
+				and oy >= minp.y and oy <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				data[area:index(x, oy, z)] = c_ornament
+			end
+		end
+	end
+
+	vm:set_data(data)
+	vm:set_param2_data(param2_data)
+	vm:calc_lighting()
+	vm:write_to_map()
+	vm:update_liquids()
+end)
+
+--------------------------------------------------------------------
+-- Player setup
+--------------------------------------------------------------------
+
+local SPAWN = {x = 0, y = GROUND_Y + 2, z = -1}
+
+core.settings:set("static_spawnpoint",
+	SPAWN.x .. "," .. SPAWN.y .. "," .. SPAWN.z)
+core.settings:set("mg_name", "singlenode")
+
+local starter_items = {
+	"rollercoaster:cart_item 2",
+	"rollercoaster:track_straight 64",
+	"rollercoaster:track_curve 32",
+	"rollercoaster:track_ramp 32",
+	"rollercoaster:track_support 64",
+	"rollercoaster:track_ornament 16",
+	"rollercoaster:platform 32",
+	"rollercoaster:station_block 1",
+}
+
+core.register_on_newplayer(function(player)
+	player:set_pos(SPAWN)
+	local inv = player:get_inventory()
+	for _, stack in ipairs(starter_items) do
+		inv:add_item("main", stack)
+	end
+	core.chat_send_player(player:get_player_name(),
+		"Welcome to Rollercoaster Park! Right-click the gold station block "
+		.. "to spawn a cart, then right-click the cart to ride the grand loop. "
+		.. "Use track segments in your inventory to build more coasters.")
+end)
+
+core.register_on_joinplayer(function(player)
+	-- Ensure a demo cart exists near the station once the area is loaded
+	core.after(2, function()
+		if not player or not player:is_player() then
+			return
+		end
+		local p = {x = 0, y = 11, z = 2}
+		local objs = core.get_objects_inside_radius(p, 40)
+		for _, obj in ipairs(objs) do
+			local ent = obj:get_luaentity()
+			if ent and ent.name == "rollercoaster:cart" then
+				return
+			end
+		end
+		local obj = core.add_entity(p, "rollercoaster:cart")
+		if obj then
+			local ent = obj:get_luaentity()
+			if ent then
+				ent:set_path("grand_loop", 1)
+			end
+		end
+	end)
+end)
+name = rollercoaster
+description = Track segments, rideable carts, and an ornate coaster layout
+‰PNG
+
+   IHDR          :˜ ½  IDATxïş ;K!FO¨F0…„¨‚ sª—ŒœŠ¦@A¢“c’”… r‘¨±zš²Xh‹°£…luh X¥y‚¤ °tvZ °¡“¤Y $Š´ZCi½<¹j„³ª‹q -i™ŸL~#_76¼‚: o¢“–­KA–T±œ)‰ƒ¹ ›‰§”xt‡™›'MY‡ {‚©—JJ„²´ÀY[‚_ ·¢›a¯¤hy–+¯«° =(¯„|‘aaDT;) Ó!“³±´ˆd²ÆÔÈÈµ ŸŒœ©º}€¤g«Œ€„¸ sETš´³p©•G™u†|¨ L=•fšxz/ˆ¦ Cs` ŒB°ª£|RHs63falYMˆÙ{6/”²    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ÕIDAT(S%iOa…ß˜º F+0ÈVE¡ €(²àÈ°ƒ8lEPÁad„H•J«±QÓÔôs?ôg¶CLNNÜÜœ›sA]ˆûxˆJf@Ö%ÂíüvØÆÎL­‹Åv¾ÿâHG?$,«IãxØÈ|#dµ¢œvTß*FNĞIÇ37ÿeÜwÚuÇp+Ç…Í\9µĞ”(ÏŸ†Crò®:pOõkÉ«RF9TyÛdd¾nÑr–mÅOlÚáíš˜¤KHQò+\Hç5ŠÇgò:?—,>õDLıZó¦MË÷—v7¯dÊb‹–u”çÕS¿H3…³Cª™ “­ÅÆU‚÷ø±·ßÖş„PtşL÷®<Ö¾ş¼=;Ú@dU­–´Úì® Sœ°óo«:—6ˆ_nk¾ èrté³Ê>›E³Ÿ}`æ•Í
+K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:r5k Ö¡5)°nˆ”ÒÙ:¹Ï
+Õå>.üœç"ËE¬¿M´âO÷+°0„2@Á½îv0#{«:C.<¾ZığˆpL­ï|(ôúéNAKUœ¹ØD/giûú? hÑÿİ3MD]“'˜Èé6#iåzmsDCBÅ•…¨ø±d.øÀ…°éí›âyÌ¾
+)oÒ»5½¬U6áÃµ?3ê™©—ïáJe;'¶ ĞÍjß.|Ã”´W›Îç>6ŠÈLò^SJó]Ãğ‡õÈhF–hŠ»:Z.ûÈi]ŸJhïv#´Gz›oCpá¿Q§::uN&i¨…¡ë'ŒH~ÅÁ‹[ÚÑÚYÌ
+Š¸úâPSÏò{9¶+?qrq¯ğk~ÔZŞW‹2³±´—qn$ÑÍÊ¾â?fà™pÕZ    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  €IDATxbÌn6T<×
+ÒÛ  „e¡e^Ó1_˜¡·Á·Nú0Ã‚ieÙ2H¹¿œn>ÏwyDgc‰µ´‘ºxsT3·˜Ğzµy{?=\mîïo
+˜ù3Ô Ó w=;9ÅÕL«Çº\m¥œ˜K6ò®Úv`œ%˜Xb3Úˆ½qÒÉi63BìêªÈöBîMMÑ7UDq”ç~ìàQ H!ÛÑ”eWek0äJ|¾,tñÅ›Á<ƒ¢«›^Ê>U!´euãøøTf¤Ü}~’çoæÔ—F¤“Cì2©³7Bü¸ì&pwS‰vÎ²ûüÃÙ(4ÏsÙôƒ®fëF—¦Dßüt¾Ÿ‡UÑŠî-—„ªrkÄ<)—PÂ!V;‚İ(Â}øy¦¡‰ãŒàIª–ÙÖ0›£ä|Ô³hÚÃ4!6»¿kşû§çq·Å¤¤VªÓ=Àcè˜Ñúë¯¿úºÜÏ½|wÿúË­4õÜaÆØBØvôjSÙ>~|ì"Ÿº†mYV}×İ&{Äl»n˜áø½OÓë+¹Û£Ó(pİÀç“i-€®~“£eÔ,ã>ÃAÖ*Îc0·¸íe/Å”­¬u]‹IØœ@¥2–M²./ÏSÃĞÍõ
+.ïUºğÓ0¬×âi³šôĞKàPïì$“óø²A™¼“ï_ı¾v™¦Çqü*l‰ßÕ(qè´5—7%[ıÏ¿ü'›éï^0ÙQ‚¾øîXª	Û#BÄóh”RÊpWÉŒ6ğ8wÀØõZ­‹R„©….>‰ÄÙÛb¨Å4ß éo–R—¯ÇBùçó (ëÿ@÷rW‘ïÑ    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ãIDATxbÌn6”DÈÛ`ş$Ëá¤ÌÌt ÷n‡Ëü˜Ÿ)ÙV5Ó¡Ÿawu‡øK‡Iª§Ïµ©›·?x‰¡›ğ…K5Ï<>ß“/m_1ş5×)rójÌ$gP‡dOˆÃ›//ğÅíí3]9òx[=©ë7´y®¯ÈB-‘ëİeªçÏryóı×iLã¤',Ÿ¥ì^4£‘2m)ó–d¹f¹ß¯ÔPt¤qN:#qÌPvB+‰/,6±ÏCZ!Ce %L¤&~¼h©ëyŸŞ›Ä,Í0p{—ÓëÇ¹¿«yëƒ=NÔsÿP¢,›Æ­C—ÀêÌ·ÔíCËÊÃW9Õib·[àj·¾Ø=¡;‹išÈÊGAS¸<•3™ÎPƒã°N¸¹,p<‹İ2äÁ¶\¸<++Gö+í€5iÛ’·^{ÙÙÔ-iU‰ıK{Ç6>’¬İ4‰mòšPc$êb‡å’U¼àé©¿şt%ÎnÎDÕeÈc:Š®éº†¹E¨Y	%¡ÁŸşI[d¼´Ø¿ğ’8ÿıY„¾`»W6n`z•°P^À<,˜u+£Ã2vL“kj5YŞÒ4—l^´	—Z64ıˆeû¨O¿Ùr~VóPyõ%I’Ä>£>!°8ûµfÚ@ªY|&ÙSëı¦êÔšÂÂ&Ú*æNğTTc…çÛÈ@òªy¹ÓÏ	È¤wŞÚ¢]‹‹óGäÃuÇv³],(*îç¶†À‰xóõõ4`^Æ¶mÆ^qØ¿ÄÙoO„®FêV±^ÿŸğ$¬61Ma±	Æ£&Šö”™ËCÚòıÿR—#ısƒáƒİ«¬o¿{ºQŞ€eÙfÀa¹up\E“Ã¨<"|?€¡¡;ÒÒ±PÀzûë57w%–Á†iO~_1š8JvËåÍM×ñÎ{kªªgˆˆı„4+øíŸwÜ#j³    IEND®B`‚‰PNG
+
+   IHDR         bò   PLTEHA6-)$‰}pVOHëÍÊV   ZIDATxc;—ßÎp§Pt>ƒÜ}Çÿ:÷÷3˜îêŸÊ°^[ü'CNÏY3æB¾üÂ †ÚL³"†sŒ)}Î²–Å1Ê&WL,61ìÔÜWÏ0±§ñ8 ƒí#½d^Ì    IEND®B`‚‰PNG
+
+   IHDR         óÿa  :IDATx%““c‰Å/yaÛ'mÛ¶ôØ¶mÛ¶gŠ¬·¸ş\g_Í”náêˆé§¦vınWç$¢N{\Úõ±Fµñ¦®æR±¢	h;‚º÷ûµø,SuëÓå…ª58ôG†f˜Š¿6ŞÜ¨ÊFS±…dJã'PÕf»†Ï%[4T¼ÒPz*˜u«x4M5[Íÿµkè:ÔlrÓyÚFQÜFlÆ¦ü.äë7pªy·SE3N¬e¬¹ŞDë.È+uæ†ñshô,¼…œ>îr¨kC¾"SBc¨|]E-*ŠCÍNØöC©
+«²™ğ(şQ*ñ<]Å5íJÖÜkÔËÀ 2œ¢â)Bv…&mê<NûI”_—¦À"´,õAÉ‚›e_¬Í¿¢ÄC}‚Ó(<fªdÚ‹/êÖšÏiª<„
+ª3é:ê¡|.M­=ÊF$¹túŸ6ÿiráïBoÂĞ‰L‹<Có^·¥2z0HëQ'#×`é;Ôt5´+<…hÜo2t-~4uì÷t­}ŸÉèñlõO¢å *kKW¨Å­ğ4€ì)´ä¹_»rè?ã…Ø¬“â5†V}B37¼
+Ï­´‚¦íÉòÇ\JoAƒÆ_ó0y6ÿßÍĞ%7T®C#÷ Ğja^bƒ¯—ëÖA÷)ˆT¤¨l·‹ĞRƒØê<fSÏ·ºö9)[p‰Ê¦ˆFnÙYöÖ¥®3–+’növiğ”©ºŸ:&Óh-+¶Ì@õÛÍ?óAŒ?2UÑ,»*0i¨qc’
+†RO¹Ô}Ô©–©\Ë™v/·)¼EæªÙÊ×@`1}Ş§¢åPw*ÔkWı^´æMTé•Ğy{£Ê¨tQ½ÅP´hÒ°ÁKJÂ#ônôkà²è,š½èS¸ÍIáR»"ı.åV¸›CU«LŠælò…²8£f£³©¬DF1øŠRXû&ÀÚgQ²š¿eÀ‚á£yZş$[YòÕØÉjûFzv‘åÌjKF k¦Ì†ü§|ùz°È2hÚÙÕ†¢^›ÑË¦ÊV£±«)J­Eå	şÈé6Dª™	H    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ñIDATxb|yĞ"U%8C13†{ô½á`9Xãªğ¾Å²ÀşGÑ·9ŸÏLpJiÊ•s>§Ãá`ŒišFJYJÙî"å|Y×Zë0mÛşí¶Rg5©‹×××œ3şã(„ Î””J) )%@ÏÏÏŞÌårâœƒ~ŒúØS*e@çMÛ*­çiî<Ï!­ `«±~·İÄY¾ApÖÖR–8Wë¤$”µ…0ñù±ùÀÙeÈÉñã]	d1`š@¾¾¾  $°‹­SŠæ|˜F×uE0ÆÖpÕul[–E ì8M¦C +¦¨•®äZ+D0×eµÎ¢nĞ„óViIº„”L%E0!5÷mÏ%EEİS‹­apÁ¦iÖÖH.¡ø÷·EÓµåæêt:-óŒ XÿşşÎëÙ[KŒ"³µî†gF¯K`Î#­´äS¸ŞÃ8N1G¥äÛÛ{.d<(úNV·Ayß¼·]Ã(]×¢qkM±”Ú{ÿ=ŒŞÓkë1i©°èšFH¹ªá-¼ c<¥"€¤˜ûÍÀØµ>ûg Â*†^¯“K¼Sv8óğ‰6Q?¸ÌkıB`c`¸K£¾k·Û.Ëì½Ÿ¦	‰q¼¼¼à™à-Gôöx¹p~q?Š    IEND®B`‚‰PNG
+
+   IHDR          :˜ ½   IDATxÊC‚c Àw·ÙLÛ¶'ß¶Û6.Ø]ë‚LLÊT»:†Êz»ÃwQÊ1gšº½0O#)øde1õ“eí'i†nH$ŸÉ/Ò/b»±˜ç7@ã…•óê_KŠiT®õØb!„o»‰)«ÖŸ×ŸhâCŒ»¯Wo 6®¸¹¨~ìPÄ-jbÍ9ƒù´U(åyñƒÛJ€LÛáÛ¯”[èÒUğKĞĞ¾šQhV1|Àr‰TÊ~bƒ;Ùâë­ !\GÍkXG×>±ı/är¬Í÷°ô’Q”q<Ë±aÍÎœ#W!9iBì€]ÉoÏÙD`ˆZş«&ì
+_¶    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ZIDATxbó WYÎÛ` @¥OlÅÎÄñP™™»‚îÿœÂk™›<±${ïÂ¤Ü
+E¿¥„ÕËllw¸}Nƒ5,Íë€É7¿üİ/ÿu|wFL‹{rp£8ìÑ_ëŒü÷7ï£åˆˆßS "ŠN«Q>9@¥îïÙ®R_ß«’<„||hƒß„45;Dš¾×;Lmo­-ĞDVÆ=¹BŠL,8ä9ş:»`cJ,Ã“Äc[©¦ÀËŠêU¿"oùNC0œ‚b4r1„²ï5Á§ihøúÌ
+»Á0Î°KùÙåøğNSc]¼R©SŞèŸ½ÑzÏS©¤8’õïş9l|øa‚ìoïÓ_³ŠC4ÑõÎhÎ3Á4Š¶e7;€¿:9{íÇe°ädÄ¾´˜ –I¤Ò´%bßÕ­ —P­şó)ÑjÌü×éÒ6ìv§1ÖdZLĞæ<½ØÇW” ê6«"r4Û!û4™òÇ/'ˆ¢7ãC]›Ì†«›1ÕLÙŠ=i/7šq1…Œ!'l/^ùRúÿb©Ó›ZŞ?Ö	¤ZÖG‡f¦L8»J*ü¢ïgk/&Ìç"9zaÖ¿F¼æ§0/›'iOà¡Ö›×1O»œiIO“OŞŞIšäÈ&¨#Ç™OOe©3†öİNm%=RJŞÂ8K‘³ß0ò3¾@Ú+}9£s°põ×¤xÇéZPê˜Æ%4B >È8†°Î“–ñÌ6©¹÷…rãMÂ¹fU û/• @Ø¸%š#(†(}¨Ğ?ÏÛıAÿğJz¦ñq    IEND®B`‚‰PNG
+
+   IHDR         ‘h6   vIDATxc0P”"	A5ø©D@N¨b€±~T†Ğ Â…°h€˜ˆ€<6 vhÆCÈhWUœ0Í&`¦R/[	|~0TÃtv˜®_<V¸P–¯~{PÒ’"?t¨RCZâCh 	 Öx®-ÅJp    IEND®B`‚‰PNG
+
+   IHDR         (-S   KPLTE'Bj(Bj(Bk)Cl)El*Fm+Eo+Fn+Gn+Go,Ho,Hp-Iq1Ov1Qx3Ry3Sy4Sz4Tz5S{5U{6U|6W|<\ƒ=]…uYOi   IDATW5ËrÃ0Ä¶‚•–HZê#ùÿ/íÁí^ÁÌJj@Gí]ãõ™A33¯…2ë{"2Æz=¾«º„ÍœÏ& F…ã‘W8Ê8Àfe8x¤ ùªkO0“Ô×{xåß„GM033SÆi7/÷¸½kšùİ•8¯¯ I^1ªNøxĞ eõÖ+œñ^=2ìŒ¬ŸòÒÿqğªC¿ç	48ú0›    IEND®B`‚‰PNG
+
+   IHDR         óÿa   'IDATxÚcè±1úŒót5P0!y†a` ©Ğå‡ƒ£é`4 1 i—İ#|`    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚc¸ğŸÌ@5hh„G5`¸0`¹ Á,_ÿ	“|    IEND®B`‚‰PNG
+
+   IHDR         óÿa   `IDATxÚ¥Ä;
+€0À=D4‰ùL,ÁB,ÁB,¼óúî°Å¾Z©À[
+xr¦·¥À•8»
+–{ŒT`
+¬–‹÷T`n[*0Y
+ŒMCç¨@o)~Î•£ q”å¯    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚcø'å?%˜DœX A5`Ô€Q¨m % à¸#¾¥§í    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚcøp"à?%˜ap°¥Gƒ(<jÀ¨´5`hf& ›IÈŸÚÖ²Y    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚcèÉsûŸjôŸ\šaÔ€QF.  ª½Ÿ:6    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚc8qâÒJ0Õ“S&	0jÀp5`Àr# ıi?oı¤H¡    IEND®B`‚‰PNG
+
+   IHDR         óÿa   'IDATxÚcXPğWD¡`BòÃÀ R5 ËFÓÁh: b VÅ5õ§c    IEND®B`‚‰PNG
+
+   IHDR         óÿa   (IDATxÚc0’ûÂ6"`L*ŸbÈÕãSnÀhŒ†Áh€1 ‹@ ğØ    IEND®B`‚‰PNG
+
+   IHDR         óÿa    IDATxÚcĞĞ0øÂQQ)`L*ŸaÔ€QF.  AËŸÁÃ    IEND®B`‚‰PNG
+
+   IHDR         óÿa   #IDATxÚc02²ùO	fx**šşS‚£±0ƒ" ÌËúğôòü    IEND®B`‚title = Spire Tunnel
+description = A spiral tunnel carved through a mountain spire. Dress the halls with crystals, runes, and carved stone.
+default_mapgen = singlenode
+disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
+-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- Spire Tunnel: a mountain spire with a spiral walkway tunnel and
+-- decorative tile set for beautifying chambers and galleries.
+
+core.register_alias("mapgen_singlenode", "air")
+core.register_alias("mapgen_stone", "spire_tunnel:stone")
+core.register_alias("mapgen_water_source", "spire_tunnel:water")
+core.register_alias("mapgen_dirt", "spire_tunnel:dirt")
+core.register_alias("mapgen_dirt_with_grass", "spire_tunnel:dirt_with_grass")
+core.register_alias("mapgen_sand", "spire_tunnel:sand")
+
+--------------------------------------------------------------------
+-- Terrain
+--------------------------------------------------------------------
+
+core.register_node("spire_tunnel:stone", {
+	description = "Mountain Stone",
+	tiles = {"st_stone.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("spire_tunnel:stone_dark", {
+	description = "Dark Mountain Stone",
+	tiles = {"st_stone_dark.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("spire_tunnel:basalt", {
+	description = "Basalt Column",
+	tiles = {"st_basalt.png"},
+	groups = {cracky = 2},
+})
+
+core.register_node("spire_tunnel:dirt", {
+	description = "Dirt",
+	tiles = {"st_dirt.png"},
+	groups = {crumbly = 3, soil = 1},
+})
+
+core.register_node("spire_tunnel:dirt_with_grass", {
+	description = "Dirt with Grass",
+	tiles = {
+		"st_grass.png",
+		"st_dirt.png",
+		{name = "default_grass_side.png", tileable_vertical = false},
+	},
+	groups = {crumbly = 3, soil = 1},
+})
+
+core.register_node("spire_tunnel:sand", {
+	description = "Sand",
+	tiles = {"default_sand.png"},
+	groups = {crumbly = 3},
+})
+
+core.register_node("spire_tunnel:snow", {
+	description = "Snow Cap",
+	tiles = {"st_snow.png"},
+	groups = {crumbly = 3},
+})
+
+core.register_node("spire_tunnel:water", {
+	description = "Water",
+	drawtype = "liquid",
+	waving = 3,
+	tiles = {"st_water.png"},
+	special_tiles = {
+		{name = "st_water.png", backface_culling = false},
+		{name = "st_water.png", backface_culling = true},
+	},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = true,
+	is_ground_content = false,
+	drowning = 1,
+	liquidtype = "source",
+	liquid_alternative_source = "spire_tunnel:water",
+	liquid_alternative_flowing = "spire_tunnel:water",
+	liquid_viscosity = 1,
+	liquid_renewable = false,
+	liquid_range = 0,
+	post_effect_color = {a = 70, r = 40, g = 80, b = 150},
+	groups = {water = 3, liquid = 3},
+})
+
+--------------------------------------------------------------------
+-- Beautifying / decorative tiles
+--------------------------------------------------------------------
+
+core.register_node("spire_tunnel:moss_stone", {
+	description = "Mossy Stone",
+	tiles = {"st_moss.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("spire_tunnel:carved_stone", {
+	description = "Carved Stone",
+	tiles = {"st_carved.png"},
+	groups = {cracky = 2},
+})
+
+core.register_node("spire_tunnel:spire_brick", {
+	description = "Spire Brick",
+	tiles = {"st_brick.png"},
+	groups = {cracky = 2},
+})
+
+core.register_node("spire_tunnel:marble", {
+	description = "Marble",
+	tiles = {"st_marble.png"},
+	groups = {cracky = 2},
+})
+
+core.register_node("spire_tunnel:obsidian", {
+	description = "Obsidian Panel",
+	tiles = {"st_obsidian.png"},
+	groups = {cracky = 1},
+})
+
+core.register_node("spire_tunnel:path", {
+	description = "Tunnel Path Stone",
+	tiles = {"st_path.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("spire_tunnel:gold_trim", {
+	description = "Gold Trim",
+	tiles = {"st_gold_trim.png"},
+	light_source = 3,
+	groups = {cracky = 2},
+})
+
+core.register_node("spire_tunnel:rune_block", {
+	description = "Rune Block",
+	tiles = {"st_rune.png"},
+	light_source = 5,
+	groups = {cracky = 2},
+	paramtype = "light",
+})
+
+-- Crystals (glowing plantlike / nodebox accents)
+local function register_crystal(name, desc, tile, light)
+	core.register_node("spire_tunnel:" .. name, {
+		description = desc,
+		drawtype = "nodebox",
+		paramtype = "light",
+		paramtype2 = "facedir",
+		light_source = light,
+		tiles = {tile},
+		use_texture_alpha = "blend",
+		node_box = {
+			type = "fixed",
+			fixed = {
+				{-0.12, -0.5, -0.12, 0.12, 0.35, 0.12},
+				{-0.22, -0.5, -0.06, -0.05, 0.1, 0.06},
+				{0.05, -0.5, -0.06, 0.22, 0.05, 0.06},
+				{-0.06, 0.2, -0.06, 0.06, 0.55, 0.06},
+			},
+		},
+		selection_box = {
+			type = "fixed",
+			fixed = {-0.25, -0.5, -0.25, 0.25, 0.55, 0.25},
+		},
+		groups = {cracky = 3, oddly_breakable_by_hand = 2},
+		is_ground_content = false,
+		sunlight_propagates = true,
+	})
+end
+
+register_crystal("crystal_blue", "Blue Crystal", "st_crystal_blue.png", 8)
+register_crystal("crystal_purple", "Purple Crystal", "st_crystal_purple.png", 7)
+register_crystal("crystal_cyan", "Cyan Crystal", "st_crystal_cyan.png", 9)
+
+core.register_node("spire_tunnel:gem_floor", {
+	description = "Gem-Inlaid Floor",
+	tiles = {"st_gem_floor.png"},
+	light_source = 2,
+	groups = {cracky = 2},
+})
+
+core.register_node("spire_tunnel:stained_glass", {
+	description = "Stained Glass",
+	drawtype = "glasslike",
+	tiles = {"st_glass.png"},
+	paramtype = "light",
+	sunlight_propagates = true,
+	use_texture_alpha = "blend",
+	light_source = 4,
+	is_ground_content = false,
+	groups = {cracky = 3, oddly_breakable_by_hand = 2},
+})
+
+core.register_node("spire_tunnel:lantern", {
+	description = "Spire Lantern",
+	drawtype = "nodebox",
+	paramtype = "light",
+	light_source = core.LIGHT_MAX - 2,
+	tiles = {"st_lantern.png", "st_gold_trim.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.2, -0.5, -0.2, 0.2, -0.15, 0.2},
+			{-0.15, -0.15, -0.15, 0.15, 0.25, 0.15},
+			{-0.08, 0.25, -0.08, 0.08, 0.45, 0.08},
+		},
+	},
+	groups = {cracky = 2, oddly_breakable_by_hand = 2},
+	is_ground_content = false,
+	sunlight_propagates = true,
+})
+
+core.register_node("spire_tunnel:vine", {
+	description = "Hanging Vine",
+	drawtype = "plantlike",
+	waving = 1,
+	tiles = {"st_vine.png"},
+	inventory_image = "st_vine.png",
+	paramtype = "light",
+	sunlight_propagates = true,
+	walkable = false,
+	buildable_to = true,
+	climbable = true,
+	groups = {snappy = 3, flora = 1, attached_node = 1},
+	selection_box = {
+		type = "fixed",
+		fixed = {-0.3, -0.5, -0.3, 0.3, 0.5, 0.3},
+	},
+})
+
+core.register_node("spire_tunnel:mountain_blossom", {
+	description = "Mountain Blossom",
+	drawtype = "plantlike",
+	waving = 1,
+	tiles = {"st_flower.png"},
+	inventory_image = "st_flower.png",
+	paramtype = "light",
+	sunlight_propagates = true,
+	walkable = false,
+	buildable_to = true,
+	groups = {snappy = 3, flora = 1, attached_node = 1},
+	selection_box = {
+		type = "fixed",
+		fixed = {-0.25, -0.5, -0.25, 0.25, 0.2, 0.25},
+	},
+})
+
+core.register_node("spire_tunnel:pillar", {
+	description = "Carved Pillar",
+	drawtype = "nodebox",
+	paramtype = "light",
+	tiles = {"st_carved.png", "st_marble.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.3, -0.5, -0.3, 0.3, 0.5, 0.3},
+			{-0.4, -0.5, -0.4, 0.4, -0.3, 0.4},
+			{-0.4, 0.3, -0.4, 0.4, 0.5, 0.4},
+		},
+	},
+	groups = {cracky = 2},
+	is_ground_content = false,
+})
+
+core.register_node("spire_tunnel:arch_keystone", {
+	description = "Arch Keystone",
+	tiles = {"st_gold_trim.png", "st_carved.png"},
+	groups = {cracky = 2},
+})
+
+core.register_node("spire_tunnel:window_frame", {
+	description = "View Window Frame",
+	drawtype = "nodebox",
+	paramtype = "light",
+	tiles = {"st_carved.png", "st_glass.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.5, -0.5, -0.1, 0.5, 0.5, 0.1},
+		},
+	},
+	use_texture_alpha = "blend",
+	groups = {cracky = 2},
+	is_ground_content = false,
+	sunlight_propagates = true,
+})
+
+--------------------------------------------------------------------
+-- Spire + spiral tunnel geometry
+--------------------------------------------------------------------
+
+local GROUND_Y = 4
+local WATER_Y = 3
+local SPIRE_CX = 0
+local SPIRE_CZ = 0
+local SPIRE_BASE_R = 22
+local SPIRE_TOP_Y = 55
+local SPIRE_BASE_Y = GROUND_Y
+local TUNNEL_R = 2.2 -- hollow radius of walkway tube
+local SPIRAL_CORE_R = 9 -- radius of spiral centerline from axis
+local SPIRAL_TURNS = 4.5
+local SPIRAL_START_Y = GROUND_Y + 2
+local SPIRAL_END_Y = SPIRE_TOP_Y - 6
+
+local GEN_PAD = 6
+local GEN_MIN = {
+	x = -SPIRE_BASE_R - GEN_PAD,
+	y = 0,
+	z = -SPIRE_BASE_R - GEN_PAD,
+}
+local GEN_MAX = {
+	x = SPIRE_BASE_R + GEN_PAD,
+	y = SPIRE_TOP_Y + 4,
+	z = SPIRE_BASE_R + GEN_PAD,
+}
+
+local function overlaps(minp, maxp)
+	return not (maxp.x < GEN_MIN.x or minp.x > GEN_MAX.x
+		or maxp.y < GEN_MIN.y or minp.y > GEN_MAX.y
+		or maxp.z < GEN_MIN.z or minp.z > GEN_MAX.z)
+end
+
+-- Spire radius at height y (tapers to a point)
+local function spire_radius_at(y)
+	if y < SPIRE_BASE_Y then
+		return SPIRE_BASE_R
+	end
+	if y > SPIRE_TOP_Y then
+		return 0
+	end
+	local t = (y - SPIRE_BASE_Y) / (SPIRE_TOP_Y - SPIRE_BASE_Y)
+	-- slight concave taper
+	local taper = (1 - t) ^ 0.85
+	return SPIRE_BASE_R * taper
+end
+
+-- Spiral centerline: angle increases with height
+local function spiral_angle_at(y)
+	local t = (y - SPIRAL_START_Y) / math.max(1, SPIRAL_END_Y - SPIRAL_START_Y)
+	t = math.max(0, math.min(1, t))
+	return t * SPIRAL_TURNS * 2 * math.pi
+end
+
+local function spiral_center(y)
+	local ang = spiral_angle_at(y)
+	-- spiral tightens slightly as it rises
+	local t = (y - SPIRAL_START_Y) / math.max(1, SPIRAL_END_Y - SPIRAL_START_Y)
+	t = math.max(0, math.min(1, t))
+	local r = SPIRAL_CORE_R * (1 - 0.25 * t)
+	return {
+		x = SPIRE_CX + math.cos(ang) * r,
+		y = y,
+		z = SPIRE_CZ + math.sin(ang) * r,
+	}
+end
+
+-- Precompute path samples for floor decoration + spawn cart-less walking
+local PATH_SAMPLES = {}
+do
+	for y = SPIRAL_START_Y, SPIRAL_END_Y, 0.5 do
+		PATH_SAMPLES[#PATH_SAMPLES + 1] = spiral_center(y)
+	end
+end
+
+local function dist2_xz(x, z, px, pz)
+	local dx = x - px
+	local dz = z - pz
+	return dx * dx + dz * dz
+end
+
+local function nearest_spiral_dist2(x, y, z)
+	-- Compare to spiral center at this y (and neighbors for thickness)
+	local best = math.huge
+	for dy = -1, 1 do
+		local yy = y + dy * 0.5
+		if yy >= SPIRAL_START_Y - 1 and yy <= SPIRAL_END_Y + 1 then
+			local c = spiral_center(yy)
+			local d = (x - c.x) ^ 2 + (y - c.y) ^ 2 + (z - c.z) ^ 2
+			if d < best then
+				best = d
+			end
+		end
+	end
+	return best
+end
+
+core.register_on_generated(function(minp, maxp, _seed)
+	if not overlaps(minp, maxp) then
+		return
+	end
+
+	local vm, emin, emax = core.get_mapgen_object("voxelmanip")
+	local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+	local data = vm:get_data()
+
+	local c_air = core.get_content_id("air")
+	local c_stone = core.get_content_id("spire_tunnel:stone")
+	local c_dark = core.get_content_id("spire_tunnel:stone_dark")
+	local c_basalt = core.get_content_id("spire_tunnel:basalt")
+	local c_dirt = core.get_content_id("spire_tunnel:dirt")
+	local c_grass = core.get_content_id("spire_tunnel:dirt_with_grass")
+	local c_sand = core.get_content_id("spire_tunnel:sand")
+	local c_snow = core.get_content_id("spire_tunnel:snow")
+	local c_water = core.get_content_id("spire_tunnel:water")
+	local c_moss = core.get_content_id("spire_tunnel:moss_stone")
+	local c_path = core.get_content_id("spire_tunnel:path")
+	local c_gem = core.get_content_id("spire_tunnel:gem_floor")
+	local c_carved = core.get_content_id("spire_tunnel:carved_stone")
+	local c_brick = core.get_content_id("spire_tunnel:spire_brick")
+	local c_marble = core.get_content_id("spire_tunnel:marble")
+	local c_obs = core.get_content_id("spire_tunnel:obsidian")
+	local c_gold = core.get_content_id("spire_tunnel:gold_trim")
+	local c_rune = core.get_content_id("spire_tunnel:rune_block")
+	local c_lantern = core.get_content_id("spire_tunnel:lantern")
+	local c_crystal_b = core.get_content_id("spire_tunnel:crystal_blue")
+	local c_crystal_p = core.get_content_id("spire_tunnel:crystal_purple")
+	local c_crystal_c = core.get_content_id("spire_tunnel:crystal_cyan")
+	local c_glass = core.get_content_id("spire_tunnel:stained_glass")
+	local c_pillar = core.get_content_id("spire_tunnel:pillar")
+	local c_vine = core.get_content_id("spire_tunnel:vine")
+	local c_flower = core.get_content_id("spire_tunnel:mountain_blossom")
+
+	local tunnel_r2 = TUNNEL_R * TUNNEL_R
+	local floor_band = 0.65
+
+	for z = minp.z, maxp.z do
+		for x = minp.x, maxp.x do
+			local dx = x - SPIRE_CX
+			local dz = z - SPIRE_CZ
+			local dist_xz = math.sqrt(dx * dx + dz * dz)
+			local in_bounds = x >= GEN_MIN.x and x <= GEN_MAX.x
+				and z >= GEN_MIN.z and z <= GEN_MAX.z
+
+			for y = minp.y, maxp.y do
+				local vi = area:index(x, y, z)
+				local r_spire = spire_radius_at(y)
+				local in_spire = dist_xz <= r_spire + 0.2 and y >= SPIRE_BASE_Y
+					and y <= SPIRE_TOP_Y
+
+				-- World base
+				if y < GROUND_Y - 2 then
+					data[vi] = c_stone
+				elseif y < GROUND_Y then
+					data[vi] = c_dirt
+				elseif y == GROUND_Y then
+					if dist_xz > SPIRE_BASE_R + 2 then
+						if y <= WATER_Y then
+							data[vi] = c_water
+						else
+							data[vi] = c_grass
+						end
+					elseif dist_xz > SPIRE_BASE_R then
+						data[vi] = c_sand
+					else
+						data[vi] = c_stone
+					end
+				elseif not in_bounds then
+					if y <= WATER_Y then
+						data[vi] = c_water
+					else
+						data[vi] = c_air
+					end
+				elseif in_spire then
+					-- Shell rings: basalt core ring near axis, dark outer skin
+					local shell = (dist_xz > r_spire - 1.2)
+					local core = dist_xz < 3.5
+					if shell then
+						data[vi] = (y > SPIRE_TOP_Y - 10) and c_snow or c_dark
+					elseif core and y > GROUND_Y + 8 then
+						data[vi] = c_basalt
+					else
+						data[vi] = c_stone
+					end
+
+					-- Snow frosting near peak
+					if y >= SPIRE_TOP_Y - 8 and dist_xz > r_spire - 2.5 then
+						data[vi] = c_snow
+					end
+				else
+					if y <= WATER_Y and dist_xz > SPIRE_BASE_R + 3 then
+						data[vi] = c_water
+					else
+						data[vi] = c_air
+					end
+				end
+			end
+		end
+	end
+
+	-- Carve spiral tunnel + lay path / beautification
+	for z = minp.z, maxp.z do
+		for x = minp.x, maxp.x do
+			for y = math.max(minp.y, SPIRAL_START_Y - 2), math.min(maxp.y, SPIRAL_END_Y + 2) do
+				local vi = area:index(x, y, z)
+				local d2 = nearest_spiral_dist2(x, y, z)
+				if d2 <= tunnel_r2 then
+					local c = spiral_center(y)
+					local rel_y = y - c.y
+					-- Floor band of the tube
+					local is_floor = rel_y < -TUNNEL_R + floor_band + 0.35
+						and rel_y > -TUNNEL_R - 0.2
+					local is_lower = rel_y < -0.3
+
+					if is_floor then
+						-- Gem inlays every few steps of the spiral
+						local ang = spiral_angle_at(y)
+						local step = math.floor(ang * 3)
+						if step % 7 == 0 then
+							data[vi] = c_gem
+						elseif step % 5 == 0 then
+							data[vi] = c_marble
+						else
+							data[vi] = c_path
+						end
+					else
+						data[vi] = c_air
+					end
+
+					-- Moss near entrance (low altitude)
+					if y < SPIRAL_START_Y + 6 and is_lower and d2 > tunnel_r2 * 0.55 then
+						-- wall ring just outside air already carved; handled below
+					end
+				elseif d2 <= (TUNNEL_R + 1.1) ^ 2 and d2 > tunnel_r2 then
+					-- Tunnel lining
+					local c = spiral_center(y)
+					local rel_y = y - c.y
+					local ang = spiral_angle_at(y)
+					local step = math.floor(ang * 4)
+					if y < SPIRAL_START_Y + 8 then
+						data[vi] = c_moss
+					elseif step % 11 == 0 then
+						data[vi] = c_carved
+					elseif step % 9 == 0 then
+						data[vi] = c_brick
+					elseif step % 17 == 0 then
+						data[vi] = c_rune
+					else
+						data[vi] = c_dark
+					end
+					-- Occasional gold trim at "stations"
+					if step % 20 == 0 and math.abs(rel_y) < 0.6 then
+						data[vi] = c_gold
+					end
+				end
+			end
+		end
+	end
+
+	-- Interior galleries: small chambers at quarter-turns with pillars & crystals
+	local gallery_ys = {}
+	for turn = 0, math.floor(SPIRAL_TURNS) do
+		local t = (turn + 0.25) / SPIRAL_TURNS
+		local gy = math.floor(SPIRAL_START_Y + t * (SPIRAL_END_Y - SPIRAL_START_Y) + 0.5)
+		gallery_ys[#gallery_ys + 1] = gy
+	end
+
+	for _, gy in ipairs(gallery_ys) do
+		local c = spiral_center(gy)
+		local gx, gz = math.floor(c.x + 0.5), math.floor(c.z + 0.5)
+		-- Chamber hollow
+		for dz = -3, 3 do
+			for dx = -3, 3 do
+				for dy = 0, 3 do
+					local x, y, z = gx + dx, gy + dy, gz + dz
+					if x >= minp.x and x <= maxp.x
+						and y >= minp.y and y <= maxp.y
+						and z >= minp.z and z <= maxp.z then
+						local vi = area:index(x, y, z)
+						local r2 = dx * dx + dz * dz
+						if r2 <= 9 then
+							if dy == 0 then
+								data[vi] = (r2 <= 1) and c_obs or c_gem
+							elseif dy <= 2 and r2 <= 6 then
+								data[vi] = c_air
+							elseif dy == 3 and r2 <= 8 then
+								data[vi] = c_carved
+							end
+						end
+					end
+				end
+			end
+		end
+		-- Pillars at chamber corners
+		for _, off in ipairs({{-2, -2}, {-2, 2}, {2, -2}, {2, 2}}) do
+			for dy = 0, 2 do
+				local x, y, z = gx + off[1], gy + dy, gz + off[2]
+				if x >= minp.x and x <= maxp.x
+					and y >= minp.y and y <= maxp.y
+					and z >= minp.z and z <= maxp.z then
+					data[area:index(x, y, z)] = c_pillar
+				end
+			end
+		end
+		-- Crystals and lantern
+		local decor = {
+			{1, 1, 1, c_crystal_b},
+			{-1, 1, 1, c_crystal_p},
+			{1, 1, -1, c_crystal_c},
+			{0, 1, 0, c_lantern},
+		}
+		for _, d in ipairs(decor) do
+			local x, y, z = gx + d[1], gy + d[2], gz + d[3]
+			if x >= minp.x and x <= maxp.x
+				and y >= minp.y and y <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				data[area:index(x, y, z)] = d[4]
+			end
+		end
+	end
+
+	-- Summit shrine
+	local peak_y = SPIRE_TOP_Y - 3
+	for dz = -2, 2 do
+		for dx = -2, 2 do
+			for dy = 0, 3 do
+				local x, y, z = SPIRE_CX + dx, peak_y + dy, SPIRE_CZ + dz
+				if x >= minp.x and x <= maxp.x
+					and y >= minp.y and y <= maxp.y
+					and z >= minp.z and z <= maxp.z then
+					local vi = area:index(x, y, z)
+					local r2 = dx * dx + dz * dz
+					if dy == 0 and r2 <= 4 then
+						data[vi] = c_marble
+					elseif dy > 0 and dy < 3 and r2 <= 1 then
+						data[vi] = c_air
+					elseif dy == 3 and r2 <= 2 then
+						data[vi] = c_gold
+					elseif dy > 0 and r2 == 4 then
+						data[vi] = c_glass
+					end
+				end
+			end
+		end
+	end
+	if SPIRE_CX >= minp.x and SPIRE_CX <= maxp.x
+		and (peak_y + 1) >= minp.y and (peak_y + 1) <= maxp.y
+		and SPIRE_CZ >= minp.z and SPIRE_CZ <= maxp.z then
+		data[area:index(SPIRE_CX, peak_y + 1, SPIRE_CZ)] = c_lantern
+	end
+
+	-- Entrance arch + path from spawn
+	local entrance = spiral_center(SPIRAL_START_Y)
+	local ex, ez = math.floor(entrance.x + 0.5), math.floor(entrance.z + 0.5)
+	for i = 0, 10 do
+		local x = ex + i -- walk outward roughly +X from first spiral point
+		local z = ez
+		local y = GROUND_Y
+		if x >= minp.x and x <= maxp.x
+			and y >= minp.y and y <= maxp.y
+			and z >= minp.z and z <= maxp.z then
+			data[area:index(x, y, z)] = c_path
+		end
+		if i <= 2 then
+			for dy = 1, 3 do
+				for _, sx in ipairs({-2, 2}) do
+					local px, py, pz = ex + sx, GROUND_Y + dy, ez
+					if px >= minp.x and px <= maxp.x
+						and py >= minp.y and py <= maxp.y
+						and pz >= minp.z and pz <= maxp.z then
+						data[area:index(px, py, pz)] = c_carved
+					end
+				end
+			end
+			local kx, ky, kz = ex, GROUND_Y + 4, ez
+			if kx >= minp.x and kx <= maxp.x
+				and ky >= minp.y and ky <= maxp.y
+				and kz >= minp.z and kz <= maxp.z then
+				data[area:index(kx, ky, kz)] = c_gold
+			end
+		end
+	end
+
+	-- Surface blossoms and vines near base
+	for z = minp.z, maxp.z do
+		for x = minp.x, maxp.x do
+			local dx = x - SPIRE_CX
+			local dz = z - SPIRE_CZ
+			local dist_xz = math.sqrt(dx * dx + dz * dz)
+			if dist_xz > SPIRE_BASE_R - 1 and dist_xz < SPIRE_BASE_R + 4 then
+				local h = (x * 73856093 + z * 19349663) % 1000
+				local y = GROUND_Y + 1
+				if y >= minp.y and y <= maxp.y then
+					local vi = area:index(x, y, z)
+					if data[vi] == c_air then
+						if h < 40 then
+							data[vi] = c_flower
+						elseif h < 70 then
+							data[vi] = c_vine
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- Lanterns along spiral every ~half turn
+	for turn = 0, SPIRAL_TURNS * 2 do
+		local t = turn / (SPIRAL_TURNS * 2)
+		local y = math.floor(SPIRAL_START_Y + t * (SPIRAL_END_Y - SPIRAL_START_Y) + 0.5)
+		local c = spiral_center(y)
+		-- offset outward from path into wall niche
+		local ang = spiral_angle_at(y)
+		local lx = math.floor(c.x + math.cos(ang) * 0.2 + 0.5)
+		local ly = y + 1
+		local lz = math.floor(c.z + math.sin(ang) * 0.2 + 0.5)
+		if lx >= minp.x and lx <= maxp.x
+			and ly >= minp.y and ly <= maxp.y
+			and lz >= minp.z and lz <= maxp.z then
+			local vi = area:index(lx, ly, lz)
+			if data[vi] == c_air then
+				data[vi] = c_lantern
+			end
+		end
+	end
+
+	vm:set_data(data)
+	vm:calc_lighting()
+	vm:write_to_map()
+	vm:update_liquids()
+end)
+
+--------------------------------------------------------------------
+-- Player setup
+--------------------------------------------------------------------
+
+local entrance0 = spiral_center(SPIRAL_START_Y)
+local SPAWN = {
+	x = math.floor(entrance0.x + 6),
+	y = GROUND_Y + 2,
+	z = math.floor(entrance0.z + 0.5),
+}
+
+core.settings:set("static_spawnpoint",
+	SPAWN.x .. "," .. SPAWN.y .. "," .. SPAWN.z)
+core.settings:set("mg_name", "singlenode")
+
+local starter_items = {
+	"spire_tunnel:path 64",
+	"spire_tunnel:moss_stone 64",
+	"spire_tunnel:carved_stone 48",
+	"spire_tunnel:spire_brick 48",
+	"spire_tunnel:marble 32",
+	"spire_tunnel:obsidian 16",
+	"spire_tunnel:gem_floor 32",
+	"spire_tunnel:gold_trim 24",
+	"spire_tunnel:rune_block 16",
+	"spire_tunnel:stained_glass 24",
+	"spire_tunnel:lantern 16",
+	"spire_tunnel:crystal_blue 12",
+	"spire_tunnel:crystal_purple 12",
+	"spire_tunnel:crystal_cyan 12",
+	"spire_tunnel:pillar 16",
+	"spire_tunnel:vine 24",
+	"spire_tunnel:mountain_blossom 16",
+	"spire_tunnel:window_frame 12",
+	"spire_tunnel:arch_keystone 8",
+	"spire_tunnel:basalt 32",
+	"spire_tunnel:snow 16",
+}
+
+core.register_on_newplayer(function(player)
+	player:set_pos(SPAWN)
+	local inv = player:get_inventory()
+	for _, stack in ipairs(starter_items) do
+		inv:add_item("main", stack)
+	end
+	core.chat_send_player(player:get_player_name(),
+		"Welcome to the Spire! Follow the stone path into the spiral tunnel. "
+		.. "Galleries open at each turn; the summit shrine waits at the peak. "
+		.. "Use crystals, runes, marble, and lanterns from your inventory to "
+		.. "beautify the mountain.")
+end)
+
+core.register_on_joinplayer(function(player)
+	-- Hint once per session via chat if they spawn mid-air / wrong game world
+	core.after(1, function()
+		if player and player:is_player() then
+			local pos = player:get_pos()
+			if pos and pos.y < GROUND_Y - 5 then
+				player:set_pos(SPAWN)
+			end
+		end
+	end)
+end)
+name = spire_tunnel
+description = Spiral mountain spire, tunnel path, and decorative masonry tiles
+‰PNG
+
+   IHDR         ‘h6  ÕIDAT(S%iOa…ß˜º F+0ÈVE¡ €(²àÈ°ƒ8lEPÁad„H•J«±QÓÔôs?ôg¶CLNNÜÜœ›sA]ˆûxˆJf@Ö%ÂíüvØÆÎL­‹Åv¾ÿâHG?$,«IãxØÈ|#dµ¢œvTß*FNĞIÇ37ÿeÜwÚuÇp+Ç…Í\9µĞ”(ÏŸ†Crò®:pOõkÉ«RF9TyÛdd¾nÑr–mÅOlÚáíš˜¤KHQò+\Hç5ŠÇgò:?—,>õDLıZó¦MË÷—v7¯dÊb‹–u”çÕS¿H3…³Cª™ “­ÅÆU‚÷ø±·ßÖş„PtşL÷®<Ö¾ş¼=;Ú@dU­–´Úì® Sœ°óo«:—6ˆ_nk¾ èrté³Ê>›E³Ÿ}`æ•Í
+K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:r5k Ö¡5)°nˆ”ÒÙ:¹Ï
+Õå>.üœç"ËE¬¿M´âO÷+°0„2@Á½îv0#{«:C.<¾ZığˆpL­ï|(ôúéNAKUœ¹ØD/giûú? hÑÿİ3MD]“'˜Èé6#iåzmsDCBÅ•…¨ø±d.øÀ…°éí›âyÌ¾
+)oÒ»5½¬U6áÃµ?3ê™©—ïáJe;'¶ ĞÍjß.|Ã”´W›Îç>6ŠÈLò^SJó]Ãğ‡õÈhF–hŠ»:Z.ûÈi]ŸJhïv#´Gz›oCpá¿Q§::uN&i¨…¡ë'ŒH~ÅÁ‹[ÚÑÚYÌ
+Š¸úâPSÏò{9¶+?qrq¯ğk~ÔZŞW‹2³±´—qn$ÑÍÊ¾â?fà™pÕZ    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  €IDATxbÌn6T<×
+ÒÛ  „e¡e^Ó1_˜¡·Á·Nú0Ã‚ieÙ2H¹¿œn>ÏwyDgc‰µ´‘ºxsT3·˜Ğzµy{?=\mîïo
+˜ù3Ô Ó w=;9ÅÕL«Çº\m¥œ˜K6ò®Úv`œ%˜Xb3Úˆ½qÒÉi63BìêªÈöBîMMÑ7UDq”ç~ìàQ H!ÛÑ”eWek0äJ|¾,tñÅ›Á<ƒ¢«›^Ê>U!´euãøøTf¤Ü}~’çoæÔ—F¤“Cì2©³7Bü¸ì&pwS‰vÎ²ûüÃÙ(4ÏsÙôƒ®fëF—¦Dßüt¾Ÿ‡UÑŠî-—„ªrkÄ<)—PÂ!V;‚İ(Â}øy¦¡‰ãŒàIª–ÙÖ0›£ä|Ô³hÚÃ4!6»¿kşû§çq·Å¤¤VªÓ=Àcè˜Ñúë¯¿úºÜÏ½|wÿúË­4õÜaÆØBØvôjSÙ>~|ì"Ÿº†mYV}×İ&{Äl»n˜áø½OÓë+¹Û£Ó(pİÀç“i-€®~“£eÔ,ã>ÃAÖ*Îc0·¸íe/Å”­¬u]‹IØœ@¥2–M²./ÏSÃĞÍõ
+.ïUºğÓ0¬×âi³šôĞKàPïì$“óø²A™¼“ï_ı¾v™¦Çqü*l‰ßÕ(qè´5—7%[ıÏ¿ü'›éï^0ÙQ‚¾øîXª	Û#BÄóh”RÊpWÉŒ6ğ8wÀØõZ­‹R„©….>‰ÄÙÛb¨Å4ß éo–R—¯ÇBùçó (ëÿ@÷rW‘ïÑ    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ãIDATxbÌn6”DÈÛ`ş$Ëá¤ÌÌt ÷n‡Ëü˜Ÿ)ÙV5Ó¡Ÿawu‡øK‡Iª§Ïµ©›·?x‰¡›ğ…K5Ï<>ß“/m_1ş5×)rójÌ$gP‡dOˆÃ›//ğÅíí3]9òx[=©ë7´y®¯ÈB-‘ëİeªçÏryóı×iLã¤',Ÿ¥ì^4£‘2m)ó–d¹f¹ß¯ÔPt¤qN:#qÌPvB+‰/,6±ÏCZ!Ce %L¤&~¼h©ëyŸŞ›Ä,Í0p{—ÓëÇ¹¿«yëƒ=NÔsÿP¢,›Æ­C—ÀêÌ·ÔíCËÊÃW9Õib·[àj·¾Ø=¡;‹išÈÊGAS¸<•3™ÎPƒã°N¸¹,p<‹İ2äÁ¶\¸<++Gö+í€5iÛ’·^{ÙÙÔ-iU‰ıK{Ç6>’¬İ4‰mòšPc$êb‡å’U¼àé©¿şt%ÎnÎDÕeÈc:Š®éº†¹E¨Y	%¡ÁŸşI[d¼´Ø¿ğ’8ÿıY„¾`»W6n`z•°P^À<,˜u+£Ã2vL“kj5YŞÒ4—l^´	—Z64ıˆeû¨O¿Ùr~VóPyõ%I’Ä>£>!°8ûµfÚ@ªY|&ÙSëı¦êÔšÂÂ&Ú*æNğTTc…çÛÈ@òªy¹ÓÏ	È¤wŞÚ¢]‹‹óGäÃuÇv³],(*îç¶†À‰xóõõ4`^Æ¶mÆ^qØ¿ÄÙoO„®FêV±^ÿŸğ$¬61Ma±	Æ£&Šö”™ËCÚòıÿR—#ısƒáƒİ«¬o¿{ºQŞ€eÙfÀa¹up\E“Ã¨<"|?€¡¡;ÒÒ±PÀzûë57w%–Á†iO~_1š8JvËåÍM×ñÎ{kªªgˆˆı„4+øíŸwÜ#j³    IEND®B`‚‰PNG
+
+   IHDR         óÿa  :IDATx%““c‰Å/yaÛ'mÛ¶ôØ¶mÛ¶gŠ¬·¸ş\g_Í”náêˆé§¦vınWç$¢N{\Úõ±Fµñ¦®æR±¢	h;‚º÷ûµø,SuëÓå…ª58ôG†f˜Š¿6ŞÜ¨ÊFS±…dJã'PÕf»†Ï%[4T¼ÒPz*˜u«x4M5[Íÿµkè:ÔlrÓyÚFQÜFlÆ¦ü.äë7pªy·SE3N¬e¬¹ŞDë.È+uæ†ñshô,¼…œ>îr¨kC¾"SBc¨|]E-*ŠCÍNØöC©
+«²™ğ(şQ*ñ<]Å5íJÖÜkÔËÀ 2œ¢â)Bv…&mê<NûI”_—¦À"´,õAÉ‚›e_¬Í¿¢ÄC}‚Ó(<fªdÚ‹/êÖšÏiª<„
+ª3é:ê¡|.M­=ÊF$¹túŸ6ÿiráïBoÂĞ‰L‹<Có^·¥2z0HëQ'#×`é;Ôt5´+<…hÜo2t-~4uì÷t­}ŸÉèñlõO¢å *kKW¨Å­ğ4€ì)´ä¹_»rè?ã…Ø¬“â5†V}B37¼
+Ï­´‚¦íÉòÇ\JoAƒÆ_ó0y6ÿßÍĞ%7T®C#÷ Ğja^bƒ¯—ëÖA÷)ˆT¤¨l·‹ĞRƒØê<fSÏ·ºö9)[p‰Ê¦ˆFnÙYöÖ¥®3–+’növiğ”©ºŸ:&Óh-+¶Ì@õÛÍ?óAŒ?2UÑ,»*0i¨qc’
+†RO¹Ô}Ô©–©\Ë™v/·)¼EæªÙÊ×@`1}Ş§¢åPw*ÔkWı^´æMTé•Ğy{£Ê¨tQ½ÅP´hÒ°ÁKJÂ#ônôkà²è,š½èS¸ÍIáR»"ı.åV¸›CU«LŠælò…²8£f£³©¬DF1øŠRXû&ÀÚgQ²š¿eÀ‚á£yZş$[YòÕØÉjûFzv‘åÌjKF k¦Ì†ü§|ùz°È2hÚÙÕ†¢^›ÑË¦ÊV£±«)J­Eå	şÈé6Dª™	H    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ñIDATxb|yĞ"U%8C13†{ô½á`9Xãªğ¾Å²ÀşGÑ·9ŸÏLpJiÊ•s>§Ãá`ŒišFJYJÙî"å|Y×Zë0mÛşí¶Rg5©‹×××œ3şã(„ Î””J) )%@ÏÏÏŞÌårâœƒ~ŒúØS*e@çMÛ*­çiî<Ï!­ `«±~·İÄY¾ApÖÖR–8Wë¤$”µ…0ñù±ùÀÙeÈÉñã]	d1`š@¾¾¾  $°‹­SŠæ|˜F×uE0ÆÖpÕul[–E ì8M¦C +¦¨•®äZ+D0×eµÎ¢nĞ„óViIº„”L%E0!5÷mÏ%EEİS‹­apÁ¦iÖÖH.¡ø÷·EÓµåæêt:-óŒ XÿşşÎëÙ[KŒ"³µî†gF¯K`Î#­´äS¸ŞÃ8N1G¥äÛÛ{.d<(úNV·Ayß¼·]Ã(]×¢qkM±”Ú{ÿ=ŒŞÓkë1i©°èšFH¹ªá-¼ c<¥"€¤˜ûÍÀØµ>ûg Â*†^¯“K¼Sv8óğ‰6Q?¸ÌkıB`c`¸K£¾k·Û.Ëì½Ÿ¦	‰q¼¼¼à™à-Gôöx¹p~q?Š    IEND®B`‚‰PNG
+
+   IHDR          :˜ ½   IDATxÊC‚c Àw·ÙLÛ¶'ß¶Û6.Ø]ë‚LLÊT»:†Êz»ÃwQÊ1gšº½0O#)øde1õ“eí'i†nH$ŸÉ/Ò/b»±˜ç7@ã…•óê_KŠiT®õØb!„o»‰)«ÖŸ×ŸhâCŒ»¯Wo 6®¸¹¨~ìPÄ-jbÍ9ƒù´U(åyñƒÛJ€LÛáÛ¯”[èÒUğKĞĞ¾šQhV1|Àr‰TÊ~bƒ;Ùâë­ !\GÍkXG×>±ı/är¬Í÷°ô’Q”q<Ë±aÍÎœ#W!9iBì€]ÉoÏÙD`ˆZş«&ì
+_¶    IEND®B`‚‰PNG
+
+   IHDR         (-S   KPLTE'Bj(Bj(Bk)Cl)El*Fm+Eo+Fn+Gn+Go,Ho,Hp-Iq1Ov1Qx3Ry3Sy4Sz4Tz5S{5U{6U|6W|<\ƒ=]…uYOi   IDATW5ËrÃ0Ä¶‚•–HZê#ùÿ/íÁí^ÁÌJj@Gí]ãõ™A33¯…2ë{"2Æz=¾«º„ÍœÏ& F…ã‘W8Ê8Àfe8x¤ ùªkO0“Ô×{xåß„GM033SÆi7/÷¸½kšùİ•8¯¯ I^1ªNøxĞ eõÖ+œñ^=2ìŒ¬ŸòÒÿqğªC¿ç	48ú0›    IEND®B`‚‰PNG
+
+   IHDR         óÿa    IDATxÚcĞÕ5ÿÂÊÊZ`L*ŸaÔ€QF.  (æ
+u¤Z    IEND®B`‚‰PNG
+
+   IHDR         óÿa   'IDATxÚc¨H‰úŒã½İP0!y†a` ©Ğå‡ƒ£é`4 1 ùc\~    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚcX0­é?%˜j¤Ä‡’„G5`¸0`¹ z]ÿx3¹    IEND®B`‚‰PNG
+
+   IHDR         óÿa   #IDATxÚc¨Øòÿ?%˜jhl¹C
+5`Ô€ájÀ€åF *ÿ†ÿ³!–    IEND®B`‚‰PNG
+
+   IHDR         óÿa   #IDATxÚcxöá?%˜jÈõ,¸C
+5`Ô€ájÀ€åF I•¯­ö/„    IEND®B`‚‰PNG
+
+   IHDR         óÿa   #IDATxÚcØRñÿ?%˜jDi,¸C
+5`Ô€ájÀ€åF ü_€ ^    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚcˆ²QşO	f5`Ô€Q†‹ c¸ö•Î    IEND®B`‚‰PNG
+
+   IHDR         óÿa    IDATxÚcø°åÄJ0Ã04`‹Q
+^<jÀÈ0`æ <Ò"®|Q>9    IEND®B`‚‰PNG
+
+   IHDR         óÿa   (IDATxÚc°1ŠúÂQnM`L*ŸbÈÕãSnÀhŒ†Áh€1 ¸zôHG.ó    IEND®B`‚‰PNG
+
+   IHDR         óÿa   #IDATxÚc8ñìÿJ0ˆHYp"…<jÀ¨£PÛ J0 xÙrësêÓê    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚcøp"à?%˜j,¨#	0jÀp5`Àr# rÊÿ{’8Ì    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚc0¯0úO	f5`Ô€Q†‹ 4"à–÷    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚcøÿ¬â?%˜appbQxÔ€QhkÀĞÌL °úåø„    IEND®B`‚‰PNG
+
+   IHDR         óÿa   $IDATxÚc¸sçÙJ0ÃÀpâÄ¥ÿ”àA`Àh,ŒÆÂ ˆ Š‚îãÈÖ<    IEND®B`‚‰PNG
+
+   IHDR         óÿa   #IDATxÚc0ÊÓıïjóŸ\šDP‚F]0ê‚Q  uÜÓnjö    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚcá—ûO	f5`Ô€Q†‹ Â@Fİ$Ï    IEND®B`‚‰PNG
+
+   IHDR         óÿa   $IDATxÚcèiÊûO	f Ø€¼”Ğÿ”`ÊƒÑ00 ßcPŸ³ÿÊĞ    IEND®B`‚‰PNG
+
+   IHDR         óÿa   "IDATxÚc8qç?%˜Dhh‘…G5`Ô j@	 /G×È£è-    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚcøğõÿJ0Ã¨£Œ0\  vûã.0ï)9    IEND®B`‚‰PNG
+
+   IHDR         óÿa   (IDATxÚcˆŠJùÃnnpL¬8ÃÀ@&dñA`Àh,ŒÆÂ ˆ ‚6ùˆœ;9    IEND®B`‚‰PNG
+
+   IHDR         óÿa   (IDATxÚc07wüÃFpL¬8ÃÀ@&dñA`Àh,ŒÆÂ ˆ Øk—êQ" Q    IEND®B`‚‰PNG
+
+   IHDR         óÿa   IDATxÚcĞHÑø/ç&÷Ÿ\šaÔ€QF.  Ğš‚¨£7    IEND®B`‚‰PNG
+
+   IHDR         óÿa   xIDATxÚ¥ÃƒP àÿ$-mjj¶t’‰˜ˆ‰11fDÇIDFÌT*½yËJÇÚ!şÊ1]˜X¹ÙÌ„êåÚ©ø1±öŸ#› ü2¡Ÿ_’	#|˜Ø^jÁ„ym&¬¨ï™ØİDÇÄş.[&±aÂ§š	'Y*æÎeüĞDè¤T    IEND®B`‚‰PNG
 
    IHDR         óÿa   HIDAT8cèŞùó?KSÀ†PÅ$šºà?ĞÏÿ‘ ºi¢\EŒF¼.Àf Q6âsŞ0 Ç ¬® ÅC$%o™4 ğ¼à‰Ø,    IEND®B`‚‰PNG
 
