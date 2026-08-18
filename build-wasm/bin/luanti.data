@@ -146379,10 +146379,10 @@ disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
 core.register_alias("mapgen_singlenode", "air")
 core.register_alias("mapgen_stone", "flower_island:stone")
 core.register_alias("mapgen_water_source", "flower_island:water")
+core.register_alias("mapgen_river_water_source", "flower_island:water")
 core.register_alias("mapgen_dirt", "flower_island:dirt")
 core.register_alias("mapgen_dirt_with_grass", "flower_island:dirt_with_grass")
 core.register_alias("mapgen_sand", "flower_island:sand")
-
 core.register_node("flower_island:stone", {
 	description = "Stone",
 	tiles = {"default_stone.png"},
@@ -146582,7 +146582,9 @@ core.register_on_generated(function(minp, maxp, _seed)
 end)
 
 core.settings:set("static_spawnpoint", "0," .. (SURFACE_Y + 2) .. ",0")
-core.settings:set("mg_name", "singlenode")
+if core.set_mapgen_setting then
+	core.set_mapgen_setting("mg_name", "singlenode", true)
+end
 
 core.register_on_newplayer(function(player)
 	player:set_pos({x = 0, y = SURFACE_Y + 2, z = 0})
@@ -146634,6 +146636,7 @@ disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
 core.register_alias("mapgen_singlenode", "air")
 core.register_alias("mapgen_stone", "log_ride:stone")
 core.register_alias("mapgen_water_source", "log_ride:water")
+core.register_alias("mapgen_river_water_source", "log_ride:water")
 core.register_alias("mapgen_dirt", "log_ride:dirt")
 core.register_alias("mapgen_dirt_with_grass", "log_ride:dirt_with_grass")
 core.register_alias("mapgen_sand", "log_ride:sand")
@@ -146674,7 +146677,11 @@ core.register_node("log_ride:water", {
 	description = "Water",
 	drawtype = "liquid",
 	waving = 3,
-	tiles = {"lr_water.png"},
+	tiles = {
+		{name = "lr_water.png", animation = {
+			type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 2.0,
+		}},
+	},
 	special_tiles = {
 		{name = "lr_water.png", backface_culling = false},
 		{name = "lr_water.png", backface_culling = true},
@@ -146694,6 +146701,38 @@ core.register_node("log_ride:water", {
 	liquid_renewable = false,
 	liquid_range = 0,
 	post_effect_color = {a = 80, r = 40, g = 90, b = 160},
+	groups = {water = 3, liquid = 3, cools_lava = 1},
+})
+
+-- Shallow channel water: no drowning so boats/players float safely
+core.register_node("log_ride:channel_water", {
+	description = "Channel Water",
+	drawtype = "liquid",
+	waving = 3,
+	tiles = {
+		{name = "lr_water.png", animation = {
+			type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 1.5,
+		}},
+	},
+	special_tiles = {
+		{name = "lr_water.png", backface_culling = false},
+		{name = "lr_water.png", backface_culling = true},
+	},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = true,
+	is_ground_content = false,
+	drowning = 0,
+	liquidtype = "source",
+	liquid_alternative_source = "log_ride:channel_water",
+	liquid_alternative_flowing = "log_ride:channel_water",
+	liquid_viscosity = 0,
+	liquid_renewable = false,
+	liquid_range = 0,
+	post_effect_color = {a = 50, r = 50, g = 120, b = 180},
 	groups = {water = 3, liquid = 3, cools_lava = 1},
 })
 
@@ -146724,23 +146763,57 @@ local flume_groups = {
 	lr_flume = 1,
 }
 
--- U-shaped wooden channel (floor + two walls)
+-- Wooden trough floor (water sits on top as a separate node in mapgen)
+core.register_node("log_ride:flume_floor", {
+	description = "Flume Floor",
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	tiles = {"lr_wood_dark.png", "lr_wood.png", "lr_flume.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {-0.5, -0.5, -0.5, 0.5, -0.15, 0.5},
+	},
+	selection_box = {
+		type = "fixed",
+		fixed = {-0.5, -0.5, -0.5, 0.5, -0.15, 0.5},
+	},
+	groups = flume_groups,
+	is_ground_content = false,
+})
+
+-- Side wall for the channel
+core.register_node("log_ride:flume_wall", {
+	description = "Flume Wall",
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	tiles = {"lr_wood.png", "lr_wood_dark.png", "lr_flume.png"},
+	node_box = {
+		type = "fixed",
+		fixed = {-0.5, -0.5, -0.5, 0.5, 0.45, 0.5},
+	},
+	groups = flume_groups,
+	is_ground_content = false,
+})
+
+-- Full U-shaped segment for player building (floor + walls; place water on top)
 local flume_box = {
 	type = "fixed",
 	fixed = {
-		{-0.5, -0.5, -0.5, 0.5, -0.25, 0.5}, -- floor
-		{-0.5, -0.25, -0.5, -0.30, 0.35, 0.5}, -- left wall
-		{0.30, -0.25, -0.5, 0.5, 0.35, 0.5}, -- right wall
+		{-0.5, -0.5, -0.5, 0.5, -0.2, 0.5}, -- floor
+		{-0.5, -0.2, -0.5, -0.28, 0.4, 0.5}, -- left wall
+		{0.28, -0.2, -0.5, 0.5, 0.4, 0.5}, -- right wall
 	},
 }
 
 core.register_node("log_ride:flume_straight", {
-	description = "Flume Segment (Straight)",
+	description = "Flume Segment (Straight) — place channel water on top",
 	drawtype = "nodebox",
 	paramtype = "light",
 	paramtype2 = "facedir",
 	tiles = {
-		"lr_wood.png",
+		"lr_water.png",
 		"lr_wood_dark.png",
 		"lr_flume.png",
 	},
@@ -146755,16 +146828,16 @@ core.register_node("log_ride:flume_curve", {
 	drawtype = "nodebox",
 	paramtype = "light",
 	paramtype2 = "facedir",
-	tiles = {"lr_wood.png", "lr_wood_dark.png", "lr_flume.png"},
+	tiles = {"lr_water.png", "lr_wood_dark.png", "lr_flume.png"},
 	node_box = {
 		type = "fixed",
 		fixed = {
-			{-0.5, -0.5, -0.5, 0.5, -0.25, 0.15},
-			{-0.15, -0.5, -0.5, 0.5, -0.25, 0.5},
-			{-0.5, -0.25, -0.5, -0.30, 0.35, 0.15},
-			{0.30, -0.25, -0.5, 0.5, 0.35, 0.15},
-			{-0.15, -0.25, 0.30, 0.5, 0.35, 0.5},
-			{-0.15, -0.25, -0.5, 0.15, 0.35, -0.30},
+			{-0.5, -0.5, -0.5, 0.5, -0.2, 0.15},
+			{-0.15, -0.5, -0.5, 0.5, -0.2, 0.5},
+			{-0.5, -0.2, -0.5, -0.28, 0.4, 0.15},
+			{0.28, -0.2, -0.5, 0.5, 0.4, 0.15},
+			{-0.15, -0.2, 0.28, 0.5, 0.4, 0.5},
+			{-0.15, -0.2, -0.5, 0.15, 0.4, -0.28},
 		},
 	},
 	groups = flume_groups,
@@ -146776,39 +146849,21 @@ core.register_node("log_ride:flume_ramp", {
 	drawtype = "nodebox",
 	paramtype = "light",
 	paramtype2 = "facedir",
-	tiles = {"lr_wood.png", "lr_wood_dark.png", "lr_flume.png"},
+	tiles = {"lr_water.png", "lr_wood_dark.png", "lr_flume.png"},
 	node_box = {
 		type = "fixed",
 		fixed = {
 			{-0.5, -0.5, -0.5, 0.5, -0.15, -0.1},
 			{-0.5, -0.35, -0.1, 0.5, 0.0, 0.2},
 			{-0.5, -0.2, 0.2, 0.5, 0.2, 0.5},
-			{-0.5, -0.15, -0.5, -0.30, 0.25, -0.1},
-			{0.30, -0.15, -0.5, 0.5, 0.25, -0.1},
-			{-0.5, 0.2, 0.2, -0.30, 0.55, 0.5},
-			{0.30, 0.2, 0.2, 0.5, 0.55, 0.5},
+			{-0.5, -0.15, -0.5, -0.28, 0.3, -0.1},
+			{0.28, -0.15, -0.5, 0.5, 0.3, -0.1},
+			{-0.5, 0.2, 0.2, -0.28, 0.55, 0.5},
+			{0.28, 0.2, 0.2, 0.5, 0.55, 0.5},
 		},
 	},
 	groups = flume_groups,
 	is_ground_content = false,
-})
-
-core.register_node("log_ride:flume_water", {
-	description = "Flume Water",
-	drawtype = "nodebox",
-	paramtype = "light",
-	tiles = {"lr_water.png"},
-	use_texture_alpha = "blend",
-	walkable = false,
-	pointable = false,
-	diggable = false,
-	buildable_to = true,
-	node_box = {
-		type = "fixed",
-		fixed = {-0.28, -0.45, -0.5, 0.28, -0.2, 0.5},
-	},
-	groups = {not_in_creative_inventory = 1, water = 1},
-	post_effect_color = {a = 40, r = 50, g = 110, b = 180},
 })
 
 core.register_node("log_ride:splash", {
@@ -147001,6 +147056,7 @@ core.register_entity("log_ride:log_boat", {
 	_index = 1,
 	_progress = 0,
 	_rider = nil,
+	_bob = 0,
 
 	set_path = function(self, name, index)
 		if PATHS[name] then
@@ -147105,19 +147161,24 @@ core.register_entity("log_ride:log_boat", {
 		end
 
 		local t = self._progress
+		self._bob = (self._bob or 0) + dtime * 3.2
+		local bob = math.sin(self._bob) * 0.08
 		local pos = {
 			x = a.x + (b.x - a.x) * t,
-			y = a.y + (b.y - a.y) * t,
+			-- Sit slightly above water surface and bob
+			y = a.y + (b.y - a.y) * t + 0.35 + bob,
 			z = a.z + (b.z - a.z) * t,
 		}
 		if vector.length(dir) < 1e-4 then
 			dir = {x = 0, y = 0, z = 1}
 		end
+		-- Gentle roll while floating
+		local roll = math.sin(self._bob * 0.7) * 0.06
 		self.object:set_pos(pos)
 		self.object:set_rotation({
 			x = pitch_from_dir(dir) * 0.85,
 			y = yaw_from_dir(dir),
-			z = 0,
+			z = roll,
 		})
 	end,
 
@@ -147257,9 +147318,9 @@ core.register_on_generated(function(minp, maxp, _seed)
 	local c_dock = core.get_content_id("log_ride:dock")
 	local c_support = core.get_content_id("log_ride:support")
 	local c_splash = core.get_content_id("log_ride:splash")
-	local c_straight = core.get_content_id("log_ride:flume_straight")
-	local c_curve = core.get_content_id("log_ride:flume_curve")
-	local c_ramp = core.get_content_id("log_ride:flume_ramp")
+	local c_floor = core.get_content_id("log_ride:flume_floor")
+	local c_wall = core.get_content_id("log_ride:flume_wall")
+	local c_channel = core.get_content_id("log_ride:channel_water")
 	local c_station = core.get_content_id("log_ride:station")
 
 	for z = minp.z, maxp.z do
@@ -147273,11 +147334,12 @@ core.register_on_generated(function(minp, maxp, _seed)
 				local vi = area:index(x, y, z)
 				if in_park then
 					if in_pool then
-						if y < GROUND_Y - 2 then
+						-- Deeper splash pool so water is obvious
+						if y < GROUND_Y - 3 then
 							data[vi] = c_stone
-						elseif y < GROUND_Y - 1 then
+						elseif y < GROUND_Y - 2 then
 							data[vi] = c_sand
-						elseif y <= GROUND_Y then
+						elseif y <= GROUND_Y + 1 then
 							data[vi] = c_water
 						else
 							data[vi] = c_air
@@ -147399,22 +147461,62 @@ core.register_on_generated(function(minp, maxp, _seed)
 		end
 	end
 
-	-- Flume channel + water + supports
+	-- Flume: wooden floor + side walls + real channel water on top
+	-- Wall offsets relative to travel facedir (perpendicular)
+	local function wall_offsets(param2)
+		if param2 == 0 or param2 == 2 then
+			return {{-1, 0}, {1, 0}} -- travel along Z → walls on ±X
+		end
+		return {{0, -1}, {0, 1}} -- travel along X → walls on ±Z
+	end
+
 	for _, cell in ipairs(FLUME_CELLS) do
 		local x, y, z = cell.x, cell.y, cell.z
-		if x >= minp.x and x <= maxp.x
-			and y >= minp.y and y <= maxp.y
-			and z >= minp.z and z <= maxp.z then
-			local vi = area:index(x, y, z)
-			local cid = c_straight
-			if cell.kind == "curve" then
-				cid = c_curve
-			elseif cell.kind == "ramp" then
-				cid = c_ramp
+		local p2 = cell.param2
+
+		-- Clear air above the channel so the boat can pass
+		for dy = 0, 2 do
+			local ay = y + dy
+			if x >= minp.x and x <= maxp.x
+				and ay >= minp.y and ay <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				data[area:index(x, ay, z)] = c_air
 			end
-			data[vi] = cid
-			param2_data[vi] = cell.param2
 		end
+
+		-- Floor under the water line
+		local fy = y
+		if x >= minp.x and x <= maxp.x
+			and fy >= minp.y and fy <= maxp.y
+			and z >= minp.z and z <= maxp.z then
+			local vi = area:index(x, fy, z)
+			data[vi] = c_floor
+			param2_data[vi] = p2
+		end
+
+		-- Real water sitting in the trough (boat floats here)
+		local wy = y + 1
+		if x >= minp.x and x <= maxp.x
+			and wy >= minp.y and wy <= maxp.y
+			and z >= minp.z and z <= maxp.z then
+			data[area:index(x, wy, z)] = c_channel
+		end
+
+		-- Side walls
+		for _, off in ipairs(wall_offsets(p2)) do
+			local wx, wz = x + off[1], z + off[2]
+			for dy = 0, 1 do
+				local wy2 = y + dy
+				if wx >= minp.x and wx <= maxp.x
+					and wy2 >= minp.y and wy2 <= maxp.y
+					and wz >= minp.z and wz <= maxp.z then
+					local vi = area:index(wx, wy2, wz)
+					data[vi] = c_wall
+					param2_data[vi] = p2
+				end
+			end
+		end
+
 		-- Supports under elevated sections
 		if y > GROUND_Y + 1 then
 			for sy = y - 1, GROUND_Y + 1, -1 do
@@ -147425,6 +147527,23 @@ core.register_on_generated(function(minp, maxp, _seed)
 					local vi = area:index(x, sy, z)
 					if data[vi] == c_air then
 						data[vi] = c_support
+					end
+				end
+			end
+		end
+	end
+
+	-- Widen pool a bit more and ensure water surface is continuous at exit
+	for z = POOL_C.z - POOL_R, POOL_C.z + POOL_R do
+		for x = POOL_C.x - POOL_R, POOL_C.x + POOL_R do
+			local pdx = x - POOL_C.x
+			local pdz = z - POOL_C.z
+			if pdx * pdx + pdz * pdz <= POOL_R * POOL_R then
+				for y = GROUND_Y - 1, GROUND_Y + 1 do
+					if x >= minp.x and x <= maxp.x
+						and y >= minp.y and y <= maxp.y
+						and z >= minp.z and z <= maxp.z then
+						data[area:index(x, y, z)] = c_water
 					end
 				end
 			end
@@ -147442,17 +147561,22 @@ end)
 -- Player setup
 --------------------------------------------------------------------
 
-local SPAWN = {x = 0, y = GROUND_Y + 2, z = -1}
+local SPAWN = {x = 0, y = GROUND_Y + 2, z = -4}
 
 core.settings:set("static_spawnpoint",
 	SPAWN.x .. "," .. SPAWN.y .. "," .. SPAWN.z)
-core.settings:set("mg_name", "singlenode")
+if core.set_mapgen_setting then
+	core.set_mapgen_setting("mg_name", "singlenode", true)
+end
 
 local starter_items = {
 	"log_ride:log_boat_item 2",
-	"log_ride:flume_straight 64",
-	"log_ride:flume_curve 32",
-	"log_ride:flume_ramp 32",
+	"log_ride:flume_straight 48",
+	"log_ride:flume_curve 24",
+	"log_ride:flume_ramp 24",
+	"log_ride:flume_floor 48",
+	"log_ride:flume_wall 48",
+	"log_ride:channel_water 64",
 	"log_ride:support 48",
 	"log_ride:dock 24",
 	"log_ride:splash 16",
@@ -147478,7 +147602,7 @@ core.register_on_joinplayer(function(player)
 		if not player or not player:is_player() then
 			return
 		end
-		local p = {x = 0, y = 9.5, z = 2}
+		local p = {x = 0, y = 10.0, z = 2}
 		local objs = core.get_objects_inside_radius(p, 50)
 		for _, obj in ipairs(objs) do
 			local ent = obj:get_luaentity()
@@ -147570,6 +147694,7 @@ disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
 core.register_alias("mapgen_singlenode", "air")
 core.register_alias("mapgen_stone", "rollercoaster:stone")
 core.register_alias("mapgen_water_source", "rollercoaster:water")
+core.register_alias("mapgen_river_water_source", "rollercoaster:water")
 core.register_alias("mapgen_dirt", "rollercoaster:dirt")
 core.register_alias("mapgen_dirt_with_grass", "rollercoaster:dirt_with_grass")
 core.register_alias("mapgen_sand", "rollercoaster:sand")
@@ -148236,51 +148361,101 @@ core.register_on_generated(function(minp, maxp, _seed)
 		end
 	end
 
-	-- Station building around origin
-	for z = -3, 2 do
-		for x = -4, 4 do
-			for y = GROUND_Y + 1, GROUND_Y + 4 do
-				if x >= minp.x and x <= maxp.x
-					and y >= minp.y and y <= maxp.y
-					and z >= minp.z and z <= maxp.z then
-					local vi = area:index(x, y, z)
-					local wall = (x == -4 or x == 4 or z == -3 or z == 2)
-					local roof = (y == GROUND_Y + 4)
-					local door = (z == 2 and math.abs(x) <= 1 and y <= GROUND_Y + 2)
-					if roof then
-						data[vi] = c_brick
-					elseif wall and not door then
-						data[vi] = c_brick
-					elseif y == GROUND_Y + 1 and not wall then
-						data[vi] = c_platform
-					end
+	-- Open-air station pavilion (no closed walls — room to walk and look around)
+	-- Floor plaza
+	for z = -8, 8 do
+		for x = -8, 8 do
+			local y = GROUND_Y
+			if x >= minp.x and x <= maxp.x
+				and y >= minp.y and y <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				local r2 = x * x + z * z
+				if r2 <= 64 then
+					data[area:index(x, y, z)] = (r2 <= 16) and c_platform or c_cobble
 				end
 			end
-			-- floor
-			local fy = GROUND_Y
-			if x >= minp.x and x <= maxp.x
-				and fy >= minp.y and fy <= maxp.y
-				and z >= minp.z and z <= maxp.z then
-				data[area:index(x, fy, z)] = c_platform
+			-- Clear air above plaza so nothing boxes the player in
+			for y = GROUND_Y + 1, GROUND_Y + 8 do
+				if x >= minp.x and x <= maxp.x
+					and y >= minp.y and y <= maxp.y
+					and z >= minp.z and z <= maxp.z
+					and (x * x + z * z) <= 64 then
+					data[area:index(x, y, z)] = c_air
+				end
 			end
 		end
 	end
 
-	-- Station control block
-	if 0 >= minp.x and 0 <= maxp.x
-		and (GROUND_Y + 1) >= minp.y and (GROUND_Y + 1) <= maxp.y
-		and (-2) >= minp.z and (-2) <= maxp.z then
-		data[area:index(0, GROUND_Y + 1, -2)] = c_station
+	-- Corner posts + light roof beams only (open sides)
+	for _, p in ipairs({{-5, -5}, {-5, 5}, {5, -5}, {5, 5}}) do
+		for y = GROUND_Y + 1, GROUND_Y + 4 do
+			if p[1] >= minp.x and p[1] <= maxp.x
+				and y >= minp.y and y <= maxp.y
+				and p[2] >= minp.z and p[2] <= maxp.z then
+				data[area:index(p[1], y, p[2])] = c_brick
+			end
+		end
+	end
+	-- Partial roof (cross beams, still open sky views)
+	for x = -5, 5 do
+		local y = GROUND_Y + 5
+		if x >= minp.x and x <= maxp.x
+			and y >= minp.y and y <= maxp.y then
+			if -5 >= minp.z and -5 <= maxp.z then
+				data[area:index(x, y, -5)] = c_platform
+			end
+			if 5 >= minp.z and 5 <= maxp.z then
+				data[area:index(x, y, 5)] = c_platform
+			end
+		end
+	end
+	for z = -5, 5 do
+		local y = GROUND_Y + 5
+		if z >= minp.z and z <= maxp.z
+			and y >= minp.y and y <= maxp.y then
+			if -5 >= minp.x and -5 <= maxp.x then
+				data[area:index(-5, y, z)] = c_platform
+			end
+			if 5 >= minp.x and 5 <= maxp.x then
+				data[area:index(5, y, z)] = c_platform
+			end
+		end
 	end
 
-	-- Path plaza
-	for z = 0, 6 do
-		for x = -1, 1 do
+	-- Station control block on the plaza edge (not enclosing spawn)
+	if 3 >= minp.x and 3 <= maxp.x
+		and (GROUND_Y + 1) >= minp.y and (GROUND_Y + 1) <= maxp.y
+		and (-4) >= minp.z and (-4) <= maxp.z then
+		data[area:index(3, GROUND_Y + 1, -4)] = c_station
+	end
+
+	-- Wide approach path toward the track (+Z)
+	for z = 0, 12 do
+		for x = -2, 2 do
 			local y = GROUND_Y
 			if x >= minp.x and x <= maxp.x
 				and y >= minp.y and y <= maxp.y
 				and z >= minp.z and z <= maxp.z then
 				data[area:index(x, y, z)] = c_cobble
+			end
+		end
+	end
+
+	-- Viewing berm south of plaza (spawn overlook)
+	for z = -14, -9 do
+		for x = -6, 6 do
+			local y = GROUND_Y
+			if x >= minp.x and x <= maxp.x
+				and y >= minp.y and y <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				data[area:index(x, y, z)] = c_cobble
+			end
+			for y = GROUND_Y + 1, GROUND_Y + 6 do
+				if x >= minp.x and x <= maxp.x
+					and y >= minp.y and y <= maxp.y
+					and z >= minp.z and z <= maxp.z then
+					data[area:index(x, y, z)] = c_air
+				end
 			end
 		end
 	end
@@ -148337,11 +148512,14 @@ end)
 -- Player setup
 --------------------------------------------------------------------
 
-local SPAWN = {x = 0, y = GROUND_Y + 2, z = -1}
+-- Open overlook south of the plaza so the whole coaster is in view
+local SPAWN = {x = 0, y = GROUND_Y + 2, z = -12}
 
 core.settings:set("static_spawnpoint",
 	SPAWN.x .. "," .. SPAWN.y .. "," .. SPAWN.z)
-core.settings:set("mg_name", "singlenode")
+if core.set_mapgen_setting then
+	core.set_mapgen_setting("mg_name", "singlenode", true)
+end
 
 local starter_items = {
 	"rollercoaster:cart_item 2",
@@ -148468,6 +148646,7 @@ disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
 core.register_alias("mapgen_singlenode", "air")
 core.register_alias("mapgen_stone", "spire_tunnel:stone")
 core.register_alias("mapgen_water_source", "spire_tunnel:water")
+core.register_alias("mapgen_river_water_source", "spire_tunnel:water")
 core.register_alias("mapgen_dirt", "spire_tunnel:dirt")
 core.register_alias("mapgen_dirt_with_grass", "spire_tunnel:dirt_with_grass")
 core.register_alias("mapgen_sand", "spire_tunnel:sand")
@@ -148758,16 +148937,17 @@ local GROUND_Y = 4
 local WATER_Y = 3
 local SPIRE_CX = 0
 local SPIRE_CZ = 0
-local SPIRE_BASE_R = 22
-local SPIRE_TOP_Y = 55
+local SPIRE_BASE_R = 18
+local SPIRE_TOP_Y = 42
 local SPIRE_BASE_Y = GROUND_Y
-local TUNNEL_R = 2.2 -- hollow radius of walkway tube
-local SPIRAL_CORE_R = 9 -- radius of spiral centerline from axis
-local SPIRAL_TURNS = 4.5
+local TUNNEL_R = 2 -- hollow radius of walkway tube
+local LINING_R = 3 -- outer lining radius
+local SPIRAL_CORE_R = 8 -- radius of spiral centerline from axis
+local SPIRAL_TURNS = 3.5
 local SPIRAL_START_Y = GROUND_Y + 2
-local SPIRAL_END_Y = SPIRE_TOP_Y - 6
+local SPIRAL_END_Y = SPIRE_TOP_Y - 5
 
-local GEN_PAD = 6
+local GEN_PAD = 10
 local GEN_MIN = {
 	x = -SPIRE_BASE_R - GEN_PAD,
 	y = 0,
@@ -148794,12 +148974,10 @@ local function spire_radius_at(y)
 		return 0
 	end
 	local t = (y - SPIRE_BASE_Y) / (SPIRE_TOP_Y - SPIRE_BASE_Y)
-	-- slight concave taper
 	local taper = (1 - t) ^ 0.85
 	return SPIRE_BASE_R * taper
 end
 
--- Spiral centerline: angle increases with height
 local function spiral_angle_at(y)
 	local t = (y - SPIRAL_START_Y) / math.max(1, SPIRAL_END_Y - SPIRAL_START_Y)
 	t = math.max(0, math.min(1, t))
@@ -148808,10 +148986,9 @@ end
 
 local function spiral_center(y)
 	local ang = spiral_angle_at(y)
-	-- spiral tightens slightly as it rises
 	local t = (y - SPIRAL_START_Y) / math.max(1, SPIRAL_END_Y - SPIRAL_START_Y)
 	t = math.max(0, math.min(1, t))
-	local r = SPIRAL_CORE_R * (1 - 0.25 * t)
+	local r = SPIRAL_CORE_R * (1 - 0.2 * t)
 	return {
 		x = SPIRE_CX + math.cos(ang) * r,
 		y = y,
@@ -148819,34 +148996,26 @@ local function spiral_center(y)
 	}
 end
 
--- Precompute path samples for floor decoration + spawn cart-less walking
-local PATH_SAMPLES = {}
+-- Precompute spiral samples once; mapgen stamps spheres around these (fast).
+local SPIRAL_SAMPLES = {}
 do
-	for y = SPIRAL_START_Y, SPIRAL_END_Y, 0.5 do
-		PATH_SAMPLES[#PATH_SAMPLES + 1] = spiral_center(y)
+	for y = SPIRAL_START_Y, SPIRAL_END_Y, 0.45 do
+		local c = spiral_center(y)
+		local ang = spiral_angle_at(y)
+		SPIRAL_SAMPLES[#SPIRAL_SAMPLES + 1] = {
+			x = c.x, y = c.y, z = c.z,
+			ang = ang,
+			step = math.floor(ang * 4),
+		}
 	end
 end
 
-local function dist2_xz(x, z, px, pz)
-	local dx = x - px
-	local dz = z - pz
-	return dx * dx + dz * dz
-end
-
-local function nearest_spiral_dist2(x, y, z)
-	-- Compare to spiral center at this y (and neighbors for thickness)
-	local best = math.huge
-	for dy = -1, 1 do
-		local yy = y + dy * 0.5
-		if yy >= SPIRAL_START_Y - 1 and yy <= SPIRAL_END_Y + 1 then
-			local c = spiral_center(yy)
-			local d = (x - c.x) ^ 2 + (y - c.y) ^ 2 + (z - c.z) ^ 2
-			if d < best then
-				best = d
-			end
-		end
+local function set_if_in(data, area, minp, maxp, x, y, z, cid)
+	if x >= minp.x and x <= maxp.x
+		and y >= minp.y and y <= maxp.y
+		and z >= minp.z and z <= maxp.z then
+		data[area:index(x, y, z)] = cid
 	end
-	return best
 end
 
 core.register_on_generated(function(minp, maxp, _seed)
@@ -148885,16 +149054,12 @@ core.register_on_generated(function(minp, maxp, _seed)
 	local c_vine = core.get_content_id("spire_tunnel:vine")
 	local c_flower = core.get_content_id("spire_tunnel:mountain_blossom")
 
-	local tunnel_r2 = TUNNEL_R * TUNNEL_R
-	local floor_band = 0.65
-
+	-- 1) Base terrain + solid spire (single pass, cheap)
 	for z = minp.z, maxp.z do
 		for x = minp.x, maxp.x do
 			local dx = x - SPIRE_CX
 			local dz = z - SPIRE_CZ
 			local dist_xz = math.sqrt(dx * dx + dz * dz)
-			local in_bounds = x >= GEN_MIN.x and x <= GEN_MAX.x
-				and z >= GEN_MIN.z and z <= GEN_MAX.z
 
 			for y = minp.y, maxp.y do
 				local vi = area:index(x, y, z)
@@ -148902,127 +149067,117 @@ core.register_on_generated(function(minp, maxp, _seed)
 				local in_spire = dist_xz <= r_spire + 0.2 and y >= SPIRE_BASE_Y
 					and y <= SPIRE_TOP_Y
 
-				-- World base
 				if y < GROUND_Y - 2 then
 					data[vi] = c_stone
 				elseif y < GROUND_Y then
 					data[vi] = c_dirt
 				elseif y == GROUND_Y then
-					if dist_xz > SPIRE_BASE_R + 2 then
-						if y <= WATER_Y then
-							data[vi] = c_water
-						else
-							data[vi] = c_grass
-						end
+					if dist_xz > SPIRE_BASE_R + 3 then
+						data[vi] = c_grass
 					elseif dist_xz > SPIRE_BASE_R then
 						data[vi] = c_sand
 					else
 						data[vi] = c_stone
 					end
-				elseif not in_bounds then
-					if y <= WATER_Y then
-						data[vi] = c_water
-					else
-						data[vi] = c_air
-					end
 				elseif in_spire then
-					-- Shell rings: basalt core ring near axis, dark outer skin
 					local shell = (dist_xz > r_spire - 1.2)
-					local core = dist_xz < 3.5
+					local core = dist_xz < 3.0
 					if shell then
-						data[vi] = (y > SPIRE_TOP_Y - 10) and c_snow or c_dark
-					elseif core and y > GROUND_Y + 8 then
+						data[vi] = (y > SPIRE_TOP_Y - 8) and c_snow or c_dark
+					elseif core and y > GROUND_Y + 6 then
 						data[vi] = c_basalt
 					else
 						data[vi] = c_stone
 					end
-
-					-- Snow frosting near peak
-					if y >= SPIRE_TOP_Y - 8 and dist_xz > r_spire - 2.5 then
+					if y >= SPIRE_TOP_Y - 6 and dist_xz > r_spire - 2.2 then
 						data[vi] = c_snow
 					end
+				elseif y <= WATER_Y and dist_xz > SPIRE_BASE_R + 4 then
+					data[vi] = c_water
 				else
-					if y <= WATER_Y and dist_xz > SPIRE_BASE_R + 3 then
-						data[vi] = c_water
-					else
-						data[vi] = c_air
-					end
+					data[vi] = c_air
 				end
 			end
 		end
 	end
 
-	-- Carve spiral tunnel + lay path / beautification
-	for z = minp.z, maxp.z do
-		for x = minp.x, maxp.x do
-			for y = math.max(minp.y, SPIRAL_START_Y - 2), math.min(maxp.y, SPIRAL_END_Y + 2) do
-				local vi = area:index(x, y, z)
-				local d2 = nearest_spiral_dist2(x, y, z)
-				if d2 <= tunnel_r2 then
-					local c = spiral_center(y)
-					local rel_y = y - c.y
-					-- Floor band of the tube
-					local is_floor = rel_y < -TUNNEL_R + floor_band + 0.35
-						and rel_y > -TUNNEL_R - 0.2
-					local is_lower = rel_y < -0.3
+	-- 2) Stamp spiral tunnel from samples (lining shell then hollow)
+	local lining_r = LINING_R
+	local hollow_r = TUNNEL_R
+	local lining_r2 = lining_r * lining_r
+	local hollow_r2 = hollow_r * hollow_r
 
-					if is_floor then
-						-- Gem inlays every few steps of the spiral
-						local ang = spiral_angle_at(y)
-						local step = math.floor(ang * 3)
-						if step % 7 == 0 then
-							data[vi] = c_gem
-						elseif step % 5 == 0 then
-							data[vi] = c_marble
-						else
-							data[vi] = c_path
+	for si, s in ipairs(SPIRAL_SAMPLES) do
+		local cx = math.floor(s.x + 0.5)
+		local cy = math.floor(s.y + 0.5)
+		local cz = math.floor(s.z + 0.5)
+		-- Skip samples far outside this chunk (with radius pad)
+		if not (cx + lining_r < minp.x or cx - lining_r > maxp.x
+			or cy + lining_r < minp.y or cy - lining_r > maxp.y
+			or cz + lining_r < minp.z or cz - lining_r > maxp.z) then
+
+			local step = s.step
+			local low = s.y < SPIRAL_START_Y + 7
+
+			for dy = -lining_r, lining_r do
+				for dx = -lining_r, lining_r do
+					for dz = -lining_r, lining_r do
+						local d2 = dx * dx + dy * dy + dz * dz
+						if d2 <= lining_r2 then
+							local x, y, z = cx + dx, cy + dy, cz + dz
+							if x >= minp.x and x <= maxp.x
+								and y >= minp.y and y <= maxp.y
+								and z >= minp.z and z <= maxp.z then
+								local vi = area:index(x, y, z)
+								if d2 <= hollow_r2 then
+									-- Interior: floor band vs air
+									if dy <= -hollow_r + 1 then
+										if step % 7 == 0 then
+											data[vi] = c_gem
+										elseif step % 5 == 0 then
+											data[vi] = c_marble
+										else
+											data[vi] = c_path
+										end
+									else
+										data[vi] = c_air
+									end
+								else
+									-- Lining ring
+									if low then
+										data[vi] = c_moss
+									elseif step % 11 == 0 then
+										data[vi] = c_carved
+									elseif step % 9 == 0 then
+										data[vi] = c_brick
+									elseif step % 17 == 0 then
+										data[vi] = c_rune
+									elseif step % 20 == 0 and math.abs(dy) < 1 then
+										data[vi] = c_gold
+									else
+										data[vi] = c_dark
+									end
+								end
+							end
 						end
-					else
-						data[vi] = c_air
-					end
-
-					-- Moss near entrance (low altitude)
-					if y < SPIRAL_START_Y + 6 and is_lower and d2 > tunnel_r2 * 0.55 then
-						-- wall ring just outside air already carved; handled below
-					end
-				elseif d2 <= (TUNNEL_R + 1.1) ^ 2 and d2 > tunnel_r2 then
-					-- Tunnel lining
-					local c = spiral_center(y)
-					local rel_y = y - c.y
-					local ang = spiral_angle_at(y)
-					local step = math.floor(ang * 4)
-					if y < SPIRAL_START_Y + 8 then
-						data[vi] = c_moss
-					elseif step % 11 == 0 then
-						data[vi] = c_carved
-					elseif step % 9 == 0 then
-						data[vi] = c_brick
-					elseif step % 17 == 0 then
-						data[vi] = c_rune
-					else
-						data[vi] = c_dark
-					end
-					-- Occasional gold trim at "stations"
-					if step % 20 == 0 and math.abs(rel_y) < 0.6 then
-						data[vi] = c_gold
 					end
 				end
+			end
+
+			-- Lantern every ~12 samples, hung from ceiling of tube
+			if si % 12 == 0 then
+				set_if_in(data, area, minp, maxp, cx, cy + 1, cz, c_lantern)
 			end
 		end
 	end
 
-	-- Interior galleries: small chambers at quarter-turns with pillars & crystals
-	local gallery_ys = {}
+	-- 3) Galleries at quarter-turns
 	for turn = 0, math.floor(SPIRAL_TURNS) do
 		local t = (turn + 0.25) / SPIRAL_TURNS
 		local gy = math.floor(SPIRAL_START_Y + t * (SPIRAL_END_Y - SPIRAL_START_Y) + 0.5)
-		gallery_ys[#gallery_ys + 1] = gy
-	end
-
-	for _, gy in ipairs(gallery_ys) do
 		local c = spiral_center(gy)
 		local gx, gz = math.floor(c.x + 0.5), math.floor(c.z + 0.5)
-		-- Chamber hollow
+
 		for dz = -3, 3 do
 			for dx = -3, 3 do
 				for dy = 0, 3 do
@@ -149045,35 +149200,18 @@ core.register_on_generated(function(minp, maxp, _seed)
 				end
 			end
 		end
-		-- Pillars at chamber corners
 		for _, off in ipairs({{-2, -2}, {-2, 2}, {2, -2}, {2, 2}}) do
 			for dy = 0, 2 do
-				local x, y, z = gx + off[1], gy + dy, gz + off[2]
-				if x >= minp.x and x <= maxp.x
-					and y >= minp.y and y <= maxp.y
-					and z >= minp.z and z <= maxp.z then
-					data[area:index(x, y, z)] = c_pillar
-				end
+				set_if_in(data, area, minp, maxp, gx + off[1], gy + dy, gz + off[2], c_pillar)
 			end
 		end
-		-- Crystals and lantern
-		local decor = {
-			{1, 1, 1, c_crystal_b},
-			{-1, 1, 1, c_crystal_p},
-			{1, 1, -1, c_crystal_c},
-			{0, 1, 0, c_lantern},
-		}
-		for _, d in ipairs(decor) do
-			local x, y, z = gx + d[1], gy + d[2], gz + d[3]
-			if x >= minp.x and x <= maxp.x
-				and y >= minp.y and y <= maxp.y
-				and z >= minp.z and z <= maxp.z then
-				data[area:index(x, y, z)] = d[4]
-			end
-		end
+		set_if_in(data, area, minp, maxp, gx + 1, gy + 1, gz + 1, c_crystal_b)
+		set_if_in(data, area, minp, maxp, gx - 1, gy + 1, gz + 1, c_crystal_p)
+		set_if_in(data, area, minp, maxp, gx + 1, gy + 1, gz - 1, c_crystal_c)
+		set_if_in(data, area, minp, maxp, gx, gy + 1, gz, c_lantern)
 	end
 
-	-- Summit shrine
+	-- 4) Summit shrine
 	local peak_y = SPIRE_TOP_Y - 3
 	for dz = -2, 2 do
 		for dx = -2, 2 do
@@ -149097,83 +149235,59 @@ core.register_on_generated(function(minp, maxp, _seed)
 			end
 		end
 	end
-	if SPIRE_CX >= minp.x and SPIRE_CX <= maxp.x
-		and (peak_y + 1) >= minp.y and (peak_y + 1) <= maxp.y
-		and SPIRE_CZ >= minp.z and SPIRE_CZ <= maxp.z then
-		data[area:index(SPIRE_CX, peak_y + 1, SPIRE_CZ)] = c_lantern
-	end
+	set_if_in(data, area, minp, maxp, SPIRE_CX, peak_y + 1, SPIRE_CZ, c_lantern)
 
-	-- Entrance arch + path from spawn
+	-- 5) Approach plaza + entrance (outside the mountain, room to look around)
 	local entrance = spiral_center(SPIRAL_START_Y)
-	local ex, ez = math.floor(entrance.x + 0.5), math.floor(entrance.z + 0.5)
-	for i = 0, 10 do
-		local x = ex + i -- walk outward roughly +X from first spiral point
-		local z = ez
-		local y = GROUND_Y
-		if x >= minp.x and x <= maxp.x
-			and y >= minp.y and y <= maxp.y
-			and z >= minp.z and z <= maxp.z then
-			data[area:index(x, y, z)] = c_path
-		end
-		if i <= 2 then
-			for dy = 1, 3 do
-				for _, sx in ipairs({-2, 2}) do
-					local px, py, pz = ex + sx, GROUND_Y + dy, ez
-					if px >= minp.x and px <= maxp.x
-						and py >= minp.y and py <= maxp.y
-						and pz >= minp.z and pz <= maxp.z then
-						data[area:index(px, py, pz)] = c_carved
-					end
+	local ex = math.floor(entrance.x + 0.5)
+	local ez = math.floor(entrance.z + 0.5)
+	-- Clear a viewing terrace east of the entrance
+	for z = ez - 4, ez + 4 do
+		for x = ex, ex + 14 do
+			for y = GROUND_Y + 1, GROUND_Y + 6 do
+				set_if_in(data, area, minp, maxp, x, y, z, c_air)
+			end
+			local gy = GROUND_Y
+			if x >= minp.x and x <= maxp.x
+				and gy >= minp.y and gy <= maxp.y
+				and z >= minp.z and z <= maxp.z then
+				local vi = area:index(x, gy, z)
+				if math.abs(z - ez) <= 1 or x <= ex + 2 then
+					data[vi] = c_path
+				elseif data[vi] == c_stone or data[vi] == c_sand then
+					data[vi] = c_grass
 				end
 			end
-			local kx, ky, kz = ex, GROUND_Y + 4, ez
-			if kx >= minp.x and kx <= maxp.x
-				and ky >= minp.y and ky <= maxp.y
-				and kz >= minp.z and kz <= maxp.z then
-				data[area:index(kx, ky, kz)] = c_gold
-			end
 		end
 	end
+	-- Entrance arch
+	for dy = 1, 3 do
+		set_if_in(data, area, minp, maxp, ex, GROUND_Y + dy, ez - 2, c_carved)
+		set_if_in(data, area, minp, maxp, ex, GROUND_Y + dy, ez + 2, c_carved)
+	end
+	set_if_in(data, area, minp, maxp, ex, GROUND_Y + 4, ez, c_gold)
+	set_if_in(data, area, minp, maxp, ex, GROUND_Y + 4, ez - 1, c_carved)
+	set_if_in(data, area, minp, maxp, ex, GROUND_Y + 4, ez + 1, c_carved)
 
-	-- Surface blossoms and vines near base
+	-- 6) Base flora
 	for z = minp.z, maxp.z do
 		for x = minp.x, maxp.x do
 			local dx = x - SPIRE_CX
 			local dz = z - SPIRE_CZ
 			local dist_xz = math.sqrt(dx * dx + dz * dz)
-			if dist_xz > SPIRE_BASE_R - 1 and dist_xz < SPIRE_BASE_R + 4 then
+			if dist_xz > SPIRE_BASE_R - 0.5 and dist_xz < SPIRE_BASE_R + 5 then
 				local h = (x * 73856093 + z * 19349663) % 1000
 				local y = GROUND_Y + 1
 				if y >= minp.y and y <= maxp.y then
 					local vi = area:index(x, y, z)
 					if data[vi] == c_air then
-						if h < 40 then
+						if h < 35 then
 							data[vi] = c_flower
-						elseif h < 70 then
+						elseif h < 60 then
 							data[vi] = c_vine
 						end
 					end
 				end
-			end
-		end
-	end
-
-	-- Lanterns along spiral every ~half turn
-	for turn = 0, SPIRAL_TURNS * 2 do
-		local t = turn / (SPIRAL_TURNS * 2)
-		local y = math.floor(SPIRAL_START_Y + t * (SPIRAL_END_Y - SPIRAL_START_Y) + 0.5)
-		local c = spiral_center(y)
-		-- offset outward from path into wall niche
-		local ang = spiral_angle_at(y)
-		local lx = math.floor(c.x + math.cos(ang) * 0.2 + 0.5)
-		local ly = y + 1
-		local lz = math.floor(c.z + math.sin(ang) * 0.2 + 0.5)
-		if lx >= minp.x and lx <= maxp.x
-			and ly >= minp.y and ly <= maxp.y
-			and lz >= minp.z and lz <= maxp.z then
-			local vi = area:index(lx, ly, lz)
-			if data[vi] == c_air then
-				data[vi] = c_lantern
 			end
 		end
 	end
@@ -149188,16 +149302,19 @@ end)
 -- Player setup
 --------------------------------------------------------------------
 
+-- Spawn on the open terrace looking at the mountain entrance
 local entrance0 = spiral_center(SPIRAL_START_Y)
 local SPAWN = {
-	x = math.floor(entrance0.x + 6),
+	x = math.floor(entrance0.x + 10),
 	y = GROUND_Y + 2,
 	z = math.floor(entrance0.z + 0.5),
 }
 
 core.settings:set("static_spawnpoint",
 	SPAWN.x .. "," .. SPAWN.y .. "," .. SPAWN.z)
-core.settings:set("mg_name", "singlenode")
+if core.set_mapgen_setting then
+	core.set_mapgen_setting("mg_name", "singlenode", true)
+end
 
 local starter_items = {
 	"spire_tunnel:path 64",
