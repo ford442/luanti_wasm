@@ -146369,7 +146369,20 @@ title = Flower Island
 description = A small grassy island in the ocean. Plants on the lawn form a six-petal flower.
 default_mapgen = singlenode
 disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
--- Luanti
+‰PNG
+
+   IHDR         ‘h6  €IDATxbÌn6T<×
+ÒÛ  „e¡e^Ó1_˜¡·Á·Nú0Ã‚ieÙ2H¹¿œn>ÏwyDgc‰µ´‘ºxsT3·˜Ðzµy{?=\mîïo
+˜ù3Ô Ó w=;9ÅÕL«Çº\m¥œ˜K6ò®ÚvŽ`œ%˜Xb3Úˆ½qÒÉi63BìêªÈöBîMMÑ7UDq”ç~ìàQ H!ÛÑ”eWek0äJ|¾,tñÅ›Á<ƒ¢«›^Ê>U!´euãøøTf¤Ü}~’çoæÔž—F¤“Cì2©³7Bü¸ìŽ&pwS‰vÎ²ûüÃÙ(4ÏsÙôƒ®fëF—¦Dßüt¾Ÿ‡UÑŠî-—„ªrkÄ<)—PÂ!V;‚Ý(Â}øy¦¡‰ãŒàIª–ÙÖ0›£ä|Ô³hÚÃ4!6»¿kþû§çq·Å¤¤VªÓ=Àcè˜Ñúë¯¿úºÜÏ½|wÿúË­4õÜaÆØBØvôjSÙ>~|ì"Ÿº†mYV}×Ý&{Äl»n˜áø½OÓë+¹Û£Ó(pÝÀç“i-€®~“£eÔ,ã>ÃAÖ*Îc0·¸íe/Å”­¬u]‹IØœ@¥ž2–M²./ÏSÃÐÍõ
+.ïUºðÓ0¬×âi³šôÐKàPïì$“óø²A™¼“ï_ý¾v™¦Çqü*l‰ßÕ(qè´5ž—7%[ýÏ¿ü'›éï^0ÙQ‚¾øîXª	Û#BÄóh”RÊpWÉŒ6ð8wÀØõZ­‹R„©….>‰žÄÙÛb¨žÅ4ß éo–R—¯ÇBùŽçó (ëÿ@÷rW‘ïÑ    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ÕIDAT(S%iOa…ß˜º F+0ÈVE¡ €(²àÈ°ƒ8lEPÁad„H•J«±QÓÔôs?ôg¶CLNNžÜÜœ›sA]ˆûxˆJf@Ö%ÂíüvØÆÎL­‹Åv¾ÿâHG?$,«IãxØÈ|#dµ¢œvTß*FNÐIÇ37ÿeÜwÚuÇp+Ç…Í\9µÐ”(ÏŸ†Crò®ž:pOõkÉ«RF9TyÛdd¾nÑr–mÅOlÚáíš˜¤KHQò+\Hç5ŠÇgò:?—,>õDLýZó¦MË÷—v7¯dÊb‹–už”çÕS¿H3…³Cª™ “­ÅÆU‚÷ø±·ßÖþ„PtþL÷®<Ö¾þ¼=;Ú@dU­–´Úì® Sœ°óo«:—6ˆ_nk¾ èrté³Ê>›E³Ÿ}`æ•Í
+K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:Žr5k Ö¡5)°nˆ”ÒÙ:¹Ï
+Õå>.üœç"ËE¬¿M´žâO÷+°0„2@Á½îv0#{«:C.<¾ZýŽðˆpL­ï|(ôúéNAKUœ¹ØD/giûú? hÑÿÝ3MD]“'˜Èé6#iåzmsDCBÅ•…¨ø±d.øÀ…°éí›âyÌ¾
+)oÒ»5½¬U6áÃµ?3ê™©—ïáJe;'¶ ÐÍjß.|Ã”´W›Îç>6ŠÈLò^SJó]Ãð‡õÈhF–hŠ»:Z.ûÈi]ŸJhïv#´Gz›oCpá¿Q§::užN&i¨…¡ë'ŒH~ÅÁ‹[ÚÑÚYÌ
+Š¸úâPSÏò{9¶+?qrq¯ðk~ÔZÞW‹2³ž±´—qn$ÑÍÊ¾â?fà™pÕZ    IEND®B`‚‰PNG
+
+   IHDR         óÿa   -IDATxcÖ`¨Õ3üGÂŒdB‰#þ#c²4ÿça2iFàál å±  X`?×>Ít    IEND®B`‚-- Luanti
 -- SPDX-License-Identifier: LGPL-2.1-or-later
 -- Copyright (C) 2026 The Luanti Contributors
 
@@ -146511,7 +146524,7 @@ local function plant_at(x, z)
 		return nil
 	end
 	local ang = math.atan2(z, x)
-	-- Rose curve: petals where cos(6Î¸) is high
+	-- Rose curve: petals where cos(6 * angle) is high
 	local petal = 4 + 8 * math.max(0, math.cos(6 * ang))
 	if r <= petal then
 		return "petal"
@@ -146588,10 +146601,11 @@ end
 
 core.register_on_newplayer(function(player)
 	player:set_pos({x = 0, y = SURFACE_Y + 2, z = 0})
-	player:get_inventory():add_item("main", "flower_island:plant 32")
-	player:get_inventory():add_item("main", "flower_island:blossom 16")
+	local inv = player:get_inventory()
+	inv:add_item("main", "flower_island:plant 32")
+	inv:add_item("main", "flower_island:blossom 16")
 end)
-name = flower_island
+ name = flower_island
 description = Island terrain and the flower-shaped plant pattern
 ‰PNG
 
@@ -146627,7 +146641,20 @@ _¶    IEND®B`‚‰PNG
 description = A wooden water flume through the jungle. Ride the log boat down the slide.
 default_mapgen = singlenode
 disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
--- Luanti
+‰PNG
+
+   IHDR         ‘h6  €IDATxbÌn6T<×
+ÒÛ  „e¡e^Ó1_˜¡·Á·Nú0Ã‚ieÙ2H¹¿œn>ÏwyDgc‰µ´‘ºxsT3·˜Ðzµy{?=\mîïo
+˜ù3Ô Ó w=;9ÅÕL«Çº\m¥œ˜K6ò®ÚvŽ`œ%˜Xb3Úˆ½qÒÉi63BìêªÈöBîMMÑ7UDq”ç~ìàQ H!ÛÑ”eWek0äJ|¾,tñÅ›Á<ƒ¢«›^Ê>U!´euãøøTf¤Ü}~’çoæÔž—F¤“Cì2©³7Bü¸ìŽ&pwS‰vÎ²ûüÃÙ(4ÏsÙôƒ®fëF—¦Dßüt¾Ÿ‡UÑŠî-—„ªrkÄ<)—PÂ!V;‚Ý(Â}øy¦¡‰ãŒàIª–ÙÖ0›£ä|Ô³hÚÃ4!6»¿kþû§çq·Å¤¤VªÓ=Àcè˜Ñúë¯¿úºÜÏ½|wÿúË­4õÜaÆØBØvôjSÙ>~|ì"Ÿº†mYV}×Ý&{Äl»n˜áø½OÓë+¹Û£Ó(pÝÀç“i-€®~“£eÔ,ã>ÃAÖ*Îc0·¸íe/Å”­¬u]‹IØœ@¥ž2–M²./ÏSÃÐÍõ
+.ïUºðÓ0¬×âi³šôÐKàPïì$“óø²A™¼“ï_ý¾v™¦Çqü*l‰ßÕ(qè´5ž—7%[ýÏ¿ü'›éï^0ÙQ‚¾øîXª	Û#BÄóh”RÊpWÉŒ6ð8wÀØõZ­‹R„©….>‰žÄÙÛb¨žÅ4ß éo–R—¯ÇBùŽçó (ëÿ@÷rW‘ïÑ    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ÕIDAT(S%iOa…ß˜º F+0ÈVE¡ €(²àÈ°ƒ8lEPÁad„H•J«±QÓÔôs?ôg¶CLNNžÜÜœ›sA]ˆûxˆJf@Ö%ÂíüvØÆÎL­‹Åv¾ÿâHG?$,«IãxØÈ|#dµ¢œvTß*FNÐIÇ37ÿeÜwÚuÇp+Ç…Í\9µÐ”(ÏŸ†Crò®ž:pOõkÉ«RF9TyÛdd¾nÑr–mÅOlÚáíš˜¤KHQò+\Hç5ŠÇgò:?—,>õDLýZó¦MË÷—v7¯dÊb‹–už”çÕS¿H3…³Cª™ “­ÅÆU‚÷ø±·ßÖþ„PtþL÷®<Ö¾þ¼=;Ú@dU­–´Úì® Sœ°óo«:—6ˆ_nk¾ èrté³Ê>›E³Ÿ}`æ•Í
+K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:Žr5k Ö¡5)°nˆ”ÒÙ:¹Ï
+Õå>.üœç"ËE¬¿M´žâO÷+°0„2@Á½îv0#{«:C.<¾ZýŽðˆpL­ï|(ôúéNAKUœ¹ØD/giûú? hÑÿÝ3MD]“'˜Èé6#iåzmsDCBÅ•…¨ø±d.øÀ…°éí›âyÌ¾
+)oÒ»5½¬U6áÃµ?3ê™©—ïáJe;'¶ ÐÍjß.|Ã”´W›Îç>6ŠÈLò^SJó]Ãð‡õÈhF–hŠ»:Z.ûÈi]ŸJhïv#´Gz›oCpá¿Q§::užN&i¨…¡ë'ŒH~ÅÁ‹[ÚÑÚYÌ
+Š¸úâPSÏò{9¶+?qrq¯ðk~ÔZÞW‹2³ž±´—qn$ÑÍÊ¾â?fà™pÕZ    IEND®B`‚‰PNG
+
+   IHDR          :˜ ½  IDATxïþ ;K!FO¨ŽF0…„¨‚ sª—ŒœŠ¦@A¢“c’”… r‘¨±zš²Xh‹°£…luh X¥y‚¤ °tvZ °¡“¤Y $Š´ZCi½<¹j„³ª‹q -i™ŸL~#_76¼‚: o¢“–­KA–T±œ)‰ƒ¹ ›‰Ž§”xt‡™›'MY‡ Ž{‚©—JJ„²´ÀY[‚_ ·¢›a¯¤hy–+¯«° =(¯„|‘aaDT;) Ó!“³±´ˆd²ÆÔÈÈµ ŸŒœ©º}€¤gŽ«Œ€„¸ sETš´³p©•G™u†|¨ L=•fšxz/ˆ¦ Cs` ŒB°ª£|RHs63falYMˆÙ{6/”²    IEND®B`‚-- Luanti
 -- SPDX-License-Identifier: LGPL-2.1-or-later
 -- Copyright (C) 2026 The Luanti Contributors
 
@@ -147685,7 +147712,20 @@ E¿¥„ÕËllw¸}Nƒ5,Íë€É7¿üÝ/ÿu|wFL‹{rp£8ìÑ_ëŒü÷7ï£åˆˆßS "ŠN«Q>9@¥îïÙ®R_ß«’<„|
 description = Build track segments and ride carts on an ornate coaster. Right-click a cart to board.
 default_mapgen = singlenode
 disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
--- Luanti
+‰PNG
+
+   IHDR         ‘h6  €IDATxbÌn6T<×
+ÒÛ  „e¡e^Ó1_˜¡·Á·Nú0Ã‚ieÙ2H¹¿œn>ÏwyDgc‰µ´‘ºxsT3·˜Ðzµy{?=\mîïo
+˜ù3Ô Ó w=;9ÅÕL«Çº\m¥œ˜K6ò®ÚvŽ`œ%˜Xb3Úˆ½qÒÉi63BìêªÈöBîMMÑ7UDq”ç~ìàQ H!ÛÑ”eWek0äJ|¾,tñÅ›Á<ƒ¢«›^Ê>U!´euãøøTf¤Ü}~’çoæÔž—F¤“Cì2©³7Bü¸ìŽ&pwS‰vÎ²ûüÃÙ(4ÏsÙôƒ®fëF—¦Dßüt¾Ÿ‡UÑŠî-—„ªrkÄ<)—PÂ!V;‚Ý(Â}øy¦¡‰ãŒàIª–ÙÖ0›£ä|Ô³hÚÃ4!6»¿kþû§çq·Å¤¤VªÓ=Àcè˜Ñúë¯¿úºÜÏ½|wÿúË­4õÜaÆØBØvôjSÙ>~|ì"Ÿº†mYV}×Ý&{Äl»n˜áø½OÓë+¹Û£Ó(pÝÀç“i-€®~“£eÔ,ã>ÃAÖ*Îc0·¸íe/Å”­¬u]‹IØœ@¥ž2–M²./ÏSÃÐÍõ
+.ïUºðÓ0¬×âi³šôÐKàPïì$“óø²A™¼“ï_ý¾v™¦Çqü*l‰ßÕ(qè´5ž—7%[ýÏ¿ü'›éï^0ÙQ‚¾øîXª	Û#BÄóh”RÊpWÉŒ6ð8wÀØõZ­‹R„©….>‰žÄÙÛb¨žÅ4ß éo–R—¯ÇBùŽçó (ëÿ@÷rW‘ïÑ    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ÕIDAT(S%iOa…ß˜º F+0ÈVE¡ €(²àÈ°ƒ8lEPÁad„H•J«±QÓÔôs?ôg¶CLNNžÜÜœ›sA]ˆûxˆJf@Ö%ÂíüvØÆÎL­‹Åv¾ÿâHG?$,«IãxØÈ|#dµ¢œvTß*FNÐIÇ37ÿeÜwÚuÇp+Ç…Í\9µÐ”(ÏŸ†Crò®ž:pOõkÉ«RF9TyÛdd¾nÑr–mÅOlÚáíš˜¤KHQò+\Hç5ŠÇgò:?—,>õDLýZó¦MË÷—v7¯dÊb‹–už”çÕS¿H3…³Cª™ “­ÅÆU‚÷ø±·ßÖþ„PtþL÷®<Ö¾þ¼=;Ú@dU­–´Úì® Sœ°óo«:—6ˆ_nk¾ èrté³Ê>›E³Ÿ}`æ•Í
+K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:Žr5k Ö¡5)°nˆ”ÒÙ:¹Ï
+Õå>.üœç"ËE¬¿M´žâO÷+°0„2@Á½îv0#{«:C.<¾ZýŽðˆpL­ï|(ôúéNAKUœ¹ØD/giûú? hÑÿÝ3MD]“'˜Èé6#iåzmsDCBÅ•…¨ø±d.øÀ…°éí›âyÌ¾
+)oÒ»5½¬U6áÃµ?3ê™©—ïáJe;'¶ ÐÍjß.|Ã”´W›Îç>6ŠÈLò^SJó]Ãð‡õÈhF–hŠ»:Z.ûÈi]ŸJhïv#´Gz›oCpá¿Q§::užN&i¨…¡ë'ŒH~ÅÁ‹[ÚÑÚYÌ
+Š¸úâPSÏò{9¶+?qrq¯ðk~ÔZÞW‹2³ž±´—qn$ÑÍÊ¾â?fà™pÕZ    IEND®B`‚‰PNG
+
+   IHDR          :˜ ½  IDATxïþ ;K!FO¨ŽF0…„¨‚ sª—ŒœŠ¦@A¢“c’”… r‘¨±zš²Xh‹°£…luh X¥y‚¤ °tvZ °¡“¤Y $Š´ZCi½<¹j„³ª‹q -i™ŸL~#_76¼‚: o¢“–­KA–T±œ)‰ƒ¹ ›‰Ž§”xt‡™›'MY‡ Ž{‚©—JJ„²´ÀY[‚_ ·¢›a¯¤hy–+¯«° =(¯„|‘aaDT;) Ó!“³±´ˆd²ÆÔÈÈµ ŸŒœ©º}€¤gŽ«Œ€„¸ sETš´³p©•G™u†|¨ L=•fšxz/ˆ¦ Cs` ŒB°ª£|RHs63falYMˆÙ{6/”²    IEND®B`‚-- Luanti
 -- SPDX-License-Identifier: LGPL-2.1-or-later
 -- Copyright (C) 2026 The Luanti Contributors
 
@@ -148636,7 +148676,20 @@ E¿¥„ÕËllw¸}Nƒ5,Íë€É7¿üÝ/ÿu|wFL‹{rp£8ìÑ_ëŒü÷7ï£åˆˆßS "ŠN«Q>9@¥îïÙ®R_ß«’<„|
 description = A spiral tunnel carved through a mountain spire. Dress the halls with crystals, runes, and carved stone.
 default_mapgen = singlenode
 disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
--- Luanti
+‰PNG
+
+   IHDR         óÿa  ãIDATxbÌn6”DÈÛ`þ$Ëá¤ÌÌtž ÷n‡Ëü˜Ÿ)ŽÙV5Ó¡Ÿawu‡øK‡Iª§Ïµ©›Ž·?x‰¡›ð…K5Ï<>ß“/m_1þ5×)rójÌ$gP‡dOˆÃ›//ðÅíí3]9òx[=©ë7´y®¯ÈB-‘ëÝeªçÏryóý×iLã¤',Ÿ¥ì^4£‘2m)ó–d¹f¹ß¯ÔPt¤qN:#qÌPvB+‰/,6±ÏCZ!Ce %L¤&~¼h©ëyŸÞ›Ä,Í0p{—ÓëÇ¹¿«yëƒ=NÔsÿP¢,›Æ­C—ÀêÌ·ÔíCËÊÃW9Õib·[àj·¾Ø=¡;‹išÈÊGAS¸<•3™ÎPƒã°N¸¹,p<‹Ý2äÁ¶\ž¸<++žGö+í€5ižÛ’·^{ÙÙÔ-iU‰ýK{Ç6>’¬Ý4‰mòšPc$êb‡å’U¼àé©¿þt%ÎnÎDÕeÈc:Š®žéº†¹E¨Y	%¡ÁŸþI[d¼´Ø¿ð’8ÿýY„¾`»W6n`z•°P^À<,˜uŽ+£Ã2vL“kj5YÞÒ4—l^´	—Z64ýˆeû¨O¿Ùr~VóPyõ%I’Ä>£>!°8ûµfÚ@ªY|&ÙSëý¦êÔšÂÂ&Ú*æNðTTc…çÛÈ@òªy¹ÓÏ	È¤wÞÚ¢]‹‹óGäÃuÇv³],(ž*îžçž¶†À‰xóõõ4`^Æ¶mÆ^qØ¿ÄÙoO„®FêV±^ÿŸð$¬61Ma±	Æ£&Šö”™ËCÚòýÿR—#ýsƒáƒÝ«¬o¿{ºQÞ€eÙfÀa¹up\E“Ã¨<"|?€¡¡;žÒÒ±PŽÀzûë57w%–Á†iO~_1š8JvËåÍM×ñÎ{kªªgˆˆý„4+øíŸwÜ#j³    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  €IDATxbÌn6T<×
+ÒÛ  „e¡e^Ó1_˜¡·Á·Nú0Ã‚ieÙ2H¹¿œn>ÏwyDgc‰µ´‘ºxsT3·˜Ðzµy{?=\mîïo
+˜ù3Ô Ó w=;9ÅÕL«Çº\m¥œ˜K6ò®ÚvŽ`œ%˜Xb3Úˆ½qÒÉi63BìêªÈöBîMMÑ7UDq”ç~ìàQ H!ÛÑ”eWek0äJ|¾,tñÅ›Á<ƒ¢«›^Ê>U!´euãøøTf¤Ü}~’çoæÔž—F¤“Cì2©³7Bü¸ìŽ&pwS‰vÎ²ûüÃÙ(4ÏsÙôƒ®fëF—¦Dßüt¾Ÿ‡UÑŠî-—„ªrkÄ<)—PÂ!V;‚Ý(Â}øy¦¡‰ãŒàIª–ÙÖ0›£ä|Ô³hÚÃ4!6»¿kþû§çq·Å¤¤VªÓ=Àcè˜Ñúë¯¿úºÜÏ½|wÿúË­4õÜaÆØBØvôjSÙ>~|ì"Ÿº†mYV}×Ý&{Äl»n˜áø½OÓë+¹Û£Ó(pÝÀç“i-€®~“£eÔ,ã>ÃAÖ*Îc0·¸íe/Å”­¬u]‹IØœ@¥ž2–M²./ÏSÃÐÍõ
+.ïUºðÓ0¬×âi³šôÐKàPïì$“óø²A™¼“ï_ý¾v™¦Çqü*l‰ßÕ(qè´5ž—7%[ýÏ¿ü'›éï^0ÙQ‚¾øîXª	Û#BÄóh”RÊpWÉŒ6ð8wÀØõZ­‹R„©….>‰žÄÙÛb¨žÅ4ß éo–R—¯ÇBùŽçó (ëÿ@÷rW‘ïÑ    IEND®B`‚‰PNG
+
+   IHDR         ‘h6  ÕIDAT(S%iOa…ß˜º F+0ÈVE¡ €(²àÈ°ƒ8lEPÁad„H•J«±QÓÔôs?ôg¶CLNNžÜÜœ›sA]ˆûxˆJf@Ö%ÂíüvØÆÎL­‹Åv¾ÿâHG?$,«IãxØÈ|#dµ¢œvTß*FNÐIÇ37ÿeÜwÚuÇp+Ç…Í\9µÐ”(ÏŸ†Crò®ž:pOõkÉ«RF9TyÛdd¾nÑr–mÅOlÚáíš˜¤KHQò+\Hç5ŠÇgò:?—,>õDLýZó¦MË÷—v7¯dÊb‹–už”çÕS¿H3…³Cª™ “­ÅÆU‚÷ø±·ßÖþ„PtþL÷®<Ö¾þ¼=;Ú@dU­–´Úì® Sœ°óo«:—6ˆ_nk¾ èrté³Ê>›E³Ÿ}`æ•Í
+K-›OáÒDLlÕ±‡í\•Puš[ ì±$|+ëtËµŒ³(…axúã¥ö8IïN]/UZ:Žr5k Ö¡5)°nˆ”ÒÙ:¹Ï
+Õå>.üœç"ËE¬¿M´žâO÷+°0„2@Á½îv0#{«:C.<¾ZýŽðˆpL­ï|(ôúéNAKUœ¹ØD/giûú? hÑÿÝ3MD]“'˜Èé6#iåzmsDCBÅ•…¨ø±d.øÀ…°éí›âyÌ¾
+)oÒ»5½¬U6áÃµ?3ê™©—ïáJe;'¶ ÐÍjß.|Ã”´W›Îç>6ŠÈLò^SJó]Ãð‡õÈhF–hŠ»:Z.ûÈi]ŸJhïv#´Gz›oCpá¿Q§::užN&i¨…¡ë'ŒH~ÅÁ‹[ÚÑÚYÌ
+Š¸úâPSÏò{9¶+?qrq¯ðk~ÔZÞW‹2³ž±´—qn$ÑÍÊ¾â?fà™pÕZ    IEND®B`‚-- Luanti
 -- SPDX-License-Identifier: LGPL-2.1-or-later
 -- Copyright (C) 2026 The Luanti Contributors
 
@@ -150114,4 +150167,3 @@ Eg‡«l‚]jpå3¬‚+ûù5UG.E—Ÿ®àF´±HmD°šf&øþe5ëšhŽ³Êid—Zƒ|>×G2Û\°œM‘ea»
 ºñõ4ç-ÙŽ4¶­Ž×Éð#ÑyRvcÑ*¹K¾b×‰tŠÙ‹ç‰ö-ij%Æð‘Ö’È¢šHK«(ä‘Šd'æi%)j#FÓ€éÝdzQ©ŠL% oé=Ù‡¹˜ê¬a¦³t•]Èæ¦b%}¸€éÙ…I˜“¦b:¦}²•˜&*¡È ÓC²}iÂ«†4%Å˜æÈ¼ŽéS%}iÄk»ìÁ—˜ò•üŒW#Ýeªð:MHI@1¦Ñ²)\Å«LIÁ£˜¦Êäbz_IA6¦ÏeF`§$á^«dÆ`zJIÂ^¼Êe^ÅT $a3^[eÆa®$á¼¶Ë<‡i”’„Ýxm‰i¬’„ãx­–Œi¦’‚,šðZ(;Ð‰kx}­¤`¦i²ñ:¦¤`¦1²+0å)	XƒW½e&cš¥„£xUÉäb:LX	ÆTLd~Åô¢ŠazB6a¦„•@LÀTMX6¡×0MVÂM-¦Ù²%˜êÈQ‚°S=½er¹Ži)J ^"R™lD	‘æ«ÍÎu"Õ3Rö¡'uD*V›p4ç²“ˆö!µ4Ð’ó<,Û¢ŒhËé¢V`Är†d²9L´ƒÊº²ˆ›;ÍÙ†!Ô­‰ú*.¤0žZâSË Ù†B.Óœ«,d¨b"›)ÂäÊ6Œâ-ÙÃlF‘%a1…2®à_5wË6äSKlÇØÄjJ)e-»¹B[¡ŸlC¶pë$G¶!•O¸Á­r€Þ²ùláVÙÃí²aÞà þ]áÊñg=d#Â¼LMÄ«†9äH¤ñ=þì¤»lÅ=SÉ5b©¦„gHÑ¿èÌzüÙBÙŒ,žf:ÙÈ.Žp†cìg+¥|H¹ŠB&ð§’Û$d²	ÊÉPEþüDº‚„l¶âÏÒ$d³V’ª ¡;ð§”T	w°–VÐ“*ü)!¤ áNöáÏ½Ø?ó,ôã0þÌS°ÐŸßñ§HÁÂ ŽâG…‚†\Ž¿
 yœ$^E
 "ò¨!óT¢–›™¯ ã~þ$–Ïtå-YBHÁÇ0ÎÑœÅ„Ô1ð g‰ôaur¯¤¨cá.òŸ•¤ªãaðetRÇD&“'ÇqÇqÇqÇqÇqœ¸ýJäâ²¸Sà(    IEND®B`‚Put your texture pack folders in this folder. Textures in the "server" pack will be used by the server.
- 

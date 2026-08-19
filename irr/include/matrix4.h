@@ -1508,6 +1508,13 @@ inline CMatrix4<T> &CMatrix4<T>::buildCameraLookAtMatrixLH(
 	zaxis.normalize();
 
 	vector3df xaxis = upVector.crossProduct(zaxis);
+	// Degenerate when up ∥ forward (e.g. pitch ±90°): pick a stable side axis.
+	if (xaxis.getLengthSQ() < 1e-8f) {
+		const vector3df alt = (core::abs_<f32>(zaxis.Y) > 0.999f)
+				? vector3df(0.f, 0.f, 1.f)
+				: vector3df(0.f, 1.f, 0.f);
+		xaxis = alt.crossProduct(zaxis);
+	}
 	xaxis.normalize();
 
 	vector3df yaxis = zaxis.crossProduct(xaxis);

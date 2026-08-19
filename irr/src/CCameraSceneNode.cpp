@@ -227,10 +227,15 @@ void CCameraSceneNode::updateMatrices()
 	core::vector3df up = UpVector;
 	up.normalize();
 
+	// Looking exactly along ±up makes up×forward vanish and the old
+	// "up.X += 0.5" nudge skewed the basis into stretched wedges (very
+	// visible in first person when pitching straight down at your feet).
 	f32 dp = tgtv.dotProduct(up);
-
 	if (core::equals(core::abs_<f32>(dp), 1.f)) {
-		up.X += 0.5f;
+		if (core::abs_<f32>(tgtv.Y) > 0.999f)
+			up = core::vector3df(0.f, 0.f, 1.f);
+		else
+			up = core::vector3df(0.f, 1.f, 0.f);
 	}
 
 	ViewArea.getTransform(video::ETS_VIEW).buildCameraLookAtMatrixLH(pos, Target, up);
