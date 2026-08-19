@@ -614,6 +614,15 @@ void COpenGL3DriverBase::drawBuffers(const scene::IVertexBuffer *vb,
 	if (!vb || !ib)
 		return;
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// First-person local player hiding uses Front+Back culling. WebGL
+	// (ANGLE) does not reliably honor glCullFace(GL_FRONT_AND_BACK), so
+	// the player head/torso still rasterizes and clips through the near
+	// plane as dark wedges when looking down.
+	if (Material.FrontfaceCulling && Material.BackfaceCulling)
+		return;
+#endif
+
 	const auto *wb = vb->getWeightBuffer();
 	SHWBufferLink_opengl *hw_weights = nullptr;
 	if (wb) {
@@ -721,6 +730,11 @@ void COpenGL3DriverBase::drawVertexPrimitiveList(const void *vertices, u32 verte
 {
 	if (!primitiveCount || !vertexCount)
 		return;
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	if (Material.FrontfaceCulling && Material.BackfaceCulling)
+		return;
+#endif
 
 	if (!checkPrimitiveCount(primitiveCount))
 		return;

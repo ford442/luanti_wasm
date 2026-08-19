@@ -1507,17 +1507,27 @@ inline CMatrix4<T> &CMatrix4<T>::buildCameraLookAtMatrixLH(
 	vector3df zaxis = target - position;
 	zaxis.normalize();
 
-	vector3df xaxis = upVector.crossProduct(zaxis);
-	// Degenerate when up ∥ forward (e.g. pitch ±90°): pick a stable side axis.
-	if (xaxis.getLengthSQ() < 1e-8f) {
-		const vector3df alt = (core::abs_<f32>(zaxis.Y) > 0.999f)
+	// Prefer an up that is not nearly parallel to forward. Exact collinearity
+	// is rare; moderate pitch-down still shrinks up×forward and stretches
+	// triangles into screen-space wedges after normalize().
+	vector3df up = upVector;
+	up.normalize();
+	if (core::abs_<f32>(up.dotProduct(zaxis)) > 0.95f) {
+		up = (core::abs_<f32>(zaxis.Y) > 0.5f)
 				? vector3df(0.f, 0.f, 1.f)
 				: vector3df(0.f, 1.f, 0.f);
-		xaxis = alt.crossProduct(zaxis);
+	}
+
+	vector3df xaxis = up.crossProduct(zaxis);
+	if (xaxis.getLengthSQ() < 1e-6f) {
+		xaxis = vector3df(1.f, 0.f, 0.f).crossProduct(zaxis);
+		if (xaxis.getLengthSQ() < 1e-6f)
+			xaxis = vector3df(0.f, 0.f, 1.f).crossProduct(zaxis);
 	}
 	xaxis.normalize();
 
 	vector3df yaxis = zaxis.crossProduct(xaxis);
+	yaxis.normalize();
 
 	M[0] = (T)xaxis.X;
 	M[1] = (T)yaxis.X;
@@ -1552,10 +1562,24 @@ inline CMatrix4<T> &CMatrix4<T>::buildCameraLookAtMatrixRH(
 	vector3df zaxis = position - target;
 	zaxis.normalize();
 
-	vector3df xaxis = upVector.crossProduct(zaxis);
+	vector3df up = upVector;
+	up.normalize();
+	if (core::abs_<f32>(up.dotProduct(zaxis)) > 0.95f) {
+		up = (core::abs_<f32>(zaxis.Y) > 0.5f)
+				? vector3df(0.f, 0.f, 1.f)
+				: vector3df(0.f, 1.f, 0.f);
+	}
+
+	vector3df xaxis = up.crossProduct(zaxis);
+	if (xaxis.getLengthSQ() < 1e-6f) {
+		xaxis = vector3df(1.f, 0.f, 0.f).crossProduct(zaxis);
+		if (xaxis.getLengthSQ() < 1e-6f)
+			xaxis = vector3df(0.f, 0.f, 1.f).crossProduct(zaxis);
+	}
 	xaxis.normalize();
 
 	vector3df yaxis = zaxis.crossProduct(xaxis);
+	yaxis.normalize();
 
 	M[0] = (T)xaxis.X;
 	M[1] = (T)yaxis.X;

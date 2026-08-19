@@ -7,6 +7,7 @@
 #include "matrix4.h"
 #include "irr_v3d.h"
 #include "util/numeric.h"
+#include <cmath>
 #include <functional>
 
 using matrix4 = core::matrix4;
@@ -160,6 +161,30 @@ SECTION("getRotationRadians") {
 				test_rotation_radians(rad, draw_v3f(gen_scale));
 			}
 		}
+	}
+}
+
+SECTION("buildCameraLookAtMatrixLH stays orthonormal near pitch ±90") {
+	auto check_basis = [](const matrix4 &m) {
+		v3f x(m[0], m[4], m[8]);
+		v3f y(m[1], m[5], m[9]);
+		v3f z(m[2], m[6], m[10]);
+		CHECK(x.getLength() == Catch::Approx(1.0f).margin(0.001f));
+		CHECK(y.getLength() == Catch::Approx(1.0f).margin(0.001f));
+		CHECK(z.getLength() == Catch::Approx(1.0f).margin(0.001f));
+		CHECK(std::fabs(x.dotProduct(y)) < 0.002f);
+		CHECK(std::fabs(y.dotProduct(z)) < 0.002f);
+		CHECK(std::fabs(z.dotProduct(x)) < 0.002f);
+	};
+
+	const v3f eye(0.f, 10.f, 0.f);
+	const v3f world_up(0.f, 1.f, 0.f);
+	for (f32 pitch_deg : {-90.f, -85.f, -70.f, 70.f, 85.f, 90.f}) {
+		const f32 pitch = pitch_deg * core::DEGTORAD;
+		v3f target = eye + v3f(0.f, std::sin(pitch), std::cos(pitch));
+		matrix4 m;
+		m.buildCameraLookAtMatrixLH(eye, target, world_up);
+		check_basis(m);
 	}
 }
 
