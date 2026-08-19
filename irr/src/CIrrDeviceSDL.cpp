@@ -522,10 +522,31 @@ CIrrDeviceSDL::~CIrrDeviceSDL()
 		SDL_CloseGamepad(p.second);
 #endif
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// Drop GL-backed Irrlicht objects before destroying the WebGL context.
+	// ~CIrrDeviceStub() runs afterward and would call glDeleteTextures on a
+	// context that is already gone (GLctx undefined in Emscripten glue).
+	if (GUIEnvironment) {
+		GUIEnvironment->drop();
+		GUIEnvironment = nullptr;
+	}
+	if (SceneManager) {
+		SceneManager->drop();
+		SceneManager = nullptr;
+	}
+	if (VideoDriver) {
+		VideoDriver->drop();
+		VideoDriver = nullptr;
+	}
+	if (ContextManager) {
+		ContextManager->drop();
+		ContextManager = nullptr;
+	}
+
 	if (Context) {
 		emscripten_webgl_make_context_current(0);
 		emscripten_webgl_destroy_context(
 			reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context));
+		Context = nullptr;
 	}
 #else
 	if (Window && Context) {
