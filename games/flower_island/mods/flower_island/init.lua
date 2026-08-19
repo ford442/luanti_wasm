@@ -140,7 +140,7 @@ local function plant_at(x, z)
 		return nil
 	end
 	local ang = math.atan2(z, x)
-	-- Rose curve: petals where cos(6θ) is high
+	-- Rose curve: petals where cos(6 * angle) is high
 	local petal = 4 + 8 * math.max(0, math.cos(6 * ang))
 	if r <= petal then
 		return "petal"
@@ -217,6 +217,7 @@ end
 
 core.register_on_newplayer(function(player)
 	player:set_pos({x = 0, y = SURFACE_Y + 2, z = 0})
-	player:get_inventory():add_item("main", "flower_island:plant 32")
-	player:get_inventory():add_item("main", "flower_island:blossom 16")
+	local inv = player:get_inventory()
+	inv:add_item("main", "flower_island:plant 32")
+	inv:add_item("main", "flower_island:blossom 16")
 end)

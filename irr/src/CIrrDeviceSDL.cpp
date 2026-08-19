@@ -10,6 +10,7 @@
 #include "IGUIEnvironment.h"
 #include "IImageLoader.h"
 #include "IFileSystem.h"
+#include "ISceneManager.h"
 #include "IVideoDriver.h"
 #include "os.h"
 #include "CTimer.h"

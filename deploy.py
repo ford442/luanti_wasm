@@ -195,8 +195,15 @@ def deploy_bundle(build_path: Path) -> bool:
 	if "target_folder" in locals() and target_folder:
 		target_folder_for_sizes = target_folder
 	target_site_for_sizes = globals().get("DEPLOY_TARGET", "test")
-	print("Checking remote file sizes...")
-	skip_sizes = fetch_remote_sizes(target_folder_for_sizes, target_site_for_sizes)
+	force = os.getenv("FORCE_DEPLOY", "").strip().lower() in ("1", "true", "yes")
+	if force:
+		print("FORCE_DEPLOY set — uploading all files (ignoring remote sizes).")
+		form_data["force"] = "1"
+		url = f"{url}?force_upload=1"
+		skip_sizes = {}
+	else:
+		print("Checking remote file sizes...")
+		skip_sizes = fetch_remote_sizes(target_folder_for_sizes, target_site_for_sizes)
 	zip_bytes = build_zip(build_path, skip_sizes)
 	print(f"Archive size: {len(zip_bytes) / 1024:.1f} KB\n")
 

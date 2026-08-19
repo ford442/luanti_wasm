@@ -7,7 +7,7 @@
 // Bump on every packaging change. This worker is a cache-buster only:
 // intercepting engine assets previously served stale luanti.wasm after
 // a failed network fetch (and then the old ABM/debug logs came back).
-var CACHE_VERSION = "5.17.0-dev-20260816g";
+var CACHE_VERSION = "5.17.0-dev-20260819b-force";
 
 self.addEventListener("install", function(event) {
 	event.waitUntil(self.skipWaiting());
