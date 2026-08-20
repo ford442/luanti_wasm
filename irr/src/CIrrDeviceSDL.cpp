@@ -696,6 +696,10 @@ static bool queryCanvasLayoutSize(int *css_w, int *css_h, int *canvas_w, int *ca
 
 static void logBrowserWebGLFailure()
 {
+	static bool logged = false;
+	if (logged)
+		return;
+	logged = true;
 	MAIN_THREAD_EM_ASM({
 		var c = Module['canvas'] || document.getElementById('canvas');
 		var parent = c && c.parentElement;
