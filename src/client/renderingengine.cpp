@@ -165,7 +165,11 @@ RenderingEngine::RenderingEngine(MyEventReceiver *receiver)
 
 	// Resolution selection
 	bool fullscreen = g_settings->getBool("fullscreen");
-#ifdef __ANDROID__
+#ifdef __EMSCRIPTEN__
+	u16 screen_w = 1, screen_h = 1;
+	bool window_maximized = false;
+	fullscreen = false;
+#elif defined(__ANDROID__)
 	u16 screen_w = 0, screen_h = 0;
 	bool window_maximized = false;
 #else
@@ -384,12 +388,19 @@ std::vector<video::E_DRIVER_TYPE> RenderingEngine::getSupportedVideoDrivers()
 {
 	// Only check these drivers. We do not support software and D3D in any capacity.
 	// ordered by preference (best first)
+#ifdef __EMSCRIPTEN__
+	static const video::E_DRIVER_TYPE glDrivers[] = {
+		video::EDT_OGLES2,
+		video::EDT_NULL,
+	};
+#else
 	static const video::E_DRIVER_TYPE glDrivers[] = {
 		video::EDT_OPENGL3,
 		video::EDT_OPENGL,
 		video::EDT_OGLES2,
 		video::EDT_NULL,
 	};
+#endif
 	std::vector<video::E_DRIVER_TYPE> drivers;
 
 	for (auto driver : glDrivers) {
