@@ -9,6 +9,7 @@
 	var query = new URLSearchParams(location.search);
 	var runtimeReady = false;
 	var started = false;
+	var launchInFlight = false;
 	var activeMode = query.get("address") ? "remote" : "local";
 	var activePhase = "assets";
 	var currentSession = null;
@@ -360,7 +361,7 @@
 
 	ui.form.addEventListener("submit", function(event) {
 		event.preventDefault();
-		if (started)
+		if (started || launchInFlight)
 			return;
 		unlockAudio();
 		try {
@@ -375,12 +376,31 @@
 			ui.play.disabled = true;
 			ui.launcher.hidden = true;
 			ui.gameShell.hidden = false;
-			syncCanvasBackingStore();
-			started = true;
+			launchInFlight = true;
 			reportStatus("Starting Luanti…", 4, "engine");
-			Module["callMain"](argumentsForSession(session));
+			var launchArgs = argumentsForSession(session);
+			requestAnimationFrame(function() {
+				syncCanvasBackingStore();
+				requestAnimationFrame(function() {
+					syncCanvasBackingStore();
+					try {
+						if (typeof Module["callMain"] !== "function")
+							throw new Error("The engine is still preparing. Try again in a moment.");
+						started = true;
+						Module["callMain"](launchArgs);
+					} catch (error) {
+						started = false;
+						launchInFlight = false;
+						ui.play.disabled = !runtimeReady;
+						ui.launcher.hidden = false;
+						ui.gameShell.hidden = true;
+						showError(String(error.message || error));
+					}
+				});
+			});
 		} catch (error) {
 			started = false;
+			launchInFlight = false;
 			ui.play.disabled = !runtimeReady;
 			ui.launcher.hidden = false;
 			ui.gameShell.hidden = true;

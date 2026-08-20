@@ -679,7 +679,7 @@ static bool queryCanvasLayoutSize(int *css_w, int *css_h, int *canvas_w, int *ca
 {
 	int cw = 0, ch = 0, bw = 0, bh = 0;
 	MAIN_THREAD_EM_ASM({
-		var c = Module['canvas'];
+		var c = Module['canvas'] || document.getElementById('canvas');
 		HEAP32[$0 >> 2] = c ? (c.clientWidth | 0) : 0;
 		HEAP32[$1 >> 2] = c ? (c.clientHeight | 0) : 0;
 		HEAP32[$2 >> 2] = c ? (c.width | 0) : 0;
@@ -692,6 +692,83 @@ static bool queryCanvasLayoutSize(int *css_w, int *css_h, int *canvas_w, int *ca
 	*canvas_w = bw;
 	*canvas_h = bh;
 	return true;
+}
+
+static void logBrowserWebGLFailure()
+{
+	MAIN_THREAD_EM_ASM({
+		var c = Module['canvas'] || document.getElementById('canvas');
+		var parent = c && c.parentElement;
+		var info = {
+			found: !!c,
+			connected: !!(c && c.isConnected),
+			hidden: !!(c && c.hidden),
+			parentHidden: !!(parent && parent.hidden),
+			closestHidden: !!(c && c.closest('[hidden]')),
+			width: c ? c.width : 0,
+			height: c ? c.height : 0,
+			clientWidth: c ? c.clientWidth : 0,
+			clientHeight: c ? c.clientHeight : 0,
+			innerWidth: window.innerWidth | 0,
+			innerHeight: window.innerHeight | 0
+		};
+		console.error('Luanti: WebGL context creation failed', info);
+	});
+}
+
+// Canvas was display:none in the launcher until Play. CSS size can still be
+// 0x0 on the first worker hop; never hand a degenerate backing store to WebGL.
+static void ensureBrowserCanvasSize(u32 *width, u32 *height)
+{
+	int css_w = 0, css_h = 0, canvas_w = 0, canvas_h = 0;
+	if (queryCanvasLayoutSize(&css_w, &css_h, &canvas_w, &canvas_h)) {
+		*width = static_cast<u32>(css_w);
+		*height = static_cast<u32>(css_h);
+		if (canvas_w != css_w || canvas_h != css_h)
+			emscripten_set_canvas_element_size("#canvas", css_w, css_h);
+		return;
+	}
+	int fallback_w = 0, fallback_h = 0;
+	MAIN_THREAD_EM_ASM({
+		HEAP32[$0 >> 2] = (window.innerWidth | 0) || 1280;
+		HEAP32[$1 >> 2] = (window.innerHeight | 0) || 720;
+	}, &fallback_w, &fallback_h);
+	if (fallback_w < 2)
+		fallback_w = 1280;
+	if (fallback_h < 2)
+		fallback_h = 720;
+	*width = static_cast<u32>(fallback_w);
+	*height = static_cast<u32>(fallback_h);
+	emscripten_set_canvas_element_size("#canvas", fallback_w, fallback_h);
+}
+
+static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE createBrowserWebGLContext(
+		const SIrrlichtCreationParameters &params)
+{
+	auto try_create = [&](int major_version, bool explicit_swap) {
+		EmscriptenWebGLContextAttributes attributes;
+		emscripten_webgl_init_context_attributes(&attributes);
+		attributes.alpha = params.WithAlphaChannel;
+		attributes.depth = params.ZBufferBits > 0;
+		attributes.stencil = params.Stencilbuffer;
+		attributes.antialias = params.AntiAlias > 1;
+		attributes.majorVersion = major_version;
+		attributes.minorVersion = 0;
+		attributes.enableExtensionsByDefault = true;
+		attributes.explicitSwapControl = explicit_swap;
+		attributes.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_ALWAYS;
+		attributes.renderViaOffscreenBackBuffer = true;
+		attributes.failIfMajorPerformanceCaveat = false;
+		return emscripten_webgl_create_context("#canvas", &attributes);
+	};
+
+	EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_context = try_create(2, true);
+	if (webgl_context)
+		return webgl_context;
+	webgl_context = try_create(2, false);
+	if (webgl_context)
+		return webgl_context;
+	return 0;
 }
 #endif
 
@@ -719,12 +796,7 @@ bool CIrrDeviceSDL::createWindowWithContext()
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
 	updateSizeAndScale();
-	if (Width < 2 || Height < 2) {
-		int w = 0, h = 0;
-		emscripten_get_canvas_element_size("#canvas", &w, &h);
-		Width = w;
-		Height = h;
-	}
+	ensureBrowserCanvasSize(&Width, &Height);
 
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
@@ -750,29 +822,13 @@ bool CIrrDeviceSDL::createWindowWithContext()
 		return false;
 	}
 
-	EmscriptenWebGLContextAttributes attributes;
-	emscripten_webgl_init_context_attributes(&attributes);
-	attributes.alpha = CreationParams.WithAlphaChannel;
-	attributes.depth = CreationParams.ZBufferBits > 0;
-	attributes.stencil = CreationParams.Stencilbuffer;
-	attributes.antialias = CreationParams.AntiAlias > 1;
-	// Irrlicht's current GLES driver uses uniform blocks and other GLES 3
-	// entry points during shader setup, which map to WebGL 2.
-	attributes.majorVersion = 2;
-	attributes.enableExtensionsByDefault = true;
-	// PROXY_TO_PTHREAD never returns to the browser event loop, so frames
-	// only appear if we commit explicitly (see SwapWindow).
-	attributes.explicitSwapControl = true;
-	// Prefer main-thread WebGL proxy + OFFSCREEN_FRAMEBUFFER over transferring
-	// #canvas to an OffscreenCanvas. Transfer leaves a blank composited
-	// surface under headless/Chrome when Irrlicht binds FBO 0 directly.
-	attributes.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_ALWAYS;
-	attributes.renderViaOffscreenBackBuffer = true;
+	ensureBrowserCanvasSize(&Width, &Height);
 
 	const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_context =
-		emscripten_webgl_create_context("#canvas", &attributes);
+		createBrowserWebGLContext(CreationParams);
 	if (!webgl_context) {
 		os::Printer::log("Could not create browser WebGL context", ELL_WARNING);
+		logBrowserWebGLFailure();
 		SDL_DestroyWindow(Window);
 		Window = nullptr;
 		return false;
