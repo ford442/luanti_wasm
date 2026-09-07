@@ -321,6 +321,15 @@ Key workflow files:
 
 ---
 
+## Known Issues / Blockers
+
+- **The "Networking (Future)" and "Main Loop (Future)" notes above, and the equivalent phase table in `CLAUDE.md`, are stale.** `wasm_porting.md` (last updated 2026-08-15, more recent than this file) shows those phases already implemented and via a different approach than described here: async main loop ships as `-sPROXY_TO_PTHREAD=1` + `-sOFFSCREEN_FRAMEBUFFER=1` (not `emscripten_set_main_loop()`/ASYNCIFY), and networking is a working WebSocket proxy (`client/web/network.js` + `util/wasm/proxy/`), not "planned." Sound (Phase 5) and most of input/browser integration (Phase 6) are implemented too, with a full browser launcher already live in `client/web/`. Read `wasm_porting.md` directly for current WASM-port status before planning work here — this file is behind it.
+- Recent commit history is dominated by WebGL-specific bugfixes (worker context creation, black wedges when looking down, leftover-vertex-buffer triangle artifacts, a WebGL shutdown crash). The GLES2/WebGL path through IrrlichtMt's Emscripten support is still the most fragile part of the port — expect more of this class of bug.
+- `src/threading/thread.cpp:123` — `FIXME: what if this fails, or if already locked by same thread?` in the lock-acquisition path.
+- **"Sound: Disabled initially (`ENABLE_SOUND=FALSE`)" above is wrong.** `CMakePresets.json`'s `Emscripten` preset sets `ENABLE_SOUND: "TRUE"` (no `ENABLE_SOUND` override for WASM in `src/CMakeLists.txt` either) — sound is compiled in, not disabled, for current WASM builds.
+- `deploy.py` (repo root) and `test_wasm.js` (repo root, Puppeteer-based local server + headless smoke test with the COOP/COEP headers already wired up) are undocumented anywhere in this file, `CLAUDE.md`, or `wasm_porting.md` — the Quick Cheat Sheet below has you hand-write an inline Python COOP/COEP server that `test_wasm.js` already provides.
+- The `elseif(EMSCRIPTEN)` line numbers cited in `CLAUDE.md` (`src/CMakeLists.txt` ~327/512/774) are stale; the actual branches are now at lines 333, 540, and 802.
+
 ## Useful Reference Files
 
 - `wasm_porting.md` — **Master living plan for the WASM port** (read this first for WASM work)

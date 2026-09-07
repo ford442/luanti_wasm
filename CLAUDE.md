@@ -135,6 +135,18 @@ client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 - Present tense, capital first letter, ≤70 chars on first line, no trailing period.
 - One logical change per branch (not `master`).
 
+## Known Issues / Blockers
+
+- **The "WASM Phase Plan" table above and the "Phase 3 work target" comments in the directory tree are stale.** `wasm_porting.md` (last updated 2026-08-15, well after this file) shows Phases 3–6 already implemented, and differently than described here:
+  - Phase 3 (async main loop) shipped as `-sPROXY_TO_PTHREAD=1` + `-sOFFSCREEN_FRAMEBUFFER=1`, not `emscripten_set_main_loop()`/ASYNCIFY. `clientlauncher.cpp`/`game.cpp` are not an open Phase 3 target.
+  - Phase 4 is a working WebSocket proxy (`client/web/network.js` + `util/wasm/proxy/`), not "WebRTC DataChannels + signaling server" — that was never the plan actually taken.
+  - Phase 5 (sound) and most of Phase 6 (input) are implemented, with a full browser launcher already live in `client/web/`.
+  Treat this file's phase table as historical; read `wasm_porting.md` directly before planning WASM work, or you'll re-plan work that's already done or built against a networking model that isn't what's there.
+- Recent commit history is dominated by WebGL-specific bugfixes (worker context creation, black wedges when looking down, leftover-vertex-buffer triangle artifacts, a WebGL shutdown crash). The GLES2/WebGL path through IrrlichtMt's Emscripten support is still the most fragile part of the port.
+- `src/threading/thread.cpp:123` — `FIXME: what if this fails, or if already locked by same thread?` in the lock-acquisition path.
+- The `elseif(EMSCRIPTEN)` line numbers cited above (`src/CMakeLists.txt` ~327/512/774) are stale; the branches are now at lines 333, 540, and 802.
+- `deploy.py` and `test_wasm.js` at the repo root (deployment script and a Puppeteer-based local server + headless smoke test) aren't mentioned anywhere in this file — the "Serve WASM Output" snippet above reinvents the COOP/COEP server `test_wasm.js` already has.
+
 ## Do Not Modify Manually
 - `minetest.conf.example` and `settings_translation_file.cpp` — regenerated pre-release.
 - `po/*.po` / `luanti.pot` — update with `util/updatepo.sh`.
