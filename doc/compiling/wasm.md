@@ -112,19 +112,42 @@ world can be launched, C++ runs on an application worker, browser-main timers
 remain responsive, and real engine loading status reaches the launcher. This
 is the automated CI smoke; it is not a visual regression test.
 
-Before publishing a demo, perform the **First Playable Smoke Test** manual gate.
-Ensure all checklist items pass on both **Chrome** and **Firefox** (latest stable).
+Before publishing a demo, the build must pass the **First Playable Smoke Test**,
+the integration gate for the browser client. Every step has to pass on both
+**Chrome** and **Firefox** (latest stable).
 
 1. Serve with COOP/COEP headers (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`).
 2. Page loads without JS/WASM errors.
-3. IDBFS sync completes (console: "IDBFS loaded successfully" or equivalent success state).
+3. IDBFS sync completes (the launcher reaches storage state `ready`, non-fatal).
 4. Main menu renders and accepts input (no tab freeze).
 5. Create a new singleplayer devtest world.
 6. Load world, move, place 10 blocks, break 5 blocks.
-7. Exit to menu, hard-reload tab, load same world — blocks persist (#3).
+7. Exit to menu, hard-reload tab, load same world — blocks persist.
 8. `minetest.conf` change survives reload.
 
-The current headless smoke does not replace this menu/world gate.
+Steps 2 to 7 are automated:
+
+```bash
+python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)"
+```
+
+It seeds a `minetest.conf`, reloads, creates and enters a devtest world, checks
+that keyboard input round-trips through a chat command, digs and places nodes,
+then hard-reloads the tab and requires `map.sqlite`, `players.sqlite` and
+`minetest.conf` to come back byte-identical before re-entering the same world.
+`--screenshot-dir DIR` saves the launcher, the world and the reloaded world;
+`--engine firefox --browser PATH` drives a Playwright Firefox build instead of
+Chrome.
+
+What the automation cannot decide stays manual: how the game feels to walk
+around in, mouse-look, sound, the pause menu, GPU rendering (the headless run
+uses software GL), and step 8 through the engine's own settings UI. Neither
+smoke replaces that pass.
+
+The gate is not currently green. `docs/wasm-issues/06-first-playable-gate-results.md`
+records the last run step by step, along with the known failures that block it
+and the browsers still to be covered. Update that file whenever the gate is
+re-run, and keep the demo gated until it passes.
 
 ## CI and demo deployment
 

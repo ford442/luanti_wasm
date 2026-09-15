@@ -586,6 +586,11 @@ Before a public demo can be approved, the build must pass this end-to-end checkl
 7. Exit to menu, hard-reload tab, load same world — blocks persist
 8. `minetest.conf` change survives reload
 
+`util/wasm/test_first_playable.py` drives steps 2-7 in a real browser; see
+`doc/compiling/wasm.md` for how to run it and what stays manual.
+`docs/wasm-issues/06-first-playable-gate-results.md` records the result of the
+last run, the failures blocking the gate, and the browsers still to cover.
+
 *Note: Multiplayer testing (WebSocket proxy) is tracked as a separate milestone.*
 
 ---
