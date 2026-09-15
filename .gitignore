@@ -146,3 +146,7 @@ lib/irrlichtmt
 
 # Generated mod storage database
 client/mod_storage.sqlite
+
+# Python bytecode from the util/ scripts
+__pycache__/
+*.pyc

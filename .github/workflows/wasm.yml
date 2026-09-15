@@ -101,6 +101,21 @@ jobs:
       - name: Smoke generated client in Chrome
         run: python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
 
+      - name: Run the first playable gate in Chrome
+        run: |
+          python3 util/wasm/test_first_playable.py \
+            --browser "$(command -v google-chrome)" \
+            --screenshot-dir wasm-gate-screenshots
+
+      - name: Upload first playable gate screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: luanti-wasm-gate-${{ github.sha }}
+          path: wasm-gate-screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Package versioned demo
         run: python3 util/wasm/package_demo.py --version "$GITHUB_SHA" --output wasm-demo
 
