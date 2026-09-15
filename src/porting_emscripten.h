@@ -31,6 +31,15 @@ void emscripten_finish_canvas_present();
 void emscripten_report_status(const std::string &message, int percent = -1,
 		const char *phase = nullptr);
 
+// Browser video overlay (theater Tier B). The page owns an HTML <video>; the
+// engine only asks for a clip by name. `clip` is a bare file name, never a
+// path or a URL: the launcher resolves it inside its own media/ directory, so
+// a mod cannot point the overlay at a third-party origin. Returns false if the
+// name is not acceptable.
+bool emscripten_show_video_overlay(const std::string &clip,
+		const std::string &title, bool loop, bool muted);
+void emscripten_hide_video_overlay();
+
 // Save paths on any engine thread only record committed work. The application
 // worker calls emscripten_service_persistence() while pumping frames and the
 // service forwards eligible generations to the browser main thread.
@@ -64,6 +73,16 @@ inline void emscripten_finish_canvas_present()
 
 inline void emscripten_report_status(const std::string &, int = -1,
 		const char * = nullptr)
+{
+}
+
+inline bool emscripten_show_video_overlay(const std::string &,
+		const std::string &, bool, bool)
+{
+	return false;
+}
+
+inline void emscripten_hide_video_overlay()
 {
 }
 

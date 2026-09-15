@@ -10,7 +10,9 @@ This drives the generated client through checklist steps 2-7 of the
   2. the page loads without JS/WASM errors
   3. IDBFS hydration completes before the launcher unlocks
   4. the launcher accepts input and the browser main thread never freezes
-  5. a new singleplayer devtest world is created
+  5. a new singleplayer world is created in the selected game (the
+     luanti_web showcase by default; --game devtest still exercises the bare
+     engine sandbox)
   6. the world loads, keyboard and mouse input reach the engine, and nodes
      are placed and dug in it
   7. the tab is reloaded and the same world (and minetest.conf) come back
@@ -33,8 +35,17 @@ from playwright.sync_api import Page, sync_playwright
 
 from serve import create_server
 
-WORLD = "/home/web_user/.luanti/worlds/devtest"
+# The launcher names a singleplayer world after the game it was created with.
+WORLDS = "/home/web_user/.luanti/worlds"
 CONFIG = "/home/web_user/.luanti/minetest.conf"
+
+# A node each game is guaranteed to have, so the place/dig steps do not depend
+# on whatever happens to be in the starting inventory.
+PLACE_ITEMS = {
+	"luanti_web": "lw_nodes:stone_brick",
+	"devtest": "basenodes:stone",
+}
+DEFAULT_GAME = "luanti_web"
 # default_privs applies when the world's player record is created, so the
 # configuration file has to be in place before the world is ever launched.
 CONFIG_TEXT = (
@@ -42,7 +53,6 @@ CONFIG_TEXT = (
 	"default_privs = interact, shout, give, settime, fly, fast\n"
 	"name = \n"
 )
-PLACE_ITEM = "basenodes:stone"
 PLACE_TARGET = 10
 DIG_TARGET = 5
 # Pointer-lock look. SDL reads the relative movement of a mouse event, so a
@@ -177,7 +187,10 @@ def dig_nodes(page: Page, console: list[str]) -> int:
 
 
 def run(page: Page, url: str, console: list[str], screenshots: Path | None,
-		require_place: bool) -> dict:
+		require_place: bool, game: str) -> dict:
+	world = f"{WORLDS}/{game}"
+	place_item = PLACE_ITEMS.get(game, "mapgen_stone")
+
 	def shot(name: str) -> None:
 		if screenshots:
 			page.screenshot(path=str(screenshots / f"{name}.png"))
@@ -198,7 +211,7 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 	assert prelaunch["launcher"]["runtimeReady"], prelaunch
 	assert not prelaunch["launcher"]["started"], prelaunch
 	assert not prelaunch["buttonDisabled"], prelaunch
-	assert prelaunch["game"] == "devtest", prelaunch
+	assert prelaunch["game"] == game, prelaunch
 	shot("01-launcher")
 
 	# The engine reads its configuration once, at startup, so seed the file
@@ -222,7 +235,7 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 	page.wait_for_timeout(6000)
 	shot("02-world")
 	grab_pointer(page)
-	send_chat(page, console, f"/giveme {PLACE_ITEM} 40")
+	send_chat(page, console, f"/giveme {place_item} 40")
 	placed = place_nodes(page, console)
 	dug = dig_nodes(page, console)
 	shot("03-interaction")
@@ -230,15 +243,15 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 	# Step 7: the same world comes back after a hard reload.
 	sync_filesystem(page)
 	before = {
-		"map": digest(page, f"{WORLD}/map.sqlite"),
-		"players": digest(page, f"{WORLD}/players.sqlite"),
+		"map": digest(page, f"{world}/map.sqlite"),
+		"players": digest(page, f"{world}/players.sqlite"),
 		"config": digest(page, CONFIG)
 	}
 	page.reload(wait_until="domcontentloaded", timeout=120_000)
 	wait_for_launcher(page)
 	after = {
-		"map": digest(page, f"{WORLD}/map.sqlite"),
-		"players": digest(page, f"{WORLD}/players.sqlite"),
+		"map": digest(page, f"{world}/map.sqlite"),
+		"players": digest(page, f"{world}/players.sqlite"),
 		"config": digest(page, CONFIG)
 	}
 	assert before == after, {"before": before, "after": after}
@@ -264,6 +277,8 @@ def main() -> int:
 		choices=("chromium", "firefox"),
 		help="Playwright browser engine for the given executable")
 	parser.add_argument("--build", default="build-wasm")
+	parser.add_argument("--game", default=DEFAULT_GAME,
+		help="game id to create the world in (default: %(default)s)")
 	parser.add_argument("--screenshot-dir")
 	parser.add_argument("--headed", action="store_true")
 	parser.add_argument("--require-place", action="store_true",
@@ -304,10 +319,10 @@ def main() -> int:
 				page.on("pageerror", lambda error: page_errors.append(
 					format_page_error(error)))
 				url = (f"http://127.0.0.1:{server.server_address[1]}/luanti.html"
-					"?game=devtest&view=60")
+					f"?game={args.game}&view=60")
 				try:
 					result = run(page, url, console, screenshots,
-						args.require_place)
+						args.require_place, args.game)
 				finally:
 					tail = "\n".join(line[:160] for line in console[-20:])
 					browser.close()
@@ -315,7 +330,8 @@ def main() -> int:
 			server.shutdown()
 
 	assert not page_errors, {"pageErrors": page_errors, "console": console[-30:]}
-	print(f"first playable smoke passed on {args.engine}: {result}")
+	print(f"first playable smoke passed on {args.engine} "
+		f"in {args.game}: {result}")
 	if not result["placed"]:
 		print("note: no node could be placed; see issue #32 and "
 			"docs/wasm-issues/06-first-playable-gate-results.md")

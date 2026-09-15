@@ -136,6 +136,14 @@ private:
 	// strip_escapes(str)
 	static int l_strip_escapes(lua_State *L);
 
+#ifdef __EMSCRIPTEN__
+	// set_web_video(def) -- browser client only
+	static int l_set_web_video(lua_State *L);
+
+	// clear_web_video() -- browser client only
+	static int l_clear_web_video(lua_State *L);
+#endif
+
 public:
 	static void Initialize(lua_State *L, int top);
 	static void InitializeAsync(lua_State *L, int top);

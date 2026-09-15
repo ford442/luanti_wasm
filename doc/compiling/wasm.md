@@ -120,7 +120,8 @@ the integration gate for the browser client. Every step has to pass on both
 2. Page loads without JS/WASM errors.
 3. IDBFS sync completes (the launcher reaches storage state `ready`, non-fatal).
 4. Main menu renders and accepts input (no tab freeze).
-5. Create a new singleplayer devtest world.
+5. Create a new singleplayer world in the default game (`luanti_web`, the
+   showcase pack; `devtest` is still selectable for engine work).
 6. Load world, move, place 10 blocks, break 5 blocks.
 7. Exit to menu, hard-reload tab, load same world — blocks persist.
 8. `minetest.conf` change survives reload.
@@ -131,13 +132,15 @@ Steps 2 to 7 are automated:
 python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)"
 ```
 
-It seeds a `minetest.conf`, reloads, creates and enters a devtest world, checks
-that keyboard input round-trips through a chat command, digs and places nodes,
-then hard-reloads the tab and requires `map.sqlite`, `players.sqlite` and
+It seeds a `minetest.conf`, reloads, creates and enters a world, checks that
+keyboard input round-trips through a chat command, digs and places nodes, then
+hard-reloads the tab and requires `map.sqlite`, `players.sqlite` and
 `minetest.conf` to come back byte-identical before re-entering the same world.
 `--screenshot-dir DIR` saves the launcher, the world and the reloaded world;
 `--engine firefox --browser PATH` drives a Playwright Firefox build instead of
-Chrome.
+Chrome. `--game devtest` runs the same gate against the bare engine sandbox
+instead of the showcase, which is the useful comparison when a failure might be
+content-specific.
 
 What the automation cannot decide stays manual: how the game feels to walk
 around in, mouse-look, sound, the pause menu, GPU rendering (the headless run

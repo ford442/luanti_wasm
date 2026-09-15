@@ -7,6 +7,9 @@
 #include "porting_emscripten.h"
 
 #include "porting.h"
+#include "log.h"
+
+#include <string>
 
 #include <atomic>
 #include <cstdlib>
@@ -40,6 +43,26 @@ const char *reason_name(porting::EmscriptenPersistenceReason reason)
 	default:
 		return "periodic";
 	}
+}
+
+// A clip name has to be a bare file name that the launcher can append to its
+// own media/ directory. Rejecting everything else here means a mod cannot aim
+// the page's <video> element at another origin, and cannot escape the media
+// directory with "../". The browser's own COOP/COEP rules would already block
+// a cross-origin fetch, but a mod should not be able to make the attempt.
+bool is_safe_clip_name(const std::string &clip)
+{
+	if (clip.empty() || clip.size() > 128)
+		return false;
+	if (clip.front() == '.' || clip.front() == '-')
+		return false;
+	for (char c : clip) {
+		const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			|| (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+		if (!ok)
+			return false;
+	}
+	return clip.find("..") == std::string::npos;
 }
 
 } // namespace
@@ -196,6 +219,40 @@ void emscripten_wait_for_persistence()
 		// main thread free to complete syncfs callbacks and display errors.
 		emscripten_thread_sleep(16);
 	}
+}
+
+bool emscripten_show_video_overlay(const std::string &clip,
+		const std::string &title, bool loop, bool muted)
+{
+	if (!is_safe_clip_name(clip)) {
+		errorstream << "Refusing to play web video clip with unusable name: "
+			<< clip << std::endl;
+		return false;
+	}
+
+	// The launcher may have no overlay (an embedder replaced the shell) or no
+	// clip on disk. Either way Tier A keeps playing, so a false return is a
+	// normal outcome rather than an error.
+	return MAIN_THREAD_EM_ASM_INT({
+		var theater = Module["luantiTheater"];
+		if (!theater || typeof theater["show"] !== "function")
+			return 0;
+		return theater["show"]({
+			"clip": UTF8ToString($0),
+			"title": UTF8ToString($1),
+			"loop": !!$2,
+			"muted": !!$3
+		}) ? 1 : 0;
+	}, clip.c_str(), title.c_str(), loop, muted) != 0;
+}
+
+void emscripten_hide_video_overlay()
+{
+	MAIN_THREAD_EM_ASM({
+		var theater = Module["luantiTheater"];
+		if (theater && typeof theater["hide"] === "function")
+			theater["hide"]();
+	});
 }
 
 } // namespace porting

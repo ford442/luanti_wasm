@@ -17,7 +17,7 @@ import shutil
 
 REQUIRED_OUTPUTS = (
 	"luanti.html", "luanti.js", "luanti.wasm", "luanti.data",
-	"launcher.js", "launcher.css", "launcher-config.js",
+	"launcher.js", "launcher.css", "launcher-config.js", "theater.js",
 	"manifest.webmanifest", "service-worker.js", "luanti-web.svg",
 )
 VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -110,6 +110,9 @@ def package_demo(source: Path, destination: Path, version: str) -> dict[str, obj
   Cache-Control: public, max-age=31536000, immutable
 
 /releases/:version/launcher-config.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/releases/:version/theater.js
   Cache-Control: public, max-age=31536000, immutable
 
 /releases/:version/manifest.webmanifest

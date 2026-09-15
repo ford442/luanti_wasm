@@ -841,8 +841,13 @@ if(BUILD_CLIENT)
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
 			"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/client/web/shell.html"
-			# Asset preloading — paths are relative to CMAKE_SOURCE_DIR at build time
+			# Asset preloading — paths are relative to CMAKE_SOURCE_DIR at build
+			# time. Everything listed here lands in luanti.data, which every
+			# visitor downloads before the engine starts: check the content
+			# budget in wasm_porting.md before adding to this list. Runtime
+			# media (theater clips) goes in client/web/media instead.
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/builtin@/builtin"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/luanti_web@/games/luanti_web"
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/devtest@/games/devtest"
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/flower_island@/games/flower_island"
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/rollercoaster@/games/rollercoaster"
@@ -862,6 +867,7 @@ if(BUILD_CLIENT)
 			${CMAKE_SOURCE_DIR}/client/web/launcher.js
 			${CMAKE_SOURCE_DIR}/client/web/launcher.css
 			${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+			${CMAKE_SOURCE_DIR}/client/web/theater.js
 			${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
 			${CMAKE_SOURCE_DIR}/client/web/service-worker.js
 			${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
@@ -872,11 +878,18 @@ if(BUILD_CLIENT)
 				${CMAKE_SOURCE_DIR}/client/web/launcher.js
 				${CMAKE_SOURCE_DIR}/client/web/launcher.css
 				${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+				${CMAKE_SOURCE_DIR}/client/web/theater.js
 				${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
 				${CMAKE_SOURCE_DIR}/client/web/service-worker.js
 				${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
 				${CMAKE_SOURCE_DIR}/client/web/.htaccess
 				$<TARGET_FILE_DIR:${PROJECT_NAME}>
+			# Theater clips are served from media/ at runtime rather than baked
+			# into luanti.data. The directory ships with only its README; a
+			# deployment drops real clips in beside it.
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+				${CMAKE_SOURCE_DIR}/client/web/media
+				$<TARGET_FILE_DIR:${PROJECT_NAME}>/media
 			COMMENT "Copying Luanti web launcher and PWA assets"
 		)
 	endif()

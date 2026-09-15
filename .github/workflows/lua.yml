@@ -6,12 +6,14 @@ on:
     paths:
       - 'builtin/**.lua'
       - 'games/devtest/**.lua'
+      - 'games/luanti_web/**.lua'
       - 'util/ci/**'
       - '.github/workflows/lua.yml'
   pull_request:
     paths:
       - 'builtin/**.lua'
       - 'games/devtest/**.lua'
+      - 'games/luanti_web/**.lua'
       - 'util/ci/**'
       - '.github/workflows/lua.yml'
 
@@ -72,3 +74,7 @@ jobs:
     - name: Run checks (devtest)
       run: |
         $HOME/.luarocks/bin/luacheck --config=games/devtest/.luacheckrc games/devtest
+
+    - name: Run luacheck for luanti_web
+      run: |
+        $HOME/.luarocks/bin/luacheck --config=games/luanti_web/.luacheckrc games/luanti_web
