@@ -50,7 +50,7 @@ end
 core.register_node("lw_theater:screen_off", {
 	description = "Cinema Screen",
 	tiles = {"lw_screen_off.png"},
-	groups = {cracky = 2, lw_screen = 1},
+	groups = {cracky = 2, lw_screen = 1, lw_palette = 1},
 	is_ground_content = false,
 })
 
@@ -250,7 +250,7 @@ core.register_node("lw_theater:seat", {
 			{-0.5, -0.125, 0.25, 0.5, 0.5, 0.5},
 		},
 	},
-	groups = {snappy = 2, oddly_breakable_by_hand = 2},
+	groups = {snappy = 2, oddly_breakable_by_hand = 2, lw_palette = 1},
 	is_ground_content = false,
 	on_rightclick = function(pos, _, clicker)
 		if clicker and clicker:is_player() then
@@ -268,7 +268,7 @@ core.register_node("lw_theater:aisle_light", {
 	on_place = core.rotate_node,
 	light_source = 7,
 	node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.25, 0.5}},
-	groups = {cracky = 3},
+	groups = {cracky = 3, lw_palette = 1},
 	is_ground_content = false,
 })
 
@@ -279,7 +279,7 @@ core.register_node("lw_theater:marquee", {
 		animation = {type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 1.2},
 	}},
 	light_source = 12,
-	groups = {cracky = 2},
+	groups = {cracky = 2, lw_palette = 1},
 	is_ground_content = false,
 })
 

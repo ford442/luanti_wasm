@@ -5,11 +5,16 @@
 -- The showcase world.
 --
 -- The map is *authored*, not procedural, but it is not a committed map
--- database either: the layout below is the source of truth and the world is
--- stamped out of it on a singlenode mapgen the first time each chunk is
--- generated. That keeps the repository small, keeps the build reproducible,
--- and means editing this file changes the landing world on the next fresh
--- world instead of requiring a map blob to be regenerated and committed.
+-- database either: the layout below plus the schematics in schems/ are the
+-- source of truth, and the world is stamped out of them on a singlenode mapgen
+-- the first time each chunk is generated. That keeps the repository small,
+-- keeps the build reproducible, and means editing this file or a schematic
+-- changes the landing world on the next fresh world instead of requiring a map
+-- blob to be regenerated and committed.
+--
+-- Rule of thumb: a building someone would rather edit in game than in code is
+-- a schematic (the theater, the fountain); anything derived from data or from
+-- other mods stays code (lettering, the pixel art, the library pedestals).
 --
 -- Walking tour, south to north:
 --
@@ -25,7 +30,14 @@
 
 lw_world = {}
 
-local FONT = dofile(core.get_modpath("lw_world") .. DIR_DELIM .. "font.lua")
+local MODPATH = core.get_modpath("lw_world")
+local FONT = dofile(MODPATH .. DIR_DELIM .. "font.lua")
+local schems = dofile(MODPATH .. DIR_DELIM .. "schems.lua")
+
+-- load(name), save(p1, p2, name, skip, done), set_pos(player, "pos1", pos):
+-- see schems.lua. Public so a world mod or a test can write schematics without
+-- going through chat.
+lw_world.schems = schems
 
 --------------------------------------------------------------------------
 -- Layout constants
@@ -84,13 +96,24 @@ local function walls(x0, y0, z0, x1, y1, z1, name)
 	fill(x1, y0, z0, x1, y1, z1, name)
 end
 
--- Rectangular outline drawn *inside* a single wall plane (constant z). walls()
--- cannot do this: with z0 == z1 its four boxes collapse into one filled slab.
-local function outline_z(x0, y0, x1, y1, z, name)
-	fill(x0, y0, z, x1, y0, z, name)
-	fill(x0, y1, z, x1, y1, z, name)
-	fill(x0, y0, z, x0, y1, z, name)
-	fill(x1, y0, z, x1, y1, z, name)
+-- Placements of committed schematics, by piece name. `/lw_schem save` uses the
+-- first placement's footprint and `skip` list to re-export a piece.
+local pieces = {}
+
+-- Stamp schems/<name>.mts with its minimum corner at (x, y, z). It takes its
+-- place in the build order like any box: later ops still overwrite it, and it
+-- overwrites earlier ones everywhere except the nodes it was saved to skip.
+local function schem(x, y, z, name, skip)
+	local piece = schems.load(name)
+	local op = {
+		x0 = x, y0 = y, z0 = z,
+		x1 = x + piece.size.x - 1, y1 = y + piece.size.y - 1, z1 = z + piece.size.z - 1,
+		piece = piece,
+	}
+	ops[#ops + 1] = op
+	pieces[name] = pieces[name] or {instances = {}, skip = skip}
+	table.insert(pieces[name].instances, op)
+	return piece
 end
 
 local function label(x, y, z, text)
@@ -172,19 +195,16 @@ local function build_plaza()
 	-- A shallow lip so the plaza reads as a built surface, not mown grass.
 	walls(x0 - 1, GROUND, z0 - 1, x1 + 1, GROUND, z1 + 1, "lw_nodes:polished_stone")
 
-	-- Colonnade down both sides.
+	-- Colonnade down both sides: column, gold capital, lamp.
 	for z = z0 + 2, z1 - 6, 4 do
 		for _, x in ipairs({x0 + 1, x1 - 1}) do
-			fill(x, FLOOR, z, x, FLOOR + 3, z, "lw_nodes:column")
-			put(x, FLOOR + 4, z, "lw_nodes:gold_trim")
-			put(x, FLOOR + 5, z, "lw_nodes:lamp")
+			schem(x, FLOOR, z, "plaza_column")
 		end
 	end
 
 	-- Fountain: a ring of polished stone around still water, with a lip so a
 	-- visitor walks around it instead of straight into it.
-	walls(-3, GROUND, -8, 3, FLOOR, -2, "lw_nodes:polished_stone")
-	fill(-2, GROUND, -7, 2, GROUND, -3, "lw_nodes:water")
+	schem(-3, GROUND, -8, "plaza_fountain")
 
 	-- Welcome sign just north of the spawn point, where a visitor already
 	-- looking up the plaza will see its face. Poster panels face south at
@@ -250,8 +270,9 @@ local function build_library()
 
 	local names = palette_names()
 	local index = 1
-	-- Two banks of three pedestals with an aisle down the middle.
-	for row = 0, 7 do
+	-- Two banks of three pedestals with an aisle down the middle, nine rows
+	-- deep: 54 pedestals for the palette in lw_nodes plus the theater nodes.
+	for row = 0, 8 do
 		for col = 0, 5 do
 			local name = names[index]
 			if not name then
@@ -359,7 +380,12 @@ local function build_artwork(art, x, y, z, front)
 	end
 	local width = #art.rows[1]
 	local height = #art.rows
-	outline_z(x - 1, y - height, x + width, y + 1, z, "lw_nodes:frame")
+	-- The frame piece is saved with its inside set to "never place", so it
+	-- wraps the art above instead of erasing it.
+	local frame = schem(x - 1, y - height, z, "gallery_frame", {"air", "group:lw_wool"})
+	assert(frame.size.x == width + 2 and frame.size.y == height + 2,
+		("lw_world artwork %q is %dx%d, but gallery_frame.mts fits %dx%d")
+			:format(art.title, width, height, frame.size.x - 2, frame.size.y - 2))
 
 	local centre = x + math.floor(width / 2)
 	local apron = z + 2 * front
@@ -496,71 +522,32 @@ end
 local THEATER = {x0 = -16, x1 = 16, z0 = 34, z1 = SCREEN_Z + 2}
 
 local function build_theater()
-	local x0, x1, z0, z1 = THEATER.x0, THEATER.x1, THEATER.z0, THEATER.z1
-
-	fill(x0, GROUND - 1, z0, x1, GROUND - 1, z1, "lw_nodes:stone_brick")
-	fill(x0, GROUND, z0, x1, GROUND, z1, "lw_nodes:carpet")
-	fill(x0, FLOOR, z0, x1, FLOOR + 11, z1, "air")
-	walls(x0, FLOOR, z0, x1, FLOOR + 11, z1, "lw_nodes:stone_brick")
-	fill(x0, FLOOR + 12, z0, x1, FLOOR + 12, z1, "lw_nodes:stone_brick")
-
-	-- Entrance, marquee and title on the south face.
-	fill(x0, FLOOR + 6, z0 - 1, x1, FLOOR + 11, z0 - 1, "lw_nodes:stone_brick")
-	fill(-3, FLOOR, z0, 3, FLOOR + 3, z0, "air")
-	fill(-5, FLOOR + 4, z0, 5, FLOOR + 4, z0, "lw_theater:marquee")
-	fill(-6, FLOOR + 5, z0, 6, FLOOR + 5, z0, "lw_nodes:gold_trim")
-	write_text(-math.floor(text_width("CINEMA") / 2), FLOOR + 11, z0 - 1, "CINEMA",
-		"red", "x", 1)
-
-	-- Auditorium floor. The house steps *down* towards the screen, so the
-	-- entrance ramp climbs to the back row and each row in front of it sits a
-	-- little lower — the back of the house can see over the front without the
-	-- entrance opening onto a wall of seating.
-	local BANDS = {
-		{z0 = 37, z1 = 38, level = 1},
-		{z0 = 39, z1 = 43, level = 2},          -- back row, z = 42
-		{z0 = 44, z1 = 49, level = 1},          -- rows z = 45 and 48
-	}
-	for _, band in ipairs(BANDS) do
-		fill(x0 + 1, GROUND + 1, band.z0, x1 - 1, GROUND + band.level, band.z1,
-			"lw_nodes:stone_brick")
-		fill(x0 + 1, GROUND + band.level, band.z0, x1 - 1, GROUND + band.level,
-			band.z1, "lw_nodes:carpet")
-	end
-
-	-- Five rows of seats, an aisle down the middle, aisle lights at both ends.
-	local ROW_LEVEL = {[42] = 2, [45] = 1, [48] = 1, [51] = 0, [54] = 0}
-	for _, z in ipairs({42, 45, 48, 51, 54}) do
-		local y = GROUND + ROW_LEVEL[z] + 1
-		for x = x0 + 3, x1 - 3 do
-			if x < -2 or x > 2 then
-				-- facedir 2 is a half turn, putting the seat back to the south
-				-- so a seated visitor faces the screen.
-				put(x, y, z, "lw_theater:seat", 2)
-			end
-		end
-		put(x0 + 2, y, z, "lw_theater:aisle_light")
-		put(x1 - 2, y, z, "lw_theater:aisle_light")
-	end
-
-	-- Curtain wall, then the screen and its proscenium arch on top of it.
-	fill(x0 + 1, FLOOR, SCREEN_Z, x1 - 1, FLOOR + 10, SCREEN_Z, "lw_nodes:curtain")
-	fill(SCREEN_X0, SCREEN_TOP - 3, SCREEN_Z,
-		SCREEN_X0 + lw_theater.screen_cols - 1, SCREEN_TOP, SCREEN_Z,
-		"lw_theater:screen_off")
-	outline_z(SCREEN_X0 - 1, SCREEN_TOP - 4,
-		SCREEN_X0 + lw_theater.screen_cols, SCREEN_TOP + 1, SCREEN_Z,
-		"lw_nodes:gold_trim")
-
-	-- House lights, kept sparse: the screen is meant to be the bright thing.
-	for x = x0 + 5, x1 - 5, 10 do
-		for z = z0 + 6, SCREEN_Z - 6, 8 do
-			put(x, FLOOR + 11, z, "lw_nodes:lamp")
+	-- The whole building is schems/theater.mts, from the foundation course
+	-- under the carpet (GROUND - 1) to the roof, and from the CINEMA lettering
+	-- one node south of the entrance wall to the back wall behind the screen.
+	-- What it holds, for whoever edits it in game:
+	--
+	-- * The house steps *down* towards the screen: the entrance ramp climbs to
+	--   the back row and each row in front sits a little lower, so the back of
+	--   the house sees over the front without the entrance opening onto a wall
+	--   of seating.
+	-- * Seats are facedir 2 (a half turn), backs to the south, so a seated
+	--   visitor faces the screen. A schematic keeps param2, so they survive a
+	--   round trip.
+	-- * House lights are sparse on purpose: the screen is the bright thing.
+	-- * The 6x4 screen of lw_theater:screen_off cells, framed in gold trim, is
+	--   what lw_theater.register_screen() below points at — checked here.
+	local theater = schem(THEATER.x0, GROUND - 1, THEATER.z0 - 1, "theater")
+	for row = 0, lw_theater.screen_rows - 1 do
+		for col = 0, lw_theater.screen_cols - 1 do
+			local found = schems.node_at(theater, SCREEN_X0 + col - THEATER.x0,
+				SCREEN_TOP - row - (GROUND - 1), SCREEN_Z - (THEATER.z0 - 1))
+			assert(found == "lw_theater:screen_off", ("lw_world: theater.mts has %s " ..
+				"where screen cell row %d col %d should be; move SCREEN_* to match")
+				:format(tostring(found), row, col))
 		end
 	end
 
-	put(-6, FLOOR, 38, "lw_nodes:pedestal")
-	put(-6, FLOOR + 1, 38, "lw_nodes:poster")
 	label(-6, FLOOR + 1, 38,
 		"Theater: left click the Screen Remote for the next reel, right click " ..
 		"for the browser video overlay. Right click a seat to sit down. " ..
@@ -617,6 +604,104 @@ local function overlaps(minp, maxp)
 		or maxp.z < BOUNDS.min.z or minp.z > BOUNDS.max.z)
 end
 
+local function has_on_construct(name)
+	local def = core.registered_nodes[name]
+	return def and def.on_construct ~= nil
+end
+
+-- Writes every op (or only the placements of piece `only`) that touches
+-- minp..maxp into voxel data covering that box. Returns whether anything was
+-- written, and the positions of nodes whose on_construct must still run.
+local function stamp(data, param2, area, minp, maxp, only)
+	local touched = false
+	local constructs = {}
+
+	for _, op in ipairs(ops) do
+		local x0 = math.max(op.x0, minp.x)
+		local x1 = math.min(op.x1, maxp.x)
+		local y0 = math.max(op.y0, minp.y)
+		local y1 = math.min(op.y1, maxp.y)
+		local z0 = math.max(op.z0, minp.z)
+		local z1 = math.min(op.z1, maxp.z)
+		local piece = op.piece
+		if x0 <= x1 and y0 <= y1 and z0 <= z1
+				and (not only or (piece and piece.name == only)) then
+			if piece then
+				local sx, sy = piece.size.x, piece.size.y
+				local ids, construct = {}, {}
+				for n, name in ipairs(piece.names) do
+					ids[n] = content_id(name)
+					construct[n] = has_on_construct(name)
+				end
+				for z = z0, z1 do
+					for y = y0, y1 do
+						local index = area:index(x0, y, z)
+						local i = (z - op.z0) * sy * sx + (y - op.y0) * sx + (x0 - op.x0) + 1
+						for x = x0, x1 do
+							local n = piece.nodes[i]
+							if n ~= 0 then
+								data[index] = ids[n]
+								param2[index] = piece.param2[i]
+								if construct[n] then
+									constructs[#constructs + 1] =
+										{pos = vector.new(x, y, z), name = piece.names[n]}
+								end
+							end
+							index = index + 1
+							i = i + 1
+						end
+					end
+				end
+			else
+				local id = content_id(op.name)
+				local p2 = op.param2 or 0
+				for z = z0, z1 do
+					for y = y0, y1 do
+						local index = area:index(x0, y, z)
+						for _ = x0, x1 do
+							data[index] = id
+							param2[index] = p2
+							index = index + 1
+						end
+					end
+				end
+				if has_on_construct(op.name) then
+					for z = z0, z1 do
+						for y = y0, y1 do
+							for x = x0, x1 do
+								constructs[#constructs + 1] =
+									{pos = vector.new(x, y, z), name = op.name}
+							end
+						end
+					end
+				end
+			end
+			touched = true
+		end
+	end
+
+	return touched, constructs
+end
+
+-- Everything a voxel manipulator cannot carry, applied once the nodes are on
+-- the map: infotext labels, and on_construct (which is how the chase light
+-- starts its node timer). A node a later op replaced is not constructed.
+local function finish(minp, maxp, constructs)
+	for _, entry in ipairs(constructs) do
+		if core.get_node(entry.pos).name == entry.name then
+			core.registered_nodes[entry.name].on_construct(entry.pos)
+		end
+	end
+	for _, entry in ipairs(labels) do
+		local pos = entry.pos
+		if pos.x >= minp.x and pos.x <= maxp.x
+				and pos.y >= minp.y and pos.y <= maxp.y
+				and pos.z >= minp.z and pos.z <= maxp.z then
+			core.get_meta(pos):set_string("infotext", entry.text)
+		end
+	end
+end
+
 core.register_on_generated(function(minp, maxp, _seed)
 	if not overlaps(minp, maxp) then
 		return
@@ -626,32 +711,8 @@ core.register_on_generated(function(minp, maxp, _seed)
 	local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
 	local data = vm:get_data()
 	local param2 = vm:get_param2_data()
-	local touched = false
 
-	for _, op in ipairs(ops) do
-		local x0 = math.max(op.x0, minp.x)
-		local x1 = math.min(op.x1, maxp.x)
-		local y0 = math.max(op.y0, minp.y)
-		local y1 = math.min(op.y1, maxp.y)
-		local z0 = math.max(op.z0, minp.z)
-		local z1 = math.min(op.z1, maxp.z)
-		if x0 <= x1 and y0 <= y1 and z0 <= z1 then
-			local id = content_id(op.name)
-			local p2 = op.param2 or 0
-			for z = z0, z1 do
-				for y = y0, y1 do
-					local index = area:index(x0, y, z)
-					for _ = x0, x1 do
-						data[index] = id
-						param2[index] = p2
-						index = index + 1
-					end
-				end
-			end
-			touched = true
-		end
-	end
-
+	local touched, constructs = stamp(data, param2, area, minp, maxp)
 	if not touched then
 		return
 	end
@@ -662,17 +723,41 @@ core.register_on_generated(function(minp, maxp, _seed)
 	vm:write_to_map()
 	vm:update_liquids()
 
-	-- Metadata cannot ride along in a voxel manipulator, so infotext labels are
-	-- applied once the chunk is on the map.
-	for _, entry in ipairs(labels) do
-		local pos = entry.pos
-		if pos.x >= minp.x and pos.x <= maxp.x
-				and pos.y >= minp.y and pos.y <= maxp.y
-				and pos.z >= minp.z and pos.z <= maxp.z then
-			core.get_meta(pos):set_string("infotext", entry.text)
-		end
-	end
+	finish(minp, maxp, constructs)
 end)
+
+-- Re-apply one piece's placements to a world that already exists, for
+-- `/lw_schem place`. Unlike chunk generation this overwrites whatever is there,
+-- including edits, because putting the committed version back is the point.
+local function restamp(name, done)
+	local instances = pieces[name].instances
+	local minp = vector.new(instances[1].x0, instances[1].y0, instances[1].z0)
+	local maxp = vector.new(instances[1].x1, instances[1].y1, instances[1].z1)
+	for _, op in ipairs(instances) do
+		minp = vector.new(math.min(minp.x, op.x0), math.min(minp.y, op.y0),
+			math.min(minp.z, op.z0))
+		maxp = vector.new(math.max(maxp.x, op.x1), math.max(maxp.y, op.y1),
+			math.max(maxp.z, op.z1))
+	end
+	core.emerge_area(minp, maxp, function(_, _, remaining)
+		if remaining > 0 then
+			return
+		end
+		local vm = VoxelManip()
+		local emin, emax = vm:read_from_map(minp, maxp)
+		local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+		local data = vm:get_data()
+		local param2 = vm:get_param2_data()
+		local _, constructs = stamp(data, param2, area, minp, maxp, name)
+		vm:set_data(data)
+		vm:set_param2_data(param2)
+		vm:write_to_map(true)
+		finish(minp, maxp, constructs)
+		done(#instances)
+	end)
+end
+
+schems.register_commands({pieces = pieces, restamp = restamp})
 
 --------------------------------------------------------------------------
 -- World setup
@@ -702,9 +787,9 @@ core.after(0, function()
 	core.set_timeofday(0.45)
 end)
 
--- Snapshot the built area as a schematic, for the schematic pipeline and for
--- keeping in-game edits. The op list above stays the source of truth: an export
--- is an artifact to diff or hand-place, not something this mod loads.
+-- Snapshot the whole built area as one schematic, to diff a world against a
+-- fresh one. Nothing loads it: individual buildings are exported with
+-- `/lw_schem save` and committed under schems/ (see schems.lua).
 core.register_chatcommand("lw_export", {
 	params = "",
 	description = "Save the showcase area to <world>/schems/lw_showcase.mts",

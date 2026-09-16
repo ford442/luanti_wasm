@@ -38,10 +38,10 @@ QA sandbox and this game is not a replacement for it.
 
 | Mod | What it owns |
 |-----|--------------|
-| `lw_nodes` | the 45-node palette and the mapgen aliases |
+| `lw_nodes` | the 45-node core palette (the theater adds 4 more) and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
-| `lw_world` | the authored world, stamped onto a singlenode mapgen |
+| `lw_world` | the authored world and its schematics, stamped onto a singlenode mapgen; `/lw_schem` authoring tools |
 
 ## Controls worth knowing
 
@@ -100,11 +100,18 @@ magick montage frame*.png -tile 1x16 -geometry +0+0 strip.png
 
 ## Editing the world
 
-The world is not a committed map database. `lw_world/init.lua` holds a list of
-box operations and stamps them into each chunk the first time it is generated,
-so an edit to that file changes the landing world on the next *fresh* world.
-An existing world keeps whatever was already generated — delete it, or visit
-new chunks, to see changes.
+The world is not a committed map database. It is stamped onto a singlenode
+mapgen from two sources, both in git, the first time each chunk is generated:
+
+* `lw_world/init.lua` — a build order of box operations, plus everything
+  derived from data: the lettering, the pixel art, the library pedestals.
+* `lw_world/schems/*.mts` — buildings authored in game: the theater (seats,
+  raked floor, screen and all), the plaza fountain, the colonnade column, and
+  the gallery frame. `init.lua` says where each one goes with `schem()`.
+
+An edit to either changes the landing world on the next *fresh* world. An
+existing world keeps whatever was already generated — delete it, visit new
+chunks, or `/lw_schem place <name>` to see changes.
 
 World-wide defaults live in `minetest.conf` next to `game.conf`: the spawn point
 (`0,10,-14`, on the plaza) and `time_speed = 0`, which freezes the clock at
@@ -122,16 +129,71 @@ created at `/home/web_user/.luanti/worlds/luanti_web` on IDBFS, so it survives
 a hard reload. `util/wasm/test_first_playable.py` enters this world for steps
 5-7 of the First Playable Smoke Test.
 
-### Exporting
+### Buildings as schematics
 
-`/lw_export` (needs the `server` privilege, which singleplayer has) generates
-the whole showcase area and writes it to `<world>/schems/lw_showcase.mts`. Use
-it to snapshot edits made in game, then fold them back into the op list here —
-the export is an artifact for diffing and for the schematic pipeline, not
-something `lw_world` loads. Run it from a native build if you want the file on
-disk; in the browser it lands on IDBFS.
+**Source of truth: `.mts`, through the engine's own schematic API.** It needs no
+mod to load, keeps `param2` (so a seat stays facing the screen), supports "never
+place" nodes (so a frame does not erase the art inside it), and is small: the
+whole theater is under 1 KB. WorldEdit's `.we` is not used — reading it back
+would make WorldEdit a runtime dependency of the demo. `.mts` does not store
+node metadata, so infotext stays in `init.lua` as `label()` calls, and
+`lw_world` runs `on_construct` for stamped nodes itself (the chase light needs
+it to start its timer).
+
+Everything below needs the `server` privilege, which the singleplayer host has.
+
+| Command | Does |
+|---------|------|
+| `/lw_schem wand` | gives the Schematic Wand: left click a node = pos1, right click = pos2 |
+| `/lw_schem pos1`, `pos2` | set a corner to where you stand |
+| `/lw_schem save <name> [skip=air,group:x]` | write the selection to `<world>/schems/<name>.mts`; `skip` nodes become "never place" |
+| `/lw_schem save <name>` | with no selection, for a piece `init.lua` places: re-export its own footprint and skip list |
+| `/lw_schem place <name>` | stamp the committed file over every placement of that piece in *this* world, edits included |
+| `/lw_schem list` | pieces, their sizes and placement counts, and this world's exports |
+
+From Lua, `lw_world.schems.save(p1, p2, name, skip, done)` does the same as the
+chat command.
+
+**Edit an existing building** (e.g. the theater):
+
+1. Run a native build (`./bin/luanti`), enter a `luanti_web` world, change the
+   theater.
+2. `/lw_schem save theater`
+3. `cp <world>/schems/theater.mts games/luanti_web/mods/lw_world/schems/`
+4. Review with `git diff` (see below) and commit. A fresh world has the change.
+
+**Add a new building:** build it, select it with the wand, `/lw_schem save
+<name>`, copy the file into `schems/`, and add `schem(x, y, z, "<name>")` to the
+right `build_*` function in `init.lua`. Its position in the build order matters:
+later ops overwrite it, and it overwrites earlier ones. A missing or unreadable
+file is a load-time error, not a hole in the world.
+
+In the browser the export lands on IDBFS, not on your disk, so author on a
+native build.
+
+**Reviewing a schematic change.** `.gitattributes` routes `*.mts` through a text
+dump; enable it once per clone:
+
+```sh
+git config diff.mts.textconv "python3 util/content/mts_to_text.py"
+```
+
+`git diff` then shows each layer as a character map, so moving one seat is a
+one-line diff. The script also runs on its own.
+
+**WorldEdit** is fine for authoring — `//pos1`, `//pos2`, `//mtschemcreate
+<name>` writes the same format to the same `<world>/schems/` directory — but it
+is not part of this game and must not become one. Put it in the author world's
+`worldmods/` on a native build. Bundling it would add it to `luanti.data` for
+every visitor, and `worldedit_gui` expects an inventory mod (Unified Inventory,
+sfinv) that this game does not ship. If an
+in-game editor is ever preloaded, keep it to a dedicated author world.
+
+`/lw_export` snapshots the whole showcase area to
+`<world>/schems/lw_showcase.mts`, for diffing a world against a fresh one. It is
+not loaded by anything.
 
 Adding a node to `lw_nodes` with the `lw_palette` group is enough to get it a
 labelled pedestal in the material library; the room is built from the group, not
-from a hardcoded list. It logs a warning if the palette outgrows the 48
+from a hardcoded list. It logs a warning if the palette outgrows the 54
 pedestals.

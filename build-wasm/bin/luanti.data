@@ -146605,7 +146605,7 @@ core.register_on_newplayer(function(player)
 	inv:add_item("main", "flower_island:plant 32")
 	inv:add_item("main", "flower_island:blossom 16")
 end)
- name = flower_island
+name = flower_island
 description = Island terrain and the flower-shaped plant pattern
 ‰PNG
 
@@ -147708,7 +147708,2451 @@ E¿¥„ÕËllw¸}Nƒ5,Íë€É7¿üİ/ÿu|wFL‹{rp£8ìÑ_ëŒü÷7ï£åˆˆßS "ŠN«Q>9@¥îïÙ®R_ß«’<„|
 
    IHDR         óÿa    IDATxÚc¨ĞøÂQæ’`L*ŸaÔ€QF.  WJÌ@XËC    IEND®B`‚‰PNG
 
-   IHDR         óÿa    IDATxÚc0’üÃæÊüpL¬8Ã¨£Œ0\  ¿í„0’nÜ    IEND®B`‚title = Rollercoaster Park
+   IHDR         óÿa    IDATxÚc0’üÃæÊüpL¬8Ã¨£Œ0\  ¿í„0’nÜ    IEND®B`‚unused_args = false
+allow_defined_top = true
+max_line_length = false
+
+ignore = {
+	"131", -- Unused global variable
+	"211", -- Unused local variable
+	"212", -- Unused argument
+	"431", -- Shadowing an upvalue
+	"432", -- Shadowing an upvalue argument
+}
+
+read_globals = {
+	"ItemStack",
+	"DIR_DELIM",
+	"dump", "dump2",
+	"vector",
+	"VoxelArea",
+	"VoxelManip",
+	"PseudoRandom",
+	"PcgRandom",
+
+	string = {fields = {"split", "trim"}},
+	table  = {fields = {"copy", "indexof", "insert_all", "key_value_swap"}},
+	math   = {fields = {"round"}},
+}
+
+globals = {
+	"core",
+	-- One global table per mod, the usual Luanti convention.
+	"lw_core",
+	"lw_nodes",
+	"lw_theater",
+	"lw_world",
+}
+<!--
+Luanti
+SPDX-License-Identifier: LGPL-2.1-or-later
+Copyright (C) 2026 The Luanti Contributors
+-->
+
+# Luanti Web Showcase
+
+The default game for the browser client. A first-time visitor should land in a
+designed space, not in raw mapgen wilderness, and should be able to walk the
+whole thing in about a minute.
+
+`games/devtest` is still in the tree and still selectable â€” it is the engine's
+QA sandbox and this game is not a replacement for it.
+
+## The tour
+
+```
+             [ theater ]                 z = 34..62
+                  |
+ [ library ]--[ courtyard ]--[ gallery ]   z = 4..32
+                  |
+             [ plaza ]                    z = -18..4   (spawn at 0, 10, -14)
+```
+
+1. **Spawn plaza** â€” fountain, colonnade, and a gate whose banner spells
+   `LUANTI WEB` out of wool. Walk north through the arch.
+2. **Material library** (west) â€” every palette node on a labelled pedestal.
+   Point at one to read its description and item name.
+3. **Pixel-art gallery** (east) â€” three framed wool artworks, uplit, with a
+   partition wall so each piece has its own wall.
+4. **Kinetic courtyard** (centre) â€” an animated LED ticker wall, an animated
+   water channel, a node-timer light chase, and a cart entity on a plank loop.
+   All engine-native: no shaders, no video.
+5. **Theater** (north) â€” marquee, curtains, raked seating, and a 6x4 screen.
+
+## Mods
+
+| Mod | What it owns |
+|-----|--------------|
+| `lw_nodes` | the 45-node palette and the mapgen aliases |
+| `lw_core` | the hand, privileges, the palette inventory, the starter kit |
+| `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
+| `lw_world` | the authored world, stamped onto a singlenode mapgen |
+
+## Controls worth knowing
+
+* `i` opens the **palette inventory**: every node, paged, infinite. Taking from
+  it never empties it.
+* `/stuff` re-gives the starter kit, `/palette` reopens the palette.
+* **Screen Remote** â€” left click cycles the theater reel, right click raises the
+  browser video overlay (web client only).
+* Right click a theater seat to sit in it facing the screen.
+* `/reel off|bars|show` switches the screen from chat, and brings the house
+  lights back up when it is off.
+
+Fly, fast and noclip are on for everyone. There is no damage, no hunger, no
+combat and no crafting.
+
+## The theater, in tiers
+
+**Tier A â€” animated tiles (everywhere, including native builds).** The screen is
+a wall of 24 nodes. Each node owns one cell of the picture and animates through
+that cell's own filmstrip, so the wall shows a single large moving image rather
+than 24 copies of a thumbnail. Two reels ship: a broadcast test pattern and a
+short sunrise loop. This needs no JavaScript and no video decoder.
+
+**Tier B â€” HTML5 video overlay (browser only).** Luanti cannot bind an MP4 to a
+node tile, but the WASM client's page owns a real `<video>` element. The remote
+calls `core.set_web_video{clip = "..."}`, which exists only under Emscripten;
+`client/web/theater.js` raises the element over the canvas, releases pointer
+lock so its controls are clickable, and hands pointer lock back on close.
+
+Clips are fetched at runtime from `media/` on the page's own origin and are
+never baked into `luanti.data`; see `client/web/media/README.md`. If the clip is
+missing, the API is absent (native build, or a remote server), or the browser
+refuses to decode, Tier A keeps playing and the visitor still sees motion on the
+wall.
+
+## Regenerating the art
+
+Every texture, the menu art and the shared pixel font are generated:
+
+```sh
+python3 util/content/generate_luanti_web_textures.py
+```
+
+It uses only the Python standard library and is deterministic â€” running it on an
+unchanged tree produces an empty diff. Sizes, cell counts and frame counts are
+constants at the top of that script and are mirrored by
+`lw_theater/init.lua`; change them together.
+
+To author a new filmstrip from real footage, produce a vertical strip of square
+frames, which is what `vertical_frames` expects:
+
+```sh
+ffmpeg -i clip.mp4 -vf "fps=12,scale=32:32" -frames:v 16 frame%02d.png
+magick montage frame*.png -tile 1x16 -geometry +0+0 strip.png
+```
+
+## Editing the world
+
+The world is not a committed map database. `lw_world/init.lua` holds a list of
+box operations and stamps them into each chunk the first time it is generated,
+so an edit to that file changes the landing world on the next *fresh* world.
+An existing world keeps whatever was already generated â€” delete it, or visit
+new chunks, to see changes.
+
+Adding a node to `lw_nodes` with the `lw_palette` group is enough to get it a
+labelled pedestal in the material library; the room is built from the group, not
+from a hardcoded list. It logs a warning if the palette outgrows the 48
+pedestals.
+title = Luanti Web Showcase
+author = The Luanti Contributors
+description = A designed creative showcase for the browser client: plaza, material library, pixel-art gallery, kinetic courtyard and a working theater.
+first_mod = lw_nodes
+last_mod = lw_world
+default_mapgen = singlenode
+disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
+disallowed_mapgen_settings = seed
+‰PNG
+
+   IHDR         \r¨f  ¹IDATxÚíØÛRÜ6 Çaİå@€ 9§çÓk÷®¯ÔÇqe»ahØµ%ı¿‹oë™&Á+K?É”›?>O{ûóï¿¦î’Ìë®±"— ˆÁcYZ˜½<uñˆ†€ÉfQ# @JLËÍïõ‚],“Ê8°#‚ŸiÀ§	Èto ÖBµwã­Ş€tBÃĞ¸®|Ù¼ø#ÏS‚	 ‡¹L“'€£MÛÇäCp[Àoõ¢sË ğ=`kÅ °U„…Z @$ÀÁs #Po’æXKs¸àãd  @ €° üZ/à–_n‡® ÀØ;	œ 8B÷Š©ˆ 4•¢$ ü‹ÕrU?€L0y·0ÆO   îÀ/¦S[VüœÖïZ›¿Å`@î\+2r. ·âÊN 8~óĞ xp0v‹Êcay‡ü¯ b†W  3 ?×‹'XvË'ş`>í3~ÅÄ³ÎU‚Å† X`™x?·n}‡’ø¥MøF LfÈØ´¼@ò	àuıH3—/ñ{§wş¯ ;md ~ª@$ø†e3+ã×ş\+–   @ÒÉ¤tßİwt0€€wI  = ëÑÿ4?à”ÿ6mòÌ{
+Àõv´Ã8ì¢ìõ`ÿû> À	 p  ?aŞ½¯–OÂ N @âÉ¥\ÖÆ0O,ãÀC ‡µ\şP/à+–É„?C›cVğv2€µV"Ğs$Ä+“ç¾q @,À CGkÂ	€¦'zëEïY1Pàw ´#¥ç* @Ò&P.¿¯@¤ø ,…tŸ   àT3¾`qà Â€7éIXwƒ‘xL D
+ÀEıà¸æÈzP.¾«ÀP–Mè€?' L  “İZ Àâ hqî½˜À„„}`â"~	BÒk ”Ñ/y2ôøİ-^' à8¸™È±îÆU¹ø\/ K |ŸÍ@Çy´Å‚  - ÇİÅN €      Àí œÿûÛóù¿@–rş©^ ‘ÀrJ0`ìÄüÛ9 À¸€1¬'¥Ãÿ¼ @0 h÷ˆì€ë·î)1.‚ÊSæ‡W 8Ql{ˆ³ @ô+ÀÇzÅ²ëwt¿ÅÀB.' >e;=ä~‹…‡ˆç|ç»÷é ‹Èï <TÀÕd €ÓY_4æV›øP/ˆµ,"ã«¼ª@&  `póû®{†° XDĞI ,VpÀÉÌ¦#  ’ ìî=$Ê«÷õˆTğz2	 ÍZÔÆA ° xpœ„K €½ Äààİ l0€»>C€èW€wõˆTÎê_6ÅŒ#+¶8  vOÈÀå<ÎºÑõ{ÿ Á €”£i‹GÖùz?J÷úÊ! !ïzÆŞ3 àN ŞÖ8‚e5] ,f qKŒ¥ àÄà€„ À !T  şc<—^£_–¨0bk .& S9{S/`pË	®ã¿*¥‡ÁN€—õÈ$ šO\Æ°‡g·} L|' ,vÀäëé{Yğ`‚@Hl½ÀÆ²¥M´¼¼©'¶|á~Î^?zU£}CxÊ÷ È>œOÀñ­;sÛ÷XzºÙš€…‰:oî{€àMK À+€:ş=¼†á€hs' ×õˆ$   °åuÀ÷h# /êÛ™'q ÅÂƒğ Xà`Gub!/ ¯&`kè÷ûùüğA @ ìÄÆÁ¸eàª^ ‘€e70 ›0Ö4 ?0ù0V± ˜48€à	  µÄ®ë  8±Œ€×gŒlYàÆá‹Š‡  t²-ÏëGOæùçÁ–ŠA€ÜMA À	  ïÀ8® ”òü²^4nôîÓ¸Ğ›b 8 vp ¯>™x9™à–ug1äÌs@À À ,8ãõL‹ÉiräÀE½8À2şY eôÅ-\pO µî¯¥ïßãsûKÂp
+ÀFá ÜÀ³ú´mŞÍOñï–=xúàÃŞœ Üì ¼˜’­“Íw#óyká«<;¯°³9ºKxÅ¦   à«¯(  0† ájûGô€ö    IEND®B`‚‰PNG
+
+   IHDR  €       »=  0IDATxÚíİ½nÓPàVêÀ #”Nş. ‰J€XKzÍÂÂX]¸ ~Š„˜øY¹
+³´‚˜Z¶“sìãsgKc;¯èëÏvÛ­3WÎU gË[    (ª œ 0 PT L  ”S ÿL  U F    
+   € @ûşşóÒã›W‚®ßwû¡—ïû|›ĞëÇşüÆŞÿĞûü[ UàÛ€Öİ^Ûú}·zùØû{ı©íå65Hv Nè­ßŠ‹06Ïn*  À’ï—ïÜ˜õz¾m{mÖ}½u×OÍºys{?@ ^äv8·k˜C_Mııê5á;Ï^õZş×·Ÿ½–?qÛö3Ùş×ç{ƒı›7 ”:ä¶C?>úTG|ÿêë_¸>t}À @{„>ÁTE^¿J<_jy7Fş|sÛHıÿœ	 €ÖÈl ¸píòÒãŸ¾ ü|ëï_mŸßºÛ€	 Àà- P  (€ÕıwÎ½¦~·õœıÀ†ÎÓ¶ı¡Ï¯»ÿ}?ÿ±÷  ÀĞw™Œıc±Ÿ½¿±·{ÿS{ÿ`jâŞ¤4€osRÿ?¿µî¦·¯^
+¨ïöÚ–ıüĞË‡6ôû“ÚşûöOÁ€k  ¥R  Å€‹l éò«  P  (    
+ €nP¹Âó£`RMèOBî¿Ş_z¼woéëMëë·}½m¹úë·m¿kşº¦í ¤?   Bù¯zDÜõÕ×oÛ~××sÄdS Cÿ®ÊjàÇ‘×‡“¸ÀPßS“˜ æGGÆ‹£#éyÃ‘ò¢á\zW±Öï›n ¦>D«—jÅåBÒ¯šÓ( d>¿<¿wt$}°¿ô¸éù¡µ½~×ü ÓŸ  (µ ÂÌ‹ƒEíHyŞq©––?ŞNÓúõåšÖoÎqòëwÍ_Ÿš÷ „	ı  S™ •Ëüî¼×óMËwızèõûæ˜ø ` (w @    P ÀºŞ<}uû_#ç·ıq·­ ü=€tUqïÒ  	W@Ì  DIÀáÛ·A·7Ûİ•W^yå%¯ @ J”p¸’W^yåÍ$¯	   @>0»ı÷ªü»—/VÚÆ­‡ä•W^yGÏ«  H° rı]SÛ/yå•W^  ƒ@®=èN4yå•7—¼&    
+ €•ÀE yå•W^  
+ €üÀ9 yå•W^  
+ €ÜÀ yå•W^  
+   @–à€¼òÊ+¯	 €¢
+À_“W^yå5    P  (  2* ÷Ê+¯¼òš  P  (    9€«ÀòÊ+¯¼E€ß!¯¼òÊ[ì € @    P  äS î•W^yå5 PTä•W^yM  (  r/ g€ä•W^yM  T  yå•W^  
+   @¦à/ÂÈ+¯¼òš  P  (    
+ €©€–W^yå5    È½ œ’W^yå-vPòÊ+¯¼e€ïÿòÊ+¯¼¥N  (    
+   @6pêô©¤Ş{üd¥õÆÚ/yå•W^  
+   € @    P  (    
+   € @    P  (   € @    P  (    
+   @¢ş 1”YôĞ    IEND®B`‚‰PNG
+
+   IHDR   €   €   Ã>aË  WIDATxÚíÛ?.DQÅñ
+K:‰EøS*E"XRhl€Dl€„B©$V ›è„bƒy3ó®óùª™w_î;Îù›7ÍûóÙv±4¿ş,¼Ú‰@®¶F¾ĞàÙ@áğøã Ù` †@ˆ ˆ  ÒÎD €  5 €¬(8  Z 8 À8 Ì H=°" " ZÀßy~³›}dx¼Y¥  Pí@kàÒáEÇÏ<İ=vüÌäÌ”ë|Ò:Şî…8
+NÏ 3€ Z Ô@DG d?` åıÿk  j ç/@ PÕ@ -À¨xş"  Àg€*eÈnØ+{-Üã/r"@TßL© D â#@ ¨P<P@v€€5™5Ğ{á*À @4ví ª  zÓ/7—+¹N«¢ûùo×ñë` ´ 3`]ZÀÛØ«‡"@ PÁP– :[ÀõÙ©İ*ˆ…Õu5PM  ˆ Ğıˆÿ© ¯…g€ÀĞ'¸ÙØùõwæNö­_—8¿²ÖÕìNÿú;İ®iıâ‡À¶õ£k çß/@ôÈ r×" ÎX@x@¸0 3 ¢g dŸÔô½ğAßWÂú€€ ´ - ÑÀR×ç  ¾¿ô}%¬ß7Ø}yèf¦¯/P`Dz€€ @OÏìƒ!f ¤
+àöhÂN„òF¢×û—ø 8    IEND®B`‚-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- Creative core for the web showcase: a fast hand, a palette inventory the
+-- visitor can open with `i`, and a starter kit. No hunger, no HP, no combat,
+-- no crafting tree â€” this game exists to be walked through and built in.
+
+lw_core = {}
+
+local F = core.formspec_escape
+
+--------------------------------------------------------------------------
+-- The hand
+--------------------------------------------------------------------------
+
+-- A visitor has a couple of minutes and no tools. Digging is quick but not
+-- instantaneous, so the smoke test (#14) can still observe dig progress.
+local QUICK = {times = {0.20, 0.30, 0.45}, uses = 0, maxlevel = 3}
+
+core.register_item(":", {
+	type = "none",
+	wield_image = "wieldhand.png",
+	wield_scale = {x = 1, y = 1, z = 2.5},
+	range = 8,
+	tool_capabilities = {
+		full_punch_interval = 0.5,
+		max_drop_level = 3,
+		groupcaps = {
+			cracky = QUICK,
+			crumbly = QUICK,
+			choppy = QUICK,
+			snappy = QUICK,
+			oddly_breakable_by_hand = QUICK,
+			-- dig_immediate does not use index 1; 3 means "instantly".
+			dig_immediate = {times = {[2] = 0.3, [3] = 0.0}, uses = 0, maxlevel = 3},
+		},
+		damage_groups = {fleshy = 1},
+	},
+})
+
+--------------------------------------------------------------------------
+-- Palette inventory
+--------------------------------------------------------------------------
+
+local SLOTS_W = 10
+local SLOTS_H = 5
+local SLOTS = SLOTS_W * SLOTS_H
+local FORMNAME = "lw_core:palette"
+
+local palette_items = nil
+local pages = {}
+
+-- Sort so the inventory reads like the material library: terrain, structure,
+-- architecture, lighting, exhibition, then the dyed cubes.
+local GROUP_ORDER = {"lw_nodes:", "lw_theater:"}
+
+local function catalogue()
+	if palette_items then
+		return palette_items
+	end
+	palette_items = {}
+	for name, def in pairs(core.registered_items) do
+		if name ~= "" and def.description and def.description ~= ""
+				and core.get_item_group(name, "not_in_creative_inventory") == 0 then
+			local rank = #GROUP_ORDER + 1
+			for index, prefix in ipairs(GROUP_ORDER) do
+				if name:sub(1, #prefix) == prefix then
+					rank = index
+					break
+				end
+			end
+			table.insert(palette_items, {name = name, rank = rank})
+		end
+	end
+	table.sort(palette_items, function(a, b)
+		if a.rank ~= b.rank then
+			return a.rank < b.rank
+		end
+		return a.name < b.name
+	end)
+	return palette_items
+end
+
+local function max_page()
+	return math.max(1, math.ceil(#catalogue() / SLOTS))
+end
+
+local function detached_name(name)
+	return "lw_core:palette_" .. name
+end
+
+-- One detached inventory per player: the page a visitor is on must not change
+-- what anybody else is looking at.
+local function fill_detached(name, page)
+	local inv = core.get_inventory({type = "detached", name = detached_name(name)})
+	if not inv then
+		return
+	end
+	local items = catalogue()
+	local list = {}
+	for slot = 1, SLOTS do
+		local entry = items[(page - 1) * SLOTS + slot]
+		list[slot] = entry and ItemStack(entry.name) or ItemStack("")
+	end
+	inv:set_list("main", list)
+end
+
+local function palette_formspec(name)
+	local page = pages[name] or 1
+	fill_detached(name, page)
+	local list = "detached:" .. detached_name(name)
+	return table.concat({
+		"formspec_version[4]",
+		"size[11.75,12.2]",
+		"label[0.5,0.55;", F("Showcase palette â€” take what you like, it never runs out"), "]",
+		"list[", list, ";main;0.5,0.9;", SLOTS_W, ",", SLOTS_H, ";]",
+		"button[0.5,6.4;1,0.8;lw_prev;<]",
+		"button[1.6,6.4;1,0.8;lw_next;>]",
+		"label[2.9,6.8;", F(("Page %d/%d"):format(page, max_page())), "]",
+		"button[9.15,6.4;2.1,0.8;lw_stuff;", F("Starter kit"), "]",
+		"list[current_player;main;0.5,7.8;8,1;]",
+		"list[current_player;main;0.5,9.0;8,3;8]",
+		"listring[", list, ";main]",
+		"listring[current_player;main]",
+	})
+end
+
+local function refresh(name)
+	core.show_formspec(name, FORMNAME, palette_formspec(name))
+end
+
+local function create_palette_inventory(name)
+	local inv = core.create_detached_inventory(detached_name(name), {
+		allow_move = function()
+			return 0
+		end,
+		allow_put = function()
+			return 0
+		end,
+		allow_take = function(_, _, _, stack)
+			-- -1 means "take the whole stack and leave the source untouched".
+			return -1
+		end,
+	}, name)
+	inv:set_size("main", SLOTS)
+	return inv
+end
+
+--------------------------------------------------------------------------
+-- Starter kit
+--------------------------------------------------------------------------
+
+lw_core.starter_kit = {
+	"lw_nodes:wool_white 99",
+	"lw_nodes:wool_red 99",
+	"lw_nodes:wool_blue 99",
+	"lw_nodes:stone_brick 99",
+	"lw_nodes:planks 99",
+	"lw_nodes:glass 99",
+	"lw_nodes:lamp 32",
+	"lw_nodes:hidden_light 32",
+	"lw_theater:remote",
+}
+
+function lw_core.give_kit(player)
+	local inv = player:get_inventory()
+	for _, item in ipairs(lw_core.starter_kit) do
+		local stack = ItemStack(item)
+		if core.registered_items[stack:get_name()] and not inv:contains_item("main", stack) then
+			inv:add_item("main", stack)
+		end
+	end
+end
+
+core.register_chatcommand("stuff", {
+	params = "",
+	description = "Give yourself the showcase starter kit",
+	func = function(name)
+		local player = core.get_player_by_name(name)
+		if not player then
+			return false, "You have to be in the world."
+		end
+		lw_core.give_kit(player)
+		return true, "Starter kit added to your inventory."
+	end,
+})
+
+core.register_chatcommand("palette", {
+	params = "",
+	description = "Open the showcase palette inventory",
+	func = function(name)
+		if not core.get_player_by_name(name) then
+			return false, "You have to be in the world."
+		end
+		refresh(name)
+		return true
+	end,
+})
+
+--------------------------------------------------------------------------
+-- Player setup
+--------------------------------------------------------------------------
+
+core.register_on_joinplayer(function(player)
+	local name = player:get_player_name()
+	pages[name] = pages[name] or 1
+	create_palette_inventory(name)
+
+	local inv = player:get_inventory()
+	inv:set_size("main", 32)
+	inv:set_size("craft", 0)
+	player:set_inventory_formspec(palette_formspec(name))
+
+	-- A showcase visitor should never be able to die or starve out of the
+	-- demo, whatever the world was created with.
+	player:set_hp(player:get_properties().hp_max)
+	player:set_breath(11)
+	player:set_properties({zoom_fov = 15})
+
+	local privs = core.get_player_privs(name)
+	for _, priv in ipairs({"interact", "shout", "fly", "fast", "noclip", "give", "settime"}) do
+		privs[priv] = true
+	end
+	core.set_player_privs(name, privs)
+end)
+
+core.register_on_newplayer(function(player)
+	lw_core.give_kit(player)
+end)
+
+core.register_on_player_receive_fields(function(player, formname, fields)
+	if formname ~= FORMNAME and formname ~= "" then
+		return
+	end
+	local name = player:get_player_name()
+	local page = pages[name] or 1
+	local changed = false
+
+	if fields.lw_next then
+		page = page % max_page() + 1
+		changed = true
+	elseif fields.lw_prev then
+		page = (page - 2) % max_page() + 1
+		changed = true
+	elseif fields.lw_stuff then
+		lw_core.give_kit(player)
+	else
+		return
+	end
+
+	pages[name] = page
+	if changed then
+		-- The player inventory formspec is what `i` opens, so keep both the
+		-- open window and the cached formspec on the same page.
+		player:set_inventory_formspec(palette_formspec(name))
+		if formname == FORMNAME then
+			refresh(name)
+		end
+	end
+end)
+
+core.register_on_leaveplayer(function(player)
+	local name = player:get_player_name()
+	pages[name] = nil
+	core.remove_detached_inventory(detached_name(name))
+end)
+name = lw_core
+title = Showcase creative core
+description = Hand, privileges, creative inventory and the visitor starter kit
+depends = lw_nodes
+-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- The showcase palette: a short, intentional set of nodes that read as
+-- architecture and exhibition design rather than a museum of drawtypes.
+--
+-- Everything here is deliberately GLES2/WebGL friendly: 16x16 tiles, no
+-- connected textures, no mesh nodes, no shader tricks. Animated tiles are
+-- vertical filmstrips, which the browser renderer handles the same way it
+-- handles water in any other game.
+--
+-- Textures are generated by util/content/generate_luanti_web_textures.py.
+
+lw_nodes = {}
+
+-- 16 dyed cubes. One greyscale weave tinted with [multiply, so the whole
+-- palette costs a single 16x16 texture instead of sixteen.
+lw_nodes.wool_colors = {
+	{name = "white", desc = "White", hex = "#e9e9e4"},
+	{name = "grey", desc = "Grey", hex = "#9a9a95"},
+	{name = "dark_grey", desc = "Dark Grey", hex = "#4c4c48"},
+	{name = "black", desc = "Black", hex = "#1c1c1a"},
+	{name = "red", desc = "Red", hex = "#bf2f31"},
+	{name = "orange", desc = "Orange", hex = "#e07a22"},
+	{name = "yellow", desc = "Yellow", hex = "#e6c22f"},
+	{name = "green", desc = "Green", hex = "#5aa83c"},
+	{name = "dark_green", desc = "Dark Green", hex = "#2d6b2d"},
+	{name = "cyan", desc = "Cyan", hex = "#31b0ae"},
+	{name = "blue", desc = "Blue", hex = "#2f5cba"},
+	{name = "violet", desc = "Violet", hex = "#6c3fb8"},
+	{name = "magenta", desc = "Magenta", hex = "#b43196"},
+	{name = "pink", desc = "Pink", hex = "#e38cae"},
+	{name = "brown", desc = "Brown", hex = "#7b5230"},
+	{name = "tan", desc = "Tan", hex = "#c8a97a"},
+}
+
+function lw_nodes.wool_texture(hex)
+	return "lw_wool.png^[multiply:" .. hex
+end
+
+-- Every palette node carries lw_palette so the material library can list the
+-- set without hardcoding names, and so a future kit item stays in sync.
+local function palette_groups(groups)
+	local out = {lw_palette = 1}
+	for key, value in pairs(groups or {}) do
+		out[key] = value
+	end
+	return out
+end
+
+local function register(name, def)
+	def.groups = palette_groups(def.groups)
+	if def.is_ground_content == nil then
+		def.is_ground_content = false
+	end
+	core.register_node("lw_nodes:" .. name, def)
+end
+
+--------------------------------------------------------------------------
+-- Ground and terrain
+--------------------------------------------------------------------------
+
+register("stone", {
+	description = "Stone",
+	tiles = {"lw_stone.png"},
+	groups = {cracky = 3},
+	is_ground_content = true,
+})
+
+register("dirt", {
+	description = "Dirt",
+	tiles = {"lw_dirt.png"},
+	groups = {crumbly = 3, soil = 1},
+	is_ground_content = true,
+})
+
+register("dirt_with_grass", {
+	description = "Dirt with Grass",
+	tiles = {
+		"lw_grass_top.png",
+		"lw_dirt.png",
+		{name = "lw_grass_side.png", tileable_vertical = false},
+	},
+	groups = {crumbly = 3, soil = 1},
+	is_ground_content = true,
+})
+
+register("sand", {
+	description = "Sand",
+	tiles = {"lw_sand.png"},
+	groups = {crumbly = 3, falling_node = 0},
+	is_ground_content = true,
+})
+
+register("paving", {
+	description = "Plaza Paving",
+	tiles = {"lw_paving.png"},
+	groups = {cracky = 3},
+})
+
+register("water", {
+	description = "Water",
+	drawtype = "liquid",
+	waving = 3,
+	tiles = {{
+		name = "lw_water.png",
+		backface_culling = false,
+		animation = {type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 2.0},
+	}},
+	special_tiles = {
+		{
+			name = "lw_water.png",
+			backface_culling = false,
+			animation = {type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 2.0},
+		},
+		{
+			name = "lw_water.png",
+			backface_culling = true,
+			animation = {type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 2.0},
+		},
+	},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = true,
+	drowning = 1,
+	liquidtype = "source",
+	liquid_alternative_source = "lw_nodes:water",
+	liquid_alternative_flowing = "lw_nodes:water",
+	liquid_viscosity = 1,
+	liquid_renewable = false,
+	liquid_range = 0,
+	post_effect_color = {a = 64, r = 60, g = 110, b = 170},
+	groups = {water = 3, liquid = 3},
+})
+
+--------------------------------------------------------------------------
+-- Structure
+--------------------------------------------------------------------------
+
+register("stone_brick", {
+	description = "Stone Brick",
+	tiles = {"lw_stone_brick.png"},
+	groups = {cracky = 2},
+})
+
+register("polished_stone", {
+	description = "Polished Stone",
+	tiles = {"lw_polished_stone.png"},
+	groups = {cracky = 2},
+})
+
+register("planks", {
+	description = "Wood Planks",
+	tiles = {"lw_planks.png"},
+	groups = {choppy = 2, oddly_breakable_by_hand = 2, flammable = 0},
+})
+
+register("beam", {
+	description = "Timber Beam",
+	tiles = {"lw_beam_end.png", "lw_beam_end.png", "lw_beam_side.png"},
+	paramtype2 = "facedir",
+	on_place = core.rotate_node,
+	groups = {choppy = 2},
+})
+
+register("glass", {
+	description = "Glass",
+	drawtype = "glasslike",
+	tiles = {"lw_glass.png"},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	sunlight_propagates = true,
+	groups = {cracky = 3},
+})
+
+register("bars", {
+	description = "Iron Bars",
+	drawtype = "nodebox",
+	tiles = {"lw_bars.png"},
+	use_texture_alpha = "clip",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	sunlight_propagates = true,
+	on_place = core.rotate_node,
+	node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.0625, 0.5, 0.5, 0.0625}},
+	selection_box = {type = "fixed", fixed = {-0.5, -0.5, -0.0625, 0.5, 0.5, 0.0625}},
+	groups = {cracky = 2},
+})
+
+register("gold_trim", {
+	description = "Gold Trim",
+	tiles = {"lw_gold.png"},
+	groups = {cracky = 2},
+})
+
+--------------------------------------------------------------------------
+-- Architecture
+--------------------------------------------------------------------------
+
+-- Plain fixed nodeboxes. No connected textures: WebGL is happier and the
+-- browser client does not have to ship a second tile set per material.
+local function register_stair_and_slab(base, description, tiles, groups)
+	register("stair_" .. base, {
+		description = description .. " Stair",
+		drawtype = "nodebox",
+		tiles = tiles,
+		paramtype = "light",
+		paramtype2 = "facedir",
+		on_place = core.rotate_node,
+		node_box = {
+			type = "fixed",
+			fixed = {
+				{-0.5, -0.5, -0.5, 0.5, 0.0, 0.5},
+				{-0.5, 0.0, 0.0, 0.5, 0.5, 0.5},
+			},
+		},
+		groups = groups,
+	})
+	register("slab_" .. base, {
+		description = description .. " Slab",
+		drawtype = "nodebox",
+		tiles = tiles,
+		paramtype = "light",
+		node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0.0, 0.5}},
+		groups = groups,
+	})
+end
+
+register_stair_and_slab("stone_brick", "Stone Brick", {"lw_stone_brick.png"}, {cracky = 2})
+register_stair_and_slab("planks", "Wood Plank", {"lw_planks.png"}, {choppy = 2})
+
+register("column", {
+	description = "Column",
+	drawtype = "nodebox",
+	tiles = {"lw_column_top.png", "lw_column_top.png", "lw_column_side.png"},
+	paramtype = "light",
+	node_box = {type = "fixed", fixed = {-0.375, -0.5, -0.375, 0.375, 0.5, 0.375}},
+	groups = {cracky = 2},
+})
+
+register("fence", {
+	description = "Fence",
+	drawtype = "nodebox",
+	tiles = {"lw_fence.png"},
+	paramtype = "light",
+	paramtype2 = "facedir",
+	sunlight_propagates = true,
+	on_place = core.rotate_node,
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.125, -0.5, -0.125, 0.125, 0.5, 0.125},
+			{-0.5, 0.0, -0.0625, 0.5, 0.3125, 0.0625},
+			{-0.5, -0.3125, -0.0625, 0.5, 0.0, 0.0625},
+		},
+	},
+	groups = {choppy = 2},
+})
+
+register("curtain", {
+	description = "Velvet Curtain",
+	tiles = {"lw_curtain.png"},
+	groups = {snappy = 2, oddly_breakable_by_hand = 2},
+})
+
+register("carpet", {
+	description = "Carpet",
+	drawtype = "nodebox",
+	tiles = {"lw_carpet.png"},
+	paramtype = "light",
+	node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}},
+	groups = {snappy = 3, oddly_breakable_by_hand = 3},
+})
+
+--------------------------------------------------------------------------
+-- Lighting
+--------------------------------------------------------------------------
+
+register("lamp", {
+	description = "Ceiling Lamp",
+	tiles = {"lw_lamp.png"},
+	paramtype = "light",
+	light_source = 14,
+	groups = {cracky = 3},
+})
+
+register("uplight", {
+	description = "Floor Uplight",
+	drawtype = "nodebox",
+	tiles = {"lw_uplight.png"},
+	paramtype = "light",
+	light_source = 12,
+	node_box = {type = "fixed", fixed = {-0.3125, -0.5, -0.3125, 0.3125, -0.25, 0.3125}},
+	groups = {cracky = 3},
+})
+
+-- An invisible light so a gallery can be lit without a visible fixture.
+register("hidden_light", {
+	description = "Hidden Light",
+	drawtype = "airlike",
+	inventory_image = "lw_hidden_light.png",
+	wield_image = "lw_hidden_light.png",
+	paramtype = "light",
+	light_source = 14,
+	sunlight_propagates = true,
+	walkable = false,
+	pointable = true,
+	buildable_to = false,
+	groups = {dig_immediate = 3},
+})
+
+--------------------------------------------------------------------------
+-- Exhibition
+--------------------------------------------------------------------------
+
+register("pedestal", {
+	description = "Pedestal",
+	drawtype = "nodebox",
+	tiles = {"lw_pedestal_top.png", "lw_pedestal_top.png", "lw_pedestal_side.png"},
+	paramtype = "light",
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.4375, -0.5, -0.4375, 0.4375, -0.375, 0.4375},
+			{-0.3125, -0.375, -0.3125, 0.3125, 0.375, 0.3125},
+			{-0.4375, 0.375, -0.4375, 0.4375, 0.5, 0.4375},
+		},
+	},
+	groups = {cracky = 2},
+})
+
+register("frame", {
+	description = "Frame Moulding",
+	tiles = {"lw_frame.png"},
+	groups = {choppy = 2, oddly_breakable_by_hand = 2},
+})
+
+-- A thin panel that hangs on a wall.
+--
+-- Tile order is +Y, -Y, +X, -X, +Z, -Z, so the art goes on index 6 and the box
+-- hugs the -Z side of the node: at facedir 0 the panel faces south, which is
+-- the direction a visitor walking north through this world is looking from.
+local function register_panel(name, description, front, groups)
+	register(name, {
+		description = description,
+		drawtype = "nodebox",
+		tiles = {"lw_frame.png", "lw_frame.png", "lw_frame.png", "lw_frame.png",
+			"lw_frame.png", front},
+		paramtype = "light",
+		paramtype2 = "facedir",
+		sunlight_propagates = true,
+		on_place = core.rotate_node,
+		node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0.5, -0.4375}},
+		groups = groups,
+	})
+end
+
+register_panel("poster", "Poster", "lw_poster.png",
+	{choppy = 2, oddly_breakable_by_hand = 2})
+
+register("stanchion", {
+	description = "Rope Stanchion",
+	drawtype = "nodebox",
+	tiles = {"lw_stanchion.png"},
+	use_texture_alpha = "clip",
+	paramtype = "light",
+	sunlight_propagates = true,
+	node_box = {type = "fixed", fixed = {-0.1875, -0.5, -0.1875, 0.1875, 0.25, 0.1875}},
+	selection_box = {type = "fixed", fixed = {-0.1875, -0.5, -0.1875, 0.1875, 0.25, 0.1875}},
+	groups = {cracky = 3},
+})
+
+-- Animated LED surface for the kinetic courtyard (and any ticker wall).
+register("ticker", {
+	description = "LED Ticker Panel",
+	tiles = {{
+		name = "lw_ticker.png",
+		animation = {type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 1.6},
+	}},
+	light_source = 8,
+	groups = {cracky = 3},
+})
+
+--------------------------------------------------------------------------
+-- Dyed cubes
+--------------------------------------------------------------------------
+
+for _, color in ipairs(lw_nodes.wool_colors) do
+	register("wool_" .. color.name, {
+		description = color.desc .. " Wool",
+		tiles = {lw_nodes.wool_texture(color.hex)},
+		groups = {snappy = 2, oddly_breakable_by_hand = 3, lw_wool = 1},
+	})
+end
+
+--------------------------------------------------------------------------
+-- Mapgen aliases
+--------------------------------------------------------------------------
+
+-- The showcase world is authored on top of singlenode; these aliases only
+-- matter if somebody creates a world with another mapgen.
+core.register_alias("mapgen_singlenode", "air")
+core.register_alias("mapgen_stone", "lw_nodes:stone")
+core.register_alias("mapgen_water_source", "lw_nodes:water")
+core.register_alias("mapgen_river_water_source", "lw_nodes:water")
+core.register_alias("mapgen_dirt", "lw_nodes:dirt")
+core.register_alias("mapgen_dirt_with_grass", "lw_nodes:dirt_with_grass")
+core.register_alias("mapgen_sand", "lw_nodes:sand")
+core.register_alias("mapgen_cobble", "lw_nodes:stone_brick")
+core.register_alias("mapgen_stair_cobble", "lw_nodes:stair_stone_brick")
+name = lw_nodes
+title = Showcase node palette
+description = The 40-node architecture and exhibition palette used by the web showcase
+‰PNG
+
+   IHDR         óÿa   /IDATxÚc`€‚ãg¯ü_»iÇ$@”ØÔ™óşS‚)7€b/Œ0j Uúy œdDd(ã    IEND®B`‚‰PNG
+
+   IHDR         óÿa  IDATxÚ¥“k7ÔQÆ}˜¾€Ë¸OÒ`\&‰H‘.ŠJfÌ˜"Š¢‹Z,EË’ú»ç·[ÎèµgÎúŸ³÷o?ûÙgÊ†£—ì"«ŒŸ±fÛKµY1ÙjŸ_±\_ÄRİ–º^as5¾¿¼]k^¶âd«í&Ûlëi¬ØŸŠÛÏL»½®·©ß©³7#¶z¯Ñ6Æ›í­ö·jÊNì¯BW	ğ#÷ lo•}m²ƒt»/Ÿä»ü› æ´¾KI œ¿ñ€¢ä*ñ“ZAò»QWä(ÛáÊ’İå¾@AÉ¯†êmW>È%j8ÏË™şj[—²ã\§WælAÀü`­K?Q_ëš<qõ~Ôv&Z<aA÷éJWô{6ñO± €$§;lQfnTÚ¹Œ7§…„í<oñIp‡/€ –Zèx¯ŒrM•‘¼=s§ À¼•»®’ØÜy$,Õyÿ›O®Úäµr!ÀM¸¤Êó`,S@N `ßT	£0ÉÓj…ö2’‹7gjx\ø 9@"ğâë³˜-ë›µ-3é)¡à{ùğßC:ë£ôıGnŸÎ$ì8Ûé÷ Ü`%K{p¤Š¸ÎEAY-ÚØ’œ‘Èëc:¨D/3 ÖÔÂ~*îæÏÜyH¹¾*¡L€·²2Òà1L‡?` \dıòXé&®    IEND®B`‚‰PNG
+
+   IHDR         óÿa  £IDATxÚ­“K7‚Q†ıC3c#¥ûÅå32¶É-"Ê5æ¹åR	-ÿnÛÏ±¾¯ÖÊƒÓ×Úçìç¼ûİûôLôJÜß÷«En?©œÍyäbÁ+çó^¹]HÆê—“¸[>÷ÇåcÏÒ¸G.uŸØãjH¿CmÀËæ°Äb“f5vÇä:á7€ËEŸ4vFü(æ’VV÷–üÎYĞ,&ƒò¶5b OkayW@^uqH ğ™[H8œv™/€ÓÙ!-Á2{%-³šà«*¾RuàÏ&6µîâJPÊëa¹Q™eU@ıyU@9Üø Æ¡Šo5‘ƒ©Á6 ƒÆáòzÄü¯è¡»dÀH¥Û’›êİr µLÔI¦º‰Ï/¥ÂFY.æ6 ZŠ"  •µŒ‘÷ZmD7è½jÿé  XĞøÿ™ÈöôÑ6êÍÍ¸åXe0}ÈÆ¦‘rñÍ`®¨¨|J!3kQ©oñscºæ ¸É.”P?ÆÒ€$ó&ğ@×$"¹ó-Ğ¢Æî¨y†&‘ø€¿˜ø÷.îãHá    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ÁIDATxÚM“ÙV‚1„û(,?Ë¥ »úhŠˆ²Ê& ²¾jÌ—¦®rÒ&“™IV¥¶uù.wå3kÊW©#£Â½l4òuù­ôäCsâ¬ØÔºÌ5.²–Õ…q¡!çê£¼åëvIÜ–;òœ»“¥Ñ¼Wği±!kF~¬<ÈDó‡G¦h¨Í½|Í×¬fL¦˜:&Âê /³¶Ñ¿(&_5Òt­>Y¤˜ó•Ö˜2}Ñğ@1	2ú¹šic“`ttFÈJŞ ‚\c0sC’fšaÒ×¦k¿¸G'‹Œ[Ê¸%, €ˆ‘Ğa"Œ@N[ÙøVö–·dkÛ‰1Ô@Z0ú60ìTebÓŒç]«[¹<<
+4¥U¢•fÙÆÈ˜D­0ÍS—œ0qM€lôC¦1>&‘¾öûİ“ÀjÆÜº¼p£ˆ3“·”^$ñ"@ĞÁ ÜŒKÎ‰gl¦{7#t`ppdŒƒ&‘âô¸`2ğÕšY|‘æÁÅé2Ïâ³~/ÔÿW]ÀWşxTôƒ¥?¢D+mC]r´Û‹ô_Ê
+í7‚Èæã\oŒBÆÑ'nÛ=Ûèû?™^åÖ0S‡    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ÚIDATxÚ=“İ1…O3¿íª¢Wn¼ÿóğ l+Töfg&óü9M#Eã$öñ9¶çğúò3Å9êv{Ó¯—«ÆqÔù|Öïßô|ù º®ôçõ¯®×ßºı{SÛ¶úúå³.—‹>}|V8j›Fû¾+¥dµ95†AëºjÅyÖºm:bSfŒQa3§Å6‡ÍœØ ‘©ª*?÷f‡`]7™ƒº®SÓÔª» +Í–-;®Nû`Á¬eYÔ÷½Ç8RÊÔAd5&G@‡qzĞFBaâ`@d	øã¨ò¥°µg^+ü <½ĞßÍŞ¶ıA•»eYÒ®kİ7”âğØ˜#—€fF»èg 9#@»òû 2©Ùh!õÀ¹ªÂı.K*õ"©K´˜ Ü®L‹66E"ˆ9ÈLƒ©í<
+ĞÉ Ái{Û\RĞûûà»géÁ ğÜj€Áh-ËÚ’*Ïâò7æyÎ½·´Pfz0(™{3Ã´t†ó0Œ¹	hÛîu)ŒŠ,@‹Lì§§“jô°hU"ĞÌ €í­Cíıßp†  Ÿ‹¹glùã|
+§é>êmkÛÓTF<é?¸ŒrÎ:ÿ    IEND®B`‚‰PNG
+
+   IHDR         óÿa  eIDATxÚ“İr‚@…÷ıŸ¢×½è3(jäW@AXDzÑ×H÷Ë²L;£ãŒ$›“œ“3ö©\ºDšê]ÚúCºÓ—çXéJí«ÍÄ¶±œŸBlßì½—Æİgp¼½¾<uÊ,S5‡VÄI5üM2Wõ®ÌÖRÍ˜*ßˆ! ƒw•G¸Õ…“pĞ³Öd ƒT9¹ïE—.U]°ùù®ÿ¡õ~â‰C/ O'ë.oÃ<º"A6lßƒ­öà8t#R1È>ùÃ²µÌ9ĞûìaÀôêO‡%¡Ó0­«ÍC¢eŒŒ†oôİ€%•UB¹cg=0à)ÓPÜ¤CzÀ¢œJÇUg¾\2R=ÂÆßë˜·Ø2Â"€	D¯Õ%òcfB‘låîéŸI©HV2¹*¡*+
+lhzf©²€)1HÇÿzgb™vØ›‹    IEND®B`‚‰PNG
+
+   IHDR         óÿa  KIDATxÁA’ÛFÀ¬Æp}İpè	ú ÿ-‡Î".eæ¿ïŸı¾â÷óñ{ß"¾çåÇõ%øõ¼ı¿oğï|ùq}Yõëy›ÛzÔ%.±¸­âc­ªZ¬¢ŠU'µ*8Œ¸UQAœ gpÄİŠxTP#
+"nk#fq«+ñ¨`q‰WâU°øX#F1ƒ—(ÁbKÕˆUG¼ŒUkFGÜj°¨úXp‰/ãVUï®Å%N±
+F@@ñ¶àˆÅI#fUñ(ˆ€¼ÄÇºU°êJ³ê0€K@±Š<
+Znë\bÕˆˆUA0âˆÛ‚`Äˆ?]0Å£`DÀ·‚UEPÀ1æÁ VİVÁˆ#ÿd|¬).±(F#x[Á£‚[Xõ§+8P.UÅˆ"âV—Xõe/cV¸Õª"€ªG	ëmıÅ^Å¯ÊOêê    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ÷IDATxÚ5“m?BAÅ÷Ûô@’ÜŞI‰<”<?%*)¤(ÑwóŸ½÷Å´»wwÎœsfr¯'iù8Û’f>&‹ËmáÜÙKÊâb[Zù¸LO32<LÙ·®ÆínÜÖ±¾{(­‰{>ÚnH–SÂyVÛ’A¸_]å¤°.ºÊëÒV€ùEVî‹	{ç@nîÄ¤¿¿&ïZíë<+ß
+6­eäI+ßèİ²XÕôİ£®®sÆĞEĞ‘BrD}tœ¶3ñVİ4PöíBÜ@F*Ãı*µßFÎ$@¹SLê90Í$á	)eâNÙğö®‡~‚Š ª	Àº¥¤­ a´/˜'ä9hçÑùSLR"	$¿W3¶"NğÆM*›F£FÇv‰q‹¡-MÀ@:A—0êOG)óÌaÕaA…qÈ
+ &Ã h©79&•ˆ46hëğ¼($ ™ğ³{ôÓFØYAÇYy€iTåîÓä1'½’ŸD$ˆáÑö° ­´—=fr“YÍ‰'„Í‰<Ä$(+i«„Úû¬†‘Äó|pTì…´1í/Ô	ƒeİ÷»]ğcÜG™dÀm¢Á¡*]à¨8±Ä`†
+_0š{Ç_2 @ Ê›Xw²~½<A
+-ı	éá6TÿÜŞ    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ¥IDATxÚ¥“YVÂ@E{9ş¹™e4®AgDÀ	ıVQQÀ™ITAİdY·0+ÈGN:Õİ·^½ª¸brNÂ<îã0/½JZn×cÒŞŒËİF\wSR÷æåº‘Ÿ³eù>õ4“îëí¥õ•ÎVBÜ«~¼+„«ñKr¿4 ü“‚Á/uoÊŞNÒ€“£¼ô+q,6õ Ôçò¢|jÀ`?#_
+h) 8d|3Õ$tÈîn',òpSŠj	íõõÂ¨–3 e£®UŠ‰m"r‘…ôA5#*³Q+‡Œx…*Ş£ZVÎWì£B‡Õ¬­‡zè©œ2%¾p™„t‹µµq\Ï™Ët ­›¨xÓ8N£“Ğî !±ÃùiÃ3#_Tm„<Zk@5š €]ÿêŒ„7‘:ÈLm£ŞæZD®ô¡¦ÙxÁ4R.òQçƒY¸
+`¨ò)…˜ÉĞLg@|ÁÜ`àf£¬2ñ %lb,1€\æŸ # äÌ ÿ¿E~£`ÿ
+QÂ$€yÁ¬„6ñ;µ'ÖÇ3¹ğ    IEND®B`‚‰PNG
+
+   IHDR         óÿa   êIDATxÚ¥SK‚0ä®Œ€îİ ÅîL<K
+„#xoämj§ŸDÓW%²:™y¯%9íj<îçÍ_ø¨‹•êªL|­ú*7h©’ešOÕÀí,³P ?ÛI¸2B › á·V;ÇÜìcE¤ó5€t(¾ì—$ bjxO€VbŞ„œ2&Ğ¸äzd[¦Qp¨©<Ù±x‚÷6æW‚¯¢°	Ğ§?J¬Â'b×®FR3ğ-L¶ ]n¸0ÚÅ\n¯3Ş‘É`®¥qÖÏ4/ÛåâˆL    IEND®B`‚‰PNG
+
+   IHDR         óÿa   KIDATxÚc¸ÿñû>J0ˆ8ÿì½2şÿÿG¡‹£cœk^ˆ1„ „!Ê |†m .CH2 ›!$@‘F µ”` éÃ.b(      IEND®B`‚‰PNG
+
+   IHDR         óÿa   LIDATxÚc˜\,÷ŸÌ "î¯×ıÿi¯áÿ]ÕşŸY E4n 9šA|¸ähñá£ÄdağÿœI#H5`†ÁHO”` :t‘Wc;&    IEND®B`‚‰PNG
+
+   IHDR         óÿa  qIDATxÚ5RYO“Q½ÿ(([¬¥ûJ7©´B¡;tÚR  -D}ÂÄ÷7\cÜ5&ş¿ãœiy˜ïŞïÎÌ™sÎ½fço«<È¿¢xÂöŸ
+A”?„±ñÂÜË 
+o‚¨~i®ò)‚­/Q¬=ñÊY† y)¨}¡ùoõq-Úü¼„å3Vî;QÿW@"`îU µo1¤î-Âiûw_	dŸz•	“¥÷adŸù°úØƒâÛòÒ”9w!óÀ­õ7º‘: N.½isæÜÎ]2àäFÏ©ç”°Õ±+8Ï+#Òì@¹}¦}êÆNwC‡Ò/z-JSÛñiT»W•Q-lE•«ÄúsŸJÉ{Æ`Êşq0:	Ú·=8\Eó°t‚•üvìF§®ØĞ‘šZÛö‰KûL?==i>É, “´aÃ=Š[+ó¨†&°îÅÍësY×öâ6]sQ”|­1­Ø4ö“3è	ĞÎÒ¤&×œ#ÈJt…Íº4¼cØN ²¢.RH½±âàÚŒ\£Pãt²à„æ+R³ÊàXâTê¸'hKüiD&aˆÆ;JÍa[XP53SƒæûP	Œ+;(aøáD®, iœÊ³-¡]­”· Ùõˆ’HÃu\pOl Ö~zA÷4“y2ÙOŒ¤'Ã©ld!M"ÅflJ'Q¯·!†±‰9Ì3öĞÃ‰å!mšv2ÔI=ñ‚ÿ9ñ‰€9	æØLp}HÔAzœÊ[`‚>p
+Áù/YÒ`>.úB£™7¾Âá"©òŸ&¬¥·3;xázB)¼Òÿ=†ıƒËÅ&,    IEND®B`‚‰PNG
+
+   IHDR         óÿa  "IDATxÚ5“i_’QÅï÷bÙEqùYff–Ùjj™í{ßï4ÿ¡ç¿{™;sæÌ™ó„İ_u-?J«ÿ*¯õ‹‚v~Ô4¸Èkt]ÔêóœÖ^Ìiğ:¯ÉÇª¿ß•´ù¡¢•Ç‹U è[ÂÖçªöÿ6´ıeŞ“6Ş—Õ8ˆ©u?¡í¯óH# ×^ÎiëSU‹wã
+ í|¯iú­¦î“Œ3áqxUT÷,«åÓ´ÖßÔ·¢öqRí‡)Ïïœ¤´x` t^¼¸}œ2 :DœzO³N|ü¶dÅ1#Lİ OÔèÊ'@{¿4±“{ï<ë£ fÿÏ‚@H†"`KGI¬#4îÄ\ÌæaÂÿ/‹
+ à4™zç9ú€#ìîÏºL €XĞlÆ=aã¦ìZ Èš¬à¥IkÖğÑ¼@B´" Û9I{q4«F#~èã®1`½ÙtØÀb`†¢+`Ä6o+®+%F>+¤¡‰X÷"æ†	È¾ëÅÑõÌTˆyfÜÉ	PÇÂtüw$Ô\¬«™¥kë(áv¦;vŸš¡\D±gsá´Õg95ïÅµbŞ˜(É¨­Ñ…X/5˜) &,Fv¦;LüÃ¹-û1»ga\€‰æÆçœÑ=Z!1Àøˆ"Ë;CÓ#paÖƒPã›’¯bbì¡§¦Fã;hÙH‘Åÿ.­?‘Ó¤ ~    IEND®B`‚‰PNG
+
+   IHDR         óÿa   6IDATxÚcø=ë%˜Ìx¹Â,<j ¦ÙQJÏ€ø0L–¸Ä¹è~&É€(À Ë}ÓY¦äº    IEND®B`‚‰PNG
+
+   IHDR         óÿa   ÎIDATxÚ­“MQ†ç÷ú[öRHã#’d1¥Èh˜‰ÑŠ")‹WÏµÒİ9¦ŞétÎsŞsï;AX­È¢€×¯Ï—AÕ”ÌêJçm—-åq[ûÕGÄä¨ÁÀz²EÓÁEªÜtuL{NÄä¨ÁÀz¸Ö²¾Î».ùĞ‰˜5XÏ€%2¦[1Ò½;“£ëàÌR™FÃã4Ñó<u"&GÖ3à°Ø/“˜Jãë9“£ûóÌ‡hşŒæ‹d¾Ê¦ŸÉ¢7¯kâe     IEND®B`‚‰PNG
+
+   IHDR         óÿa  7IDATxÚ­“ÛRƒ@†ûØ^{ãô`¶…
+,»AZh;h}®¸:ĞiA/Ä‹0!“ı’Mş|"úÉîïØ~Ëà³M,òœ)•™KÕÎ£S L’Ö#bNo¡AJû Ì© 2 ÛRUø-@oè˜+r7c.pHƒboÉAå¢À¡Ó>¤ãVq7 5 ´„ÖòW‹|gÆş- 1@‡I°&Ç]  £²0Ç<´Û¸szñVœ‡‚‘|º zm¡Nú«õü‹ê-xö”>õªıß¥À
+¯†ˆé#€$Ø!—-€½r!Ç±_‹q‘:Á»t Ÿ'©sÕÎgÕ6€Ğ]/f°`1uIyÿ.Ié+¢‹Z‘ VK}¯	ƒà£Ú-àüØÏ¨õúlá}\ô€$Ë    IEND®B`‚‰PNG
+
+   IHDR         óÿa  )IDATxÚ¥’IrÃ@Eûş7È>UÎ¢Áq[N%dÍ–/U®õ@è½ hø|†ğÿ7IŠ„d€¹?ÉıœËÜW26Q°›K)·ŸLíî¶—©2ÜÒ×_‹~Ô÷ÑUš0òD½şÍTÆæ à# !€S$4—b	Ì@ÑñxµÆDõ[Nf0Úë~Cçƒt³ó•A¡`ÖF”ia€İQ“¨† Óß¼H{-U§ˆÏPŞAù¹“IxßJšP‚6ºO>mC…¶}üÌè9œ$àğóş| $ùMçÃõMĞ˜*U¨N t\©âÃäeúvp6Ü`ÁQ×ä”	h•I®~?6eçm­ÛÑK¬ÏvHPãÃu*b£³înµxòÂÇû›¤H2ÀGèA®.ïe5    IEND®B`‚‰PNG
+
+   IHDR         óÿa  FIDATxÚ¥’Avƒ0DsÿctİEî“´@_›¦¤ô®¿ìq ]f!°,i4Òx·~
+ØÏÔ¿„ÛØ„áR…ejÃ<ÔaìNáÛ·áëúj>gr°ezãçñÀ…$Àï?fSt=Wá–ÏjX p(„AvÑ¯cË@.Æ8ybõc›0‚bĞÅî$“fq£ß¶@T…@š91.Çæìïm?ÍÀ…°„?6Çb Ä¸ |ïÜ”E¡Äâ“*4án½› º¨BI–¬.rJfT) ÌK‘I“QcÒ¬€Ó™øz+ ¤›v iÓh­Íß½2ÀŸX ²­‹øsO²–¦×Ê=7/%’,í§²³ê»•
+F?S§PKä^£ îìjû&30½‡¤½Ñ’ÅâßØ/†ol²Ú8ë$    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ¼IDATxÚ¥“YVQDß‚üs	2‰LŠ¸EœP'ÔGÄá¨«‹¹ñ°>úôë¼¤RUI»TpBÆyÜûş¬4³a¹YõKe= ·kyØš‘BbR.S^ù9]ï“„ÆıRÕ{bÍ°¾}Rİ˜÷¬o
+BÂù’GúÅy¹K€„şQÜÀKIõn3h€ŸsÒÊFÄq XNzµ‘	É‡Æ xÙÈ—\+À(Ş^ÌXÓĞA»¶.äÀÕŠO%$ì®¥İ|Ì ‘]Sv×+~qc›İênl‡¤‹È½Òl+ƒªuğ™:â¬xwóQ9[œ²‡‚Éí\ÔÎMzÌÌU$Œ|¡x >0-Î6Æ^!fÈ3Š^âÃ«Æqf˜  ;œ'ÌÈ'¥ÄbŒÖ Õh& À°®ñ_İ‘ñMDFÛÇØĞ[^öÊ…>È`û l#r¡;ÌÂU :J)`&Kóyøˆ/˜k§95[e=Ğ‰ `‚~Œ% Åüt€Är%İ<Ûu LdDıbÜşÂ„M$ æ±+Æ`\ÿ 7àAğ!Úuh    IEND®B`‚‰PNG
+
+   IHDR         óÿa  aIDATxÚ¥SIrƒ0ôÃsˆIlØ¼/³ƒñ’¼°£W\ò)UIêezÄhüú‚!5âçr®şU_·m“áÔæ¨Ê#É›õa †
+ZOà:oğô‹y`xîJ”E‚İvíf.à(Òwpà»²Çs‹€êu•"9l<‹<Vğ}Ç ®–âı
+ûİÒ& e,Xô¼)±<ï9²Gå"?HY÷¶•ú"˜¶£PõYºGzÜI»A•]÷Ê”´ñÜÔÙo^…MÀ‹SÙ7+Óî+òXÂmêÔÜ­q»46X6@mV’±ØCc¸¹m
+tF½;=qÎ}T}`‡x-o¢*\*Á·ksoå‘ÀŒŠi³o*s*´MµOóÈÎ§RÂëÌút
+ZM0Ÿùf`y@ë~Ş		û‡fôÑ6{¦m*ÌğØ
+Iy‡S±ıLCê5´ÃW]üŠ    IEND®B`‚‰PNG
+
+   IHDR           szzô  ¤IDATxÚÍ’½2AÇ/—I|öƒ]ªT‰D;¬£$"R¡ÈHä/ J J•'r"±Ø°3tWßÎú–Ú­üvº{ºg~suÑóÆgH:æ3“náÿÌ¦½ °À\Òk…×[í³À|²cy{q,sYG±\	si5—g~- ](gäË«9XHv-¦™b™Ë•@9Õ4y>tË¤û3L±Ìµ•3š€<_ô-ã×(ÖV£ÿ õ,°X&m _öY`)–ãA„À^X *óÇK‡I3u`8ŞWA“fêĞšÀÉİ½ƒ*Ä*H@ëG¨Ò2Ñ@Z?@}B °ôoNL^°€ÛÇ+QaA¦hP¬F‡$`êH€f6¯Î õKX +“Ì#yh¦® õK„ÀĞ‚†ï™º[×,—åÜ#@3¬EG$`êH€fxxyrVÂ\Lq£ëÑ±Å' _.EÌL#SÓ#_,óê¾œù+µªû¨Ş¨@uÕ~‘FBòOÔş¼(8    IEND®B`‚‰PNG
+
+   IHDR         óÿa  IDATxÚ5“çVQ„ï«‹€H³ *¼‡ëÒË²t¨(
+/óÅ³?îÙİÜd23ÉºyïP^;âmÉr—F)*‹^NÚ×qÙ<¥[Ù‘ÁCRšå¨Ì5şîçä#8ÒÜcyní‹{jîÉGÿÈ
+)i]Åd¡IÏ­=ÙÌŠÒ¿ß•îÍÔ."Ò©Ä­rÜ[÷Ğ’úw»‰ß£ù™œ
+wÓzÖŠ^Úû²ŸÈ×ğØòz·	t“ZF8$˜¼´uõïRU@â€ ‰»êyÄ@ Ê!	¸Dó¬‘•©I=£E[æEk•Ö,ÇìŞñ]PYÿß—Jäá±ŸIÁä½”IáÎ÷Ië :l>ƒ¼™0fut
+ëYÁ<¿‘V»Ü6™3Ğ†Vè3VĞEg¼ b“‚6Óê´ s#IŸZÌüq½®è6VeÕPƒÇ¤Iƒl ÎùÆ€€-RäíÈ¡€˜¯9 w†:¾zÑM(C¸Ïª8LÌ÷Æ¿Ó‚8h‡6É0A+1¿Ôu6”ãjÚÌ#éä:öÓ8¾.EêãÀGZìé.À‰ à‹­2¨X$Œá", ˜BŸÆh¯—¶ÍÇîÏÿ‹‚9s'@w
+Ä’Ñ0 Ş”‰y€ôa` °m˜ÆoË$XuŠ^Ûö¢O¦Á ş \®)àmsY    IEND®B`‚‰PNG
+
+   IHDR         óÿa   9IDATxÚc`@w7šüÇ‡7 Şî3ÿr¡>/lT#Nc¯ŠÙb0í Ø£Œ@® ¾êÙÙv,½    IEND®B`‚‰PNG
+
+   IHDR         óÿa  °IDATxÚMÒWd!PVYk¨œ»+çœÃ†=:Œú=Ø7™´^¯c³ÙÄïïo‡ÃX­V1ãóùÄt:ÃáµZ-ÇcT«ÕX,ñı~ãr¹ä³t½^ãçç'7+fßétòÿóùŒ×ë•5Xšo·Û ¨˜|FŒF£Ì¾\.3pç˜[­VL&“¸ßïYñ|>4r!%Ûí6ºİn´ÛíÌ H1FJ*•J¼ßïØï÷x·ÛER  ^¯‡<N§SnfO>[šË¢D³lÒãñ*°brIÉŠJ,iv†|„i6›e Œ˜J¤×ëå©P(4õ”ÉJÈ‰\	cÁ®-6›Íä#tæ^ğÉÈHÇ,Y Ø±¨ÙY¿ßóùœüÛ³š ±P†&@Øñn ìeRFË^âjIº0‰ş’­Aşæ1šëß1ÉE‘/@Ái¤„JŠåá› !¹šKØxİ92ßTPcS›øç«x6Ïû¯* ”jöœÙôjSI]£"å¢˜=ÍÎ¼:’K€@(OdñkœÙÅNñm¤»GHå?©7p!½M    IEND®B`‚‰PNG
+
+   IHDR         óÿa  ®IDATxÚ­“Yr‚`„=f^R9ƒÆ("²È¾ˆ²Z¢K­$—œLâô*øgìú›¶÷ñşF‡]NËÄ¡ElS]&ÔlVòœÛšPÇûßõ@US¹
+¹×¥cSRZÔCC]$Tf…AùÒ'ÇR©Êcš*ÀPÃÙÜP(K=ù©Ã›@Î¹0‘š³‹d›²ô±d©O‘o’:îó¹JO‹Vï&ğÌ#‹Èf…<ûmNçã†võ’~.ÍÃxäi@ë<’ó‚§Œƒ;€ÁGç#fÇ ßğ-çÌkÁ–Ñ»ğ‘2ÉwfÂÀOE şq³¦~’>J?6¯ay¦(^¾·Âà÷º¿ÛMØòŞq†ıƒ>,n«ô.À#ÊŞ'PW'õÎ ëL9d §k_Òƒú#k„p£¥+ªÒ—: "pölMx¼†AÛâ·_O[™ »>µ•4]8X56| ¬À–`T@´yLÁÄŞu4s6+ˆ²cMe…È‰¬ ‚‚Fä  ¿¨w2ºìï†6O3ø:ZlÚI6RP    IEND®B`‚‰PNG
+
+   IHDR         ºRöN  ZIDATxÚíÓ?+…aÆqGbq"Ñ”P‹áY’,Ã9ÓQ¬ş”?ENÙP&XlŞ€‰—`1*/†~—nûÕcĞ¯ïU×³<§»û:ŸFsbì«¯Fúã±tÖQKŞ®Õ’½×+µ¤:\S¨“ÆŸ|Bí6OÕ’“Ï;µ¤ı°¯–´–çÔLwàìšU3İ³{dpjDÅ°Ï‚³{d|qFÅ°Ï‚³{dagUÅ°Ï‚³{dı~WÅ°Ï‚³{dûåRÅ°Ï‚³{äøãVÅ°Ï‚³{äèıFÅ°Ï‚³{dó©§bXÈgÁÙ=²rŞU±€,ä³àì™mW*°€…|œİ#Ãó-XÀB>Îî‘É¦Š,`!Ÿg÷¬ÿ,`?8»ë}§R±€,ä³àì®ß_tU,`ù,8»G¶{êÿ¸ƒoo„Rçò±ß    IEND®B`‚‰PNG
+
+   IHDR         óÿa   íIDATxÚ¥RË‚0äL<x³÷¯úk^½›Úi™eKEM8!ÛÙÙÇlq:_Üø\«Î•MïLİ‡{ªvòñÁã?xà€+x@B ×Qˆ	 31€`eÈ­İã c¦îá6Vdâvé€]%#”ÍæK’^Ï‹û¼Ğ¬âÂ°‡,y#beª¨a¦İä­ˆ/”¹ ü+€vhÛ¯´¥‰P´Êº½%òV0SÜîøÕF&g;àòÒ‚#ª¶Ï{şt‰(kâêù$Uç[v‰°’dv¥ß¸+º&GğĞ!5«ó…ˆ    IEND®B`‚‰PNG
+
+   IHDR      €   •é"  
+IDATxÚYëZTG­‡‘nèæ¦ïxCƒ&4Œ‘#Á Ä*4´„T@#Šf¾<BŞ!ÿSkíKÕéÓÍ7?ú³å¬®Sµ/k¯½+´¯uãØÍ_âø×‡qü«ƒ8úÅÏ±õùzz‡/ÿıó¯?ğ©cFç^Ä‰¾Š“·ßÆ‰[GqüË_c{ö9#Ÿ=‰­«86·—0¿Õ0#	ğ<8ı¯ñôÂ	Ä¢ík[|ûèõm¾ßó¾‚	ã_¿Œ“ß¼gîüùÈ7`»x7úÅnìÙ'&`õÉoãé;eó¯ãØ=ş¸}m3-°“vp˜0ïúbÂØ}ş àÑë;±5³A;`›†Á1sà˜ĞİcÉ0$¶Š³µf:Oı”ù4¶a‡f#_y•Ü‚3É¶¶ÒƒÕØ¼¸~ +áÖ:æ11_ZW7¹%sMóÒÃ8ôÅ8tî»Ø8Ÿàv‰I»j^æ^Z@ß ƒ`¡‘éU¾yèìâ©OşÍ…Jv<r%c*´¹ÀACgïV˜)_²¦ÜÅV%`’»`¬°Ÿ.r‹ â871³†yiñ k"X<pW{¶Ë74/>ˆÍËéíbÌ*1†_'æK.zÅİp›é­0ŒÚÓ!&`Õ‰ù#Ï:d³$ç&&…/Âyòö1³Òğ!‡éïL(	SÙ¦œûçx&`+0À<;¬›üÛ[p¤Ó0Ì¹»°Á6óİ¶—!xğCx£¥6è‡iœ_iR¬ˆ( ¼‘g˜±>˜àL34 ÂF›Œ}ËB\á˜§1Àª0,<²mtn×])î;¾0Lr#bQL E¹ó¿Âº{™”/A"ƒ0¡Â4ÎuæÂLgƒ0AÄØè@ò!%ƒh¶K» C;ÜªcÈ‰X•¨çG“Ê0.0ÆFÀKn+…LsÁØHi®3%]àY+Ló€i<tNSyZS™˜.İkæŞ DÑáÛaÆFO¿gù2Œ˜SŠ!©Úøîœ­/P{IÂ„Ì4å„š<ÂšV¨*†´R5ËËN2]“øöÑÂš‰¦˜ÂÕ‚Aº‡Éƒ1¥\İ'gË< Â.¨cğÁ÷@ã`Å0,+X’¤2Àpm%Q®X|'WvĞƒA áL¬´)®Á@âÊ¥(l´Îg£5#=Ç‡„‚|'‘ÀEÓO2¥ˆcåNÏa‰Î4`Yfú!K:tAªÆÎFÉÄà¸&Ó¼s®o)ÓĞ}ä‚w±ÄXL Ó”Dz ¸!ÊÌÙh &°XPy	b[o§³÷,(“Ê‡ŠaANRÚä­7…>\—R>+²Ï Hÿõb3‘Öae
+ÕÂxf]81=3Œ«ØŒi()Ò„i–ù†JÏ2¦SÃ¦)
+Åôf!Ù©œ¾ão00”6¬ËÊÔÎ4Œó%ašôa¤M=f:K.tb?L8é!álx–V0Jã.8Âu;æZ(š¯©æÑdâ¢(û_F’‰‡ùÁH®<•\ Ğ„£e¢ÈºO"/cÀ%&˜kğG0­å¹é–rA¶‘aŒp‚ºLCãÜw%†Eó#ÙÚ0V#zvp—Ú§9hÌ²ìÀlÀó÷œ¡K\?Á.Yà¢ÂÂ_Ôd£º§³ƒdzÅ¼¦òœ6¦Qq‰N&e¡¤ú‹>˜(É[	´ËÜ§2À`aj$!‡]‘-uÚ#áÇg”p¤*Õ1A”×KQ^d#¥³y¡3’*ùğ%j¡/˜×ĞHoœ²…i6\Ö€ñé#ó¢Š9ÌM{a2ÍªVä|+%>ûåÇŒ˜ ¢©ÃRN¦I$1¬
+¶	oXdYWŒu1¡¢Ò™¦‹º*KKX¸Qb.	&HÕ}äUwHsaÄJ»UæËı1ìŞÛuÆõào•ò·£%0Ş±˜â°ã°!	Ô;ë…ú?cIˆ£N˜à­.óàQ–5	À< © íƒ	¨´9ï‹°J[õLÔ’ËgÌO	f@ašï\ÂYÈ–,1ÔûÍË+t[Wå­x`ËU‰aÌp=ú–uõ­ÿc[ÊÕó©¸<ÑÙNÁ%~Š,²‘öÂFÒŞôÃ`¶/d¯iøv£ÄÁë8ÑFeä•àQ6Ó)”I‰©ÍXìQÇNÎ4Úhc^DiSˆ«*æ1Á”‡Y]¨êˆow6Rã˜›ã´.LÓÉò.)Ùhş(V0W« FŒi48¸‹Ä¸6|2ã¦]`‚Š0ÍÃÜp' xdkµ±&˜Ïmf(Æù@ J!#ñ#Ã&¸UPÀmlséc'Ô
+&-ÌE&ä2.b‹%Õ6Ú%å+Æ‹b‚1'w:|ÄtjL9 4Lp¦¡"[—º˜ ÂF{Ş+eÌ†cÈ‰œÚ!ËĞ+ÛĞ-L•ËPªÃpLàÈyÙvI„–Èùçî¾^âÆ0qê“o)]L¶´•¨J0LÊÛs†yâ˜@áTaš§š4ºMWÄÜËUK1³‚´ÅÌ¶›ÊF»Y\¦³ÂÊw2Mæ{c#›¯V1ëEİ8HqşÙèy´ŠÃ	¶¦ºI}1ŞvŒy­œK”½—&Ë‡Ôİ˜P‰ó›‘Ñ…\2Éâª7,_‚?ì¡*[DÂ×0ÅK¤ú¬{ÄI?:9²Qîha‚HZİ_„‰ >Ic¢^8SÒi/3nböá…g1‹Wä |¬ES}û±ˆOPZ[§•N&8Ø¨à`Lx8™(ÆQrQq,sS°‘ÓÙN<	£3Ue#”…õ ¦ô’bPÚ8¹œÑğLhÒØˆQ(“Ñ‰ı1A˜æ±¨Ó¯ô&§’+Ò+ãÂ&E¢U*%”ï%Ç©<eŠi0’‰Ël¶„ê˜ L³è­®×D"mŒ}0SbÙ¨B&[>K1Áu&œ*¸®e\‡şÈo:îÅŒY©`ÈÊ¸#hœÏŒlòß&—œ`S2rª—6Œ	à8}êÄLƒ BQı\šRb¦òx4c’Èr¦±Š¦™?òÂg,ûå€ö–b ²lØVÖ<¯Ö–ÊÌ‘ÔÅI÷\xÛ'¶ä‚”ÿ€ qñ0/ad0×ğ»¦%oÆ“ã„¡lm,U	çæù¢‰#¼QÅ¬êÄFàz—fU™5Éú6
+©c:HçMŸ›ÉŒı¸ªà¡æ­kG^‘ä[ÏªLò…¤±²Ğô‘È¿}ÑH&(İºFgô@·~ÓS`‚	gáÃÅæ¾O³3o÷böôªlN/"Ğ+“i|Î*ŒÕÉ#Şüf[.ëLyú½r!ïÙx+¼ï“OÃæ¸)°‚i8„¦.XŠ†áqqßDí â‹”fÂ4]6—Æœ`÷ÅÈP&P¶˜pÓÔ.-¿u21LKyƒ7äºË+~)ãâ
+×`Ê‡~3ê¡¼PŞhú0âªÌ8xR6Ê·ÊF üt¬™æ£ÍûôøH¸BbÂT~ÈLs¨LóÚ›,Ş§¡‹¥°ê‡éÆ¿R÷4¼¾‘ï    IEND®B`‚‰PNG
+
+   IHDR         óÿa  IDATxÚ]ÓŠ1Ğ¹ÿ	Ó{ï½'ZA!¬``lË¿Hrõz½âx<F¿ßÕjât:Åh4*{ÖÍf3G‡Q¯×£:ŸÏ±Ûíb:Æ|>/ÉŸÏ'ÖëuI&œ´FÚjµ
+a5™Lb³Ù”¤ûıÃá0ì‰÷ûİn7‹EQé\®½çóYÔTN§ ].—r	Àx<.—E£Ñ(òSúl6‹årùµVå9˜H”ìR®ˆ*öû}±ËÒà· A>éi¨ú8¯jµZ‘™¯´ä’b¹œÅëõZ,öz½¯ÅŠ4 âv»•d>S:+ ó‚î ù¤d~€a¡†…v»]ê2ë_"9elğÃ—’µKÈQd5rt»İu•M>%	ÿ„j³ƒ=C>ß6Ç¬6tÌä™Îìe9h¿ƒ§ÈUËbıŸ‹À˜óíPIM•}&s"ûWÔ­Võ’OÒRlj`Höño­mùJå Ò1@,WP³}Ùw ø0yÆŞæ|B7ş yıÍi·¹B    IEND®B`‚-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- The showcase theater.
+--
+-- Tier A (this file, everywhere): the screen is a wall of nodes, each owning
+-- one cell of a picture that animates through a vertical filmstrip. Because
+-- every cell carries a *different* crop, the wall shows one large moving image
+-- instead of a tiled thumbnail. This is engine-native and works identically on
+-- a native desktop build and in the browser.
+--
+-- Tier B (browser only): if the engine exposes core.set_web_video â€” it only
+-- does under Emscripten â€” the remote can also raise an HTML5 <video> overlay
+-- owned by the page, which is the one thing a web port can do that desktop
+-- Luanti cannot. When that API is missing, or when the page has no clip to
+-- play, Tier A keeps running and nothing else changes.
+
+lw_theater = {}
+
+local storage = core.get_mod_storage()
+
+-- Must match SCREEN_COLS / SCREEN_ROWS / REEL_FRAMES / CELL in
+-- util/content/generate_luanti_web_textures.py.
+local COLS = 6
+local ROWS = 4
+local FRAMES = 16
+local CELL = 32
+local FPS = 12
+
+lw_theater.screen_cols = COLS
+lw_theater.screen_rows = ROWS
+
+-- Reel order the remote cycles through. "off" is a dark screen, not a reel.
+lw_theater.reels = {"bars", "show"}
+
+local REEL_TITLES = {
+	bars = "Reel 1 â€” Test Pattern",
+	show = "Reel 2 â€” Luanti in your browser",
+}
+
+--------------------------------------------------------------------------
+-- Screen nodes
+--------------------------------------------------------------------------
+
+local function cell_name(reel, row, col)
+	return ("lw_theater:screen_%s_%d_%d"):format(reel, row, col)
+end
+
+core.register_node("lw_theater:screen_off", {
+	description = "Cinema Screen",
+	tiles = {"lw_screen_off.png"},
+	groups = {cracky = 2, lw_screen = 1},
+	is_ground_content = false,
+})
+
+for _, reel in ipairs(lw_theater.reels) do
+	for row = 0, ROWS - 1 do
+		for col = 0, COLS - 1 do
+			core.register_node(cell_name(reel, row, col), {
+				description = ("Cinema Screen (%s %d/%d)"):format(reel, row + 1, col + 1),
+				tiles = {{
+					name = ("lw_screen_%s_%d_%d.png"):format(reel, row, col),
+					animation = {
+						type = "vertical_frames",
+						aspect_w = CELL,
+						aspect_h = CELL,
+						length = FRAMES / FPS,
+					},
+				}},
+				-- A lit screen washes the room; that is most of the cinema feel.
+				light_source = 9,
+				drop = "lw_theater:screen_off",
+				groups = {cracky = 2, lw_screen = 1, not_in_creative_inventory = 1},
+				is_ground_content = false,
+			})
+		end
+	end
+end
+
+--------------------------------------------------------------------------
+-- Screen placement registry
+--------------------------------------------------------------------------
+
+-- The world mod registers where the screen wall is, so the remote never has to
+-- scan the map for it. `origin` is the top-left cell as the audience sees it;
+-- columns advance along +x (or +z) and rows advance downwards.
+function lw_theater.register_screen(origin, right)
+	storage:set_string("screen", core.serialize({
+		origin = origin,
+		right = right or {x = 1, y = 0, z = 0},
+	}))
+end
+
+local function screen_layout()
+	local raw = storage:get_string("screen")
+	if raw == "" then
+		return nil
+	end
+	local data = core.deserialize(raw)
+	if not data or not data.origin then
+		return nil
+	end
+	return data
+end
+
+local function cell_pos(layout, row, col)
+	local right = layout.right
+	return {
+		x = layout.origin.x + right.x * col,
+		y = layout.origin.y - row,
+		z = layout.origin.z + right.z * col,
+	}
+end
+
+function lw_theater.current_reel()
+	local reel = storage:get_string("reel")
+	return reel ~= "" and reel or "off"
+end
+
+-- Swap every cell in place. 24 swap_node calls is cheap enough to run on the
+-- WASM application worker without a visible hitch; do not turn this into an
+-- ABM.
+function lw_theater.set_reel(reel)
+	local layout = screen_layout()
+	if not layout then
+		return false, "The theater screen has not been built yet."
+	end
+	for row = 0, ROWS - 1 do
+		for col = 0, COLS - 1 do
+			local pos = cell_pos(layout, row, col)
+			local node = core.get_node(pos)
+			local target = reel == "off" and "lw_theater:screen_off"
+				or cell_name(reel, row, col)
+			-- "ignore" means the mapblock is not loaded. Leave those alone:
+			-- whatever is on disk is already a screen cell, and the next
+			-- switch catches it once the block comes back.
+			if node.name ~= "ignore" then
+				if node.name == "air" then
+					-- Somebody dug a hole in the screen. Put the cell back.
+					core.set_node(pos, {name = target})
+				elseif core.get_item_group(node.name, "lw_screen") == 0 then
+					return false, "The screen wall is obstructed at " ..
+						core.pos_to_string(pos) .. "."
+				elseif node.name ~= target then
+					core.swap_node(pos, {name = target})
+				end
+			end
+		end
+	end
+	storage:set_string("reel", reel)
+	return true
+end
+
+function lw_theater.next_reel()
+	local current = lw_theater.current_reel()
+	if current == "off" then
+		return lw_theater.reels[1]
+	end
+	for index, reel in ipairs(lw_theater.reels) do
+		if reel == current then
+			return lw_theater.reels[index + 1] or "off"
+		end
+	end
+	return lw_theater.reels[1]
+end
+
+--------------------------------------------------------------------------
+-- House lights
+--------------------------------------------------------------------------
+
+-- The game pins time_speed to 0, so the clock only moves when the remote moves
+-- it. Dimming for a reel and raising the lights afterwards is therefore
+-- deterministic rather than a race with the day cycle.
+local DAY = 0.45
+local NIGHT = 0.83
+
+local function set_house_lights(up)
+	core.set_timeofday(up and DAY or NIGHT)
+end
+
+--------------------------------------------------------------------------
+-- Tier B: browser video overlay
+--------------------------------------------------------------------------
+
+-- Same-origin clip served next to luanti.html in media/. It is deliberately
+-- NOT preloaded into luanti.data: see client/web/media/README.md.
+lw_theater.web_clip = "showcase-reel.webm"
+
+function lw_theater.web_video_available()
+	return type(core.set_web_video) == "function"
+end
+
+function lw_theater.show_web_video(player)
+	if not lw_theater.web_video_available() then
+		return false
+	end
+	local ok = core.set_web_video({
+		clip = lw_theater.web_clip,
+		title = "Showcase reel",
+		loop = true,
+		-- Autoplay policy: the page starts muted and offers an unmute control.
+		muted = true,
+	})
+	if ok and player then
+		core.chat_send_player(player:get_player_name(),
+			"Browser cinema: press Escape or use the overlay's Close button to return.")
+	end
+	return ok
+end
+
+function lw_theater.hide_web_video()
+	if not lw_theater.web_video_available() then
+		return false
+	end
+	return core.clear_web_video()
+end
+
+--------------------------------------------------------------------------
+-- Seats
+--------------------------------------------------------------------------
+
+-- Not a real sit pose â€” attaching the player to an entity costs an entity per
+-- seat and a pile of edge cases on reconnect. Placing the visitor on the seat
+-- and pointing them at the screen gives the same "take your seat" beat, and
+-- doubles as the calibrated camera Tier B wants.
+function lw_theater.seat_player(player, pos)
+	local layout = screen_layout()
+	player:set_pos({x = pos.x, y = pos.y + 0.6, z = pos.z})
+	if layout then
+		local centre = cell_pos(layout, ROWS / 2, (COLS - 1) / 2)
+		local dx = centre.x - pos.x
+		local dz = centre.z - pos.z
+		player:set_look_horizontal((math.atan2(-dx, dz) + math.pi * 2) % (math.pi * 2))
+		player:set_look_vertical(0)
+	end
+end
+
+core.register_node("lw_theater:seat", {
+	description = "Theater Seat",
+	drawtype = "nodebox",
+	tiles = {"lw_seat_top.png", "lw_seat_side.png", "lw_seat_side.png"},
+	paramtype = "light",
+	paramtype2 = "facedir",
+	on_place = core.rotate_node,
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.5, -0.5, -0.5, 0.5, -0.125, 0.5},
+			{-0.5, -0.125, 0.25, 0.5, 0.5, 0.5},
+		},
+	},
+	groups = {snappy = 2, oddly_breakable_by_hand = 2},
+	is_ground_content = false,
+	on_rightclick = function(pos, _, clicker)
+		if clicker and clicker:is_player() then
+			lw_theater.seat_player(clicker, pos)
+		end
+	end,
+})
+
+core.register_node("lw_theater:aisle_light", {
+	description = "Aisle Light",
+	drawtype = "nodebox",
+	tiles = {"lw_aisle_light.png"},
+	paramtype = "light",
+	paramtype2 = "facedir",
+	on_place = core.rotate_node,
+	light_source = 7,
+	node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.25, 0.5}},
+	groups = {cracky = 3},
+	is_ground_content = false,
+})
+
+core.register_node("lw_theater:marquee", {
+	description = "Marquee Block",
+	tiles = {{
+		name = "lw_marquee.png",
+		animation = {type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 1.2},
+	}},
+	light_source = 12,
+	groups = {cracky = 2},
+	is_ground_content = false,
+})
+
+--------------------------------------------------------------------------
+-- The remote
+--------------------------------------------------------------------------
+
+local function cycle(player)
+	local reel = lw_theater.next_reel()
+	local ok, err = lw_theater.set_reel(reel)
+	local name = player:get_player_name()
+	if not ok then
+		core.chat_send_player(name, err)
+		return
+	end
+	set_house_lights(reel == "off")
+	if reel == "off" then
+		lw_theater.hide_web_video()
+		core.chat_send_player(name, "Screen off. House lights up.")
+	else
+		core.chat_send_player(name, REEL_TITLES[reel] or reel)
+	end
+end
+
+local function toggle_overlay(player)
+	local name = player:get_player_name()
+	if not lw_theater.web_video_available() then
+		core.chat_send_player(name,
+			"Video overlay is a browser-only feature. The animated screen " ..
+			"(left click with the remote) works everywhere.")
+		return
+	end
+	if lw_theater.overlay_on then
+		lw_theater.hide_web_video()
+		lw_theater.overlay_on = false
+		core.chat_send_player(name, "Overlay closed.")
+	else
+		if lw_theater.show_web_video(player) then
+			lw_theater.overlay_on = true
+			set_house_lights(false)
+		else
+			core.chat_send_player(name, "The browser could not start the clip.")
+		end
+	end
+end
+
+core.register_craftitem("lw_theater:remote", {
+	description = "Screen Remote\n" ..
+		"Left click: next reel\n" ..
+		"Right click: browser video overlay (web client only)",
+	inventory_image = "lw_remote.png",
+	stack_max = 1,
+	on_use = function(itemstack, user)
+		if user and user:is_player() then
+			cycle(user)
+		end
+		return itemstack
+	end,
+	on_place = function(itemstack, placer)
+		if placer and placer:is_player() then
+			toggle_overlay(placer)
+		end
+		return itemstack
+	end,
+	on_secondary_use = function(itemstack, user)
+		if user and user:is_player() then
+			toggle_overlay(user)
+		end
+		return itemstack
+	end,
+})
+
+core.register_chatcommand("reel", {
+	params = "[off|" .. table.concat(lw_theater.reels, "|") .. "]",
+	description = "Switch the theater screen to a reel",
+	func = function(name, param)
+		param = param:trim()
+		if param == "" then
+			return true, "Now showing: " .. lw_theater.current_reel()
+		end
+		local known = param == "off"
+		for _, reel in ipairs(lw_theater.reels) do
+			known = known or reel == param
+		end
+		if not known then
+			return false, "Unknown reel. Try: off, " ..
+				table.concat(lw_theater.reels, ", ")
+		end
+		local ok, err = lw_theater.set_reel(param)
+		if not ok then
+			return false, err
+		end
+		set_house_lights(param == "off")
+		return true, REEL_TITLES[param] or "Screen off."
+	end,
+})
+name = lw_theater
+title = Showcase theater
+description = Animated-tile cinema (Tier A) and the browser video overlay bridge (Tier B)
+depends = lw_nodes
+‰PNG
+
+   IHDR         óÿa   ¸IDATxÚ•SA„0ä3ÖDûT?¸—}†W7„@‡)÷€¶P¦Ã@¥µıªlY¶0ö­kNR§®ı_áÑ@Ÿ·f1¾İƒ–8|NÙâƒ Uë‰"¯™‘Ôµ÷[aYĞ$âõ9^ê#^“şãĞù­ ´Aqşˆ†(ïKÀ®O*¢ywğÂ`€Îy€rÿËA2Ç6ÑÓ@NÚKš˜Ì{ÁÏzÖ FæİÓÅIåú,È?;×ÓÎ    IEND®B`‚‰PNG
+
+   IHDR      €   •é"   IDATxÚí™A–Â †½„ugİÌ¢íÒãÌÆ«Ì±æDsNAÀş@R»}Y ¥¦?I€ïÙpøşú˜Ÿi÷1]ºyşıIÍõÇİë×÷’€ÄØõ‡óQ&0aésOI'¯îšÂH1Œè¿^ìè5è|É{ènsLı,‰1Fj<»GA¦àÙC`éÜ>¯©q—İw„Úµú<,ç	XF ?Dw£44(àc#nG—©€S¹JâH’•¦3‰ti€Ô‚MæÊA–"‰8•“ˆŒUOoç]x€¦âA&°…h˜8
+“(å0¼5Z[¼É>3jğ™1vã(‰5ÈöB…Pàµx cb…"ŠuÆƒZ¯ÃMäx 0¬~°#Z…¨&ø[ªšÜØx`<ØÄ´”U<€¬—íÛò@”ÄŠKYÊƒ\?h%¬ÉT|Tñ M£ñÀx°TõDÄU=ñàÅê‰ÒóFĞù‚Šè|Áx`<°óÜş ë{#B„@¸#    IEND®B`‚‰PNG
+
+   IHDR         óÿa   ËIDATxÚ¥SÁÃ Ë	?Ú/8‹w£nC°A2Üõ‘‡c dçø~îò$ú×U²†¼{NmJŠg‹L5¡å¢[Aˆ—3°eÀ7XØyıHhïdG×
+°8Á^4“dÑAº²½x	¨u{Í(«f’ĞX(ÕÆ`Ó•¢ç` ÿÖf¨¬&î»0t«™µäA@N0‚lç`É¼%Á0Ms0; ,Ô}'†ÉúLD 4lı7.º¥4y0²›òàIü Sf¬füx    IEND®B`‚‰PNG
+
+   IHDR         óÿa   5IDATxÚc` 60³vù¯­o†+ªhş§ó¯/ÃŠ‡‡Á•:X1ıõÂ@@*  FaåKƒÉ›Ä    IEND®B`‚‰PNG
+
+   IHDR          ãInë  JIDATxÚíØ1
+À DA”ûWÀÒÎÒƒü`‘ 2Å+¦ŞÔ{ÖZÔZ£”9ç…¥K	              `;àÉpÀp@ß              ¾
+˜í|               ü°ı                                                                                                                                                                                                                ˜œúkæ9£‘    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ]IDATxÚíÛ±€0ÀŒÄ&l’I*¤L—2ƒ…	 @ŠàŠ—å¯®¶äTJŠ7’J¹                                              € µnÑÚ½çã¸æÜg              ğÀÓÜ              |ğô@±Õ{k‘{cŒkÎ}ö               ÿ xñ                                                                                                                                                              Xpy"pV{S    IEND®B`‚‰PNG
+
+   IHDR          ãInë  [IDATxÚíÛ±€ PFb7q†b J:JAÑ8€ÆÂ„WüüÜU¯¾äBÈ¹“ğ.                                                                                               ¿ÄRúRk_[ëiÛÎóØ              Ìxš¼Ğõ §³ÇK              ˜ğô@1`7              `N€                                                                                                             €_v×|%õZk»    IEND®B`‚‰PNG
+
+   IHDR          ãInë  _IDATxÚíÛ±!PFb6a†b J:J!úD9é¤(¹W¸ö«-9¥ÎÕôÔoK                                                                                                                              ø: ívêª§ÌròÈ               |R° 4À«®3Ë<#              €‡ ®`@wÛoÁ               ÿ	pñ                                                                              ø)Àlã»¤¬Ï<    IEND®B`‚‰PNG
+
+   IHDR          ãInë  \IDATxÚíÛ±€ PFb7q†b J:JAp …‰	¯ø¹Ü¯^}É…rNø,                                                                                                                                                                              à€K¯[ímoıHÇ5ç>{              €5 o%ÆÜtàtÍ¹Ï              `ÀÛÜ              Ö xñ                              ø5à¢P²Q…¡R    IEND®B`‚‰PNG
+
+   IHDR          ãInë  MIDATxÚíÜÁƒ0 @J :¡*IQ) Ïüò¼B|Ê½x€b_ÀÆö<PÄF1°ìÚìp†°Ş†á~ú6M0ÏÏ°,¯0  TÇqs‹ı;€ÿî ´è÷>        ¾ TˆyìŞKHÚ|ÚïP| Š_†±—i½ ±           õ±¼]@l
+vZfty@¿éyô«¨F         êêêêÎ~ïb         @ìcyñÄ¤Xjmîø² õöb         €uÅÖ–ëÀ >`ı€X          Ú°Ø¼¡ú€úÀeú´»†¤ß>¥b         €õæõ P          äæeÇÎ÷±          @^ 7LMÏûè? ÿ€`        Ğ> 6%;­mx1@ja¢=@ê´=@{ ï‰          ‡MXV8¬1bµ ç €ú€X          pØ’îj©È¾~àt€ìø°ÆÕÔÄ          õõõÔıô       ø
+0M0ÏÏ°,¯p»ıü}¾÷ß  Èòâó¥Y^ÿ¿4 Kˆª‡¤ç—¤şÄíÄ     €> ©ÛW` €jëÇí5 HÂ¬€­/Şœ6Å©CĞ`/™m°w™e‚â ±       9À/—<7õ}ëù    IEND®B`‚‰PNG
+
+   IHDR          ãInë  JIDATxÚíØ1
+À DA”ûWÀÒÎÒƒü`‘ 2Å+¦ŞÔ{ÖZÔZ£”9ç…¥K	              `;àÉpÀp@ß              ¾
+˜í|               ü°ı                                                                                                                                                                                                                ˜œúkæ9£‘    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ]IDATxÚíÛ±€0ÀŒÄ&l’I*¤L—2ƒ…	 @ŠàŠ—å¯®¶äTJŠ7’J¹                                              € µnÑÚ½çã¸æÜg              ğÀÓÜ              |ğô@±Õ{k‘{cŒkÎ}ö               ÿ xñ                                                                                                                                                              Xpy"pV{S    IEND®B`‚‰PNG
+
+   IHDR          ãInë  [IDATxÚíÛ±€ PFb7q†b J:JAÑ8€ÆÂ„WüüÜU¯¾äBÈ¹“ğ.                                                                                               ¿ÄRúRk_[ëiÛÎóØ              Ìxš¼Ğõ §³ÇK              ˜ğô@1`7              `N€                                                                                                             €_v×|%õZk»    IEND®B`‚‰PNG
+
+   IHDR          ãInë  _IDATxÚíÛ±!PFb6a†b J:J!úD9é¤(¹W¸ö«-9¥ÎÕôÔoK                                                                                                                              ø: ívêª§ÌròÈ               |R° 4À«®3Ë<#              €‡ ®`@wÛoÁ               ÿ	pñ                                                                              ø)Àlã»¤¬Ï<    IEND®B`‚‰PNG
+
+   IHDR          ãInë  \IDATxÚíÛ±€ PFb7q†b J:JAp …‰	¯ø¹Ü¯^}É…rNø,                                                                                                                                                                              à€K¯[ímoıHÇ5ç>{              €5 o%ÆÜtàtÍ¹Ï              `ÀÛÜ              Ö xñ                              ø5à¢P²Q…¡R    IEND®B`‚‰PNG
+
+   IHDR          ãInë  PIDATxÚíÎ±Â0 ÀÉ›ü&?I†Ê .İ¹d§…E¤\qıÅÑ¯"Î¯cvæêªİ!              pËÀ¿Œ1;suÕîãxtÕîÌÕcL›>u),              ğëÀ„b€È—"C    IEND®B`‚‰PNG
+
+   IHDR          ãInë  âIDATxÚíÙ1‚PĞÖê
+LØÃ,dvÅ†\Â4„X«z¨¡˜f4Š#sH^~ÂoNÅ}¹DÇã±kš&´múór¹„é_o"         €,ËºÓéú9ŸÏ!ÏóEÑİ‰ãøåû›w     ûı¾{ô_.—a±X„$I†óõì¸‘          «Õª{´¹¦i¶ÛíÏôÛsY–ÃEñ·­    à™,ûÜÏÏkv|#        €yÙŠÇŞïv»°^¯Ãf³Îªª†©ë:‡ñk9   À¼SdÁÛËj        €y¦ØŠßşÛ   `Ş a              F         ú     a              F         ú     a              F         ú     a              F         ú     a              F         ú     a              F         ú   €øªvÇ:æ¼    IEND®B`‚‰PNG
+
+   IHDR          ãInë  fIDATxÚíÜ½j"a€á£¶âOAÛ–"ŞˆàÕˆ·¤•`•Ätşu)´Êê€%²¸.#‰y„	|rôÉdÆãx¿b|Õó2          ­Vë=“ÉÄie³Ù8ÿ|iımÿæ×  <`6›]ü#Óét’ıÉdrq¿×ë=à¼7N“_Ün·ÿØ;ºİîç×F         ú   €> F         ú   €> œfA¡ğù|-r¹ÚñøûıkËãqoo/é#        €Ÿ8}*n6›Q©T¢Z­F¹\Õjõ±æóyú_L   ¾=à¿¿{Àİ¯¸fv¤«        pËY³F£¥Réc­×ëØl6ÉZ,éŸ¸  ør€~¿ßÓ÷_p~F£Ñ}úÀ¿¶âçB!jù|Ôr¹x:_÷ûX±<         îras½^O>=‹Ådm·Ûdív;  €Üzú~0<àÚë†Ãáç·À?»        ¸ÿ   €û¸ÿ€a            èú€a            èú€a            èú€a            èú€a            èú€a            èú€a            èú€a            èú€a            è?¾ü=u|I¯    IEND®B`‚‰PNG
+
+   IHDR          ãInë  “IDATxÚíÜ;j*Q à36Iaã£²P—àî,ìÔˆ¸+ï,,,-+Á2KÈ‚Z¤Hªd˜Ë$˜›‡zÉ7pœ|80?óÏ#
+77Oá(Ó¯oí         ´Z­§L&¢(zw²ş£}  .0ŸÏ_$F²|6›í=‰´ÛíOÆãñ«ıºİî…‹E²¢^¯ÿóoœN§ÉvÍfóK‡à/ Óé$ËF£Qò»×ë	#         ı   €~@? Œ         ô   úı€0        Ğ   èôÂ        @?    Ğ#         ı   €~@?°?jÙl¨\_‡ÊÕU(Çó»‡‡°||Ëx~{Ÿ~        ü,À¾“jµŠÅb(
+É|³Ù¼ŒÕj•ş•  ÀÙ o/Ï‡Ãaˆ·9O?p2ÀÛ~à½CĞï÷OÓ|uú“¿ãì¨ÄÙQ³ã.ÎeœË8;nÓ/«        şoÀ1n\–ËåÏç_Æv»»İ.ëõ:ı;§   G|÷öıG€ÔŸ8pèóŸ\Ìûµl-ÎJ’          gy°¹T*…\.—  €ËœêñşÁ`pa€s½_0™L¼ì        àû   ¾?àûÂ        @?    Ğ#         ı   €~@? Œ         ô   úı€0        Ğ   èôÂ        @?    Ğ#         ı   €~@?_º'ãz7ö    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ÈIDATxÚíÜ»JcQà<‚â›äM|ï¢Fƒ÷oÁ"6Š‚ `¡Øv–>È°›`21Ì|Å.²OóÁ_¬œuö9µÚ]-ß]wµ»­         Àääd¦¦¦2==™™™ÌÎÎfnn.óóóYXXÈââb–––²¼¼œF£‘•••¬®®¦Ùlfmm-ëëëÙØØÈææf¶¶¶²½½´Z­´Ûíìîîfoo/ûûû988Èááa:Nr||  0b€±±±÷Õ(û½« ú]/€~×GP6ÊÊïŞ”ı~#(×{GPö?0        Ğ   èôÂ        @?    Ğ#         ı   €~@? Œ         ô   úı€0        Ğ   èôÂ        @?    Ğ#         ı   €~@?Ğ|kfâu"õ—zÆŸÆ‡Ÿ          ÷÷÷¹¼¼L·Û}ÿ;ô  €‘üÈíùH ÊFÁÈ¨2¢ÊŠ*3ªìxxÍKı%OãOÃ)«        şmÀW\Vÿ`ÏÎÎrss“ÇÇÇÜŞŞæââ"'''Ãyr
+  04ÀwoÏàÇÎğ»óee¿ßFæı‚*#ª¬¨2ã­ùöiv          ü•ƒÍ§§§¹ººJõDîùù9¹¾¾ÎùùùpNV  ü1`ĞïàÇŞ/ø2`Ğïô ì8/»        øş   €ïøş€0        Ğ   èôÂ        @?    Ğ#         ı   €~@? Œ         ô   úÿ¾øx6O ÌF3    IEND®B`‚‰PNG
+
+   IHDR          ãInë  …IDATxÚíÜ1j"Q à§MFD°W°¶Ú³XØXx,,´Ë´x\ÁÜ@:ÚdÇ×)KvÉšoà1¼QáÁüçÍ”Ãó{øëö+µ•          ¦Óé{©T
+ç£\.‡?ÿ—×/ú,  À· ƒ“‡Ñhtò¦^¯O&“8ïv»q>›Íî0ãÁ~¿çãñøp¾] Œ         ô   úı€0        Ğ   èôÂ        @?    Ğ#         ı   €~@? Œ         ô   úı€0        Ğ   èôÂ        @?    Ğ#         ı   €~@? Œ         ô   úı€0        Ğ   èôÇ,HÛiHZIxh=„ä1	Ùkö«}ÈVYx{y+>Œ         ~6àxVÜl6Cš¦¡V«Å±İnÃn·‹ûõz]ü  €/œÿ=_,'€›÷_˜Ïçñ+èt:qşôôt(¬¸´+NÛí<;Zyv´òìxÌ³ã5ÏU«<;^Š/«        îğ™—F#=W«Õ8§ğY–Å±ÙlŠ¿r
+  puÀg/ß/—Ë;\º~à*€[¬%û(;          n²°¹^¯‡$IB¥R‰ûı~‡CÜ  |@ÑËûÿ@Q÷|p³        €ç   xş€ç#         ı   €~àÇ÷¿à—¬-aÂÀ    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ÍIDATxÚíÙ=ŠƒPĞkü-\CÜ‚K˜¥§±Ï’5LQÉ8ƒR&†œ—¾ætßå39D\cu>â[Ÿ¶­£iªyÊH          º®»&IëÙívñûÛ#o¾EišF–e     ¯É‚õ         xÉV|ó    @        è     „        €~     @        è     „        €~     @        è     „        €~     @        è     „        €~     @        è     „        €~     @        è     „        €~     à^´mMSÍSÆ~_Åù|‰Ó©ŸçÇãçöa        ğ^€{[q]×Q–eE±ÜÃ0üLß÷Û¯å    ïxFWü—ì          xÊ_³ªª–:Ïóe¦iŠq—û{“Şü·   À¿|üi@•YIƒ“    IEND®B`‚‰PNG
+
+   IHDR          ãInë  qIDATxÚíØ!ƒ@EÑ?¬ ¬€„Õ²6Bğ0„UĞ€¨jÓPƒàˆ›ï‹£'õ}¿ÏóGË²Ä0‘RúZQï7              €ÛeYî¿º®‹¦iŞĞœóÙ8                \İÛ¶ªª¢®ëó]×õlÛ¶˜¦	              à€Û?(                                                                                                                                                                                                               ®l/±ä²j+†Í    IEND®B`‚‰PNG
+
+   IHDR          ãInë  %IDATxÚíÜMjÂ@ €Ñ‰w£Ë€x—Ù‰xOc<“+/píßZ"D(ÖBmÍDóÄ <œÈ™d:~$IªÙëõBıú»ùÓñêØv»ÕÈóüË±Ífsy6›İ~¶I@=æóyGÑ— 5ç@=‹Å›ú,           €> èú            €> èú            @˜L&a8†ÑhÒ4ûış:Ë²|ş½aS€»·çD_‚Öœ7·çoˆ~           x]Ào¿d<‡Á`p‡Ã!Ç°^¯›yvü(àßß¿, ú´æøóãûÖª¹Ûíâ]           ºxôÉéjµ
+ı~?œN§Ë<ŸÏqşÚ]EGÑ— 5ç@=–Ëå›îË²ìr½¨~ş§.           €ıì?`ÿû            èú€>             èú€>             èú€>             èú€>             èú€>             èú€>             èú€>             èú€>             èú€>            ¼$à”—ô¨	    IEND®B`‚‰PNG
+
+   IHDR          ãInë  sIDATxÚíÜ?jÂP ÀáÄøgr$â¦7oàäİDğ@‚›zƒ¤¥¶¶¶öÅˆ_à!Ö$~¶ŸÏ—öz½—Íf“œ¶V«•¤iúi”J¥ğ¸\.Ã~İn÷Ë×/;ŸÏÃqı~?ül6›…çÃá0IO€ìëõ:¼Ğn·£ ²m0¼ïS(@6V«UØ±ÓéD¹F! Ù/a¶ÅºÅ|w‚ŸŞàÀwÇ           ¤ú€> è            ú€> è            ú€> è            ú€> è            ú€> è            _õf³™Ôjµ¤Z­†Çı~Æx<Î§ŒF£(€«ûÀİ ç·çÓé4Ê%¸ºä8¿=u	Š8?Á¥?ÃÓØn·ñÿ          <àÖùF#©T*oãp8$Çã1ŒİnşÀµ€hóşğ×ï{	ş}şÀÍ€[?¾|À­ğ'@ôP	          ğø€{}¿`±XÜgzÿd2IÊårÅä5½¿^¯÷ôşâòG           pñÎÈúÖ°ş€õ           ¬? èú€>            èú€>            èú€> è           ú€> èú           €> èú€>            èú€>            <%àtyîìQ°x    IEND®B`‚‰PNG
+
+   IHDR          ãInë  nIDATxÚíÜMjò@ €áÑ½º¼ğ^À…AÄADÁ+oà-¼Œ ‚ë–´hhùüDIŸÀPœ)õ 0o“”ƒÁÇb±ÉÑétB©T
+³Ù,¾îv»¡\.Ç¹dŒÇã8ßï÷ãëëµd‡Ã¸>nÖ{½^œŸL&7¿×¯éãÙ€¯c:¾) ÷SPx@ú˜Ïço¸ş#é‘~“{×î^           Ğô}@            Ğô}@            Ğô}@            Ğô}@            Ğô}@            Ğô}@            Ğô}@            Øl6­V+îT’Ïv»ÍvoxÈe{şV€ÜOAá?nÏßp8ÂñxÉÏù÷           ÀßÜóŸÓF£jµZh·Ûq~½^‡ÓéÇn·{ıõÏ<|ı@f€ÜOAá_?ğrÀ¿>«_€dT«Õï7O^*          Šxö•ÕËå2B“Q©TB³ÙŒó«Õ*ì÷û×ß_ğ ³ûä~
+
+Èìş‚ÿ<û:¢z½~8ŸÏq\.—ŸO           €çxş€çxş            €> èú            €> èú            €> èú            €> èú           ÀŸ|0ÏËâÂıÁ½    IEND®B`‚‰PNG
+
+   IHDR          ãInë  BIDATxÚíÜ½jÂP€á'ÿÁ»ñr\¼28èæ5èæ‰ Æ¥%
+VZ‹4> ©Eˆıà¼±É–ËåÇt:å6›ÍB–ea2™Äã<Ïãñx<÷¶ÕjŸ¿İÆİŸß}şğµÍçóo¿ô>€ä§ ò€ÅbG£QÍ ~           €Ú¬õ}@0	          ô}@ĞLB           }@Ğô“          @Ğô}À$          Ğô}@0	          ô}@ĞLB           }@Ğô“          @Ğô}À$          Ğô}@0	          ô}@ĞLB          €ä}`³Ù„N§†Ãa<^¯×a¿ß¿~y¾İnÃét
+ÇãñÍ ÉOAåOïÉ ƒÁ t»İøæå^~ø®?„OŸ            ^;Şív¡İnGìù|ûápxİåûú’Ÿ‚Ên—çõüöo¹ßïÇyQ¾9           @ÒµáO¯œöz½Ğl6C«ÕŠEQ„Ëå_òõşÿH~
+*xôò}õÏş           @òµ¡û¸ÿ€ûøG'           ÷'Ôô}À           ¨4à6yóHú¹    IEND®B`‚‰PNG
+
+   IHDR          ãInë  hIDATxÚíØ1ƒ0À³1†ÂÿÿB€ÅE”¤"S¬Vºm¦¾´,Ë#¥ŸÉ9ÇïíÌvv¯µÆ0QJ‰              pKÀ×                                                                                                                                                                                                              à’€ÖZLÓµÖŞÛ¶½³®+              À ÿ>(æyîØq{ãˆ}ß{¿Ğ               —<ÊMtWìÌ    IEND®B`‚‰PNG
+
+   IHDR         óÿa   ƒIDATxÚ¥ÒI
+À Ğ®[(8õş—L‰´—~QŒğH¢Çyİ´/Ö?äB!Ÿ*…Ô(äÖwkÏó½±™´I¤L$¥cß0.Cˆ œDø€ øzZE¦
+dÌÀ&™^A¦€ ¸X D N"ˆ ½' À?˜Edª AØ‰îŸ<Ü’C{    IEND®B`‚‰PNG
+
+   IHDR          ãInë  °IDATxÚíKKQ€ó¢¢¿À‚.BÕZé‹®]I‘‚Pºh‹-Ç.D0„ñ±11…>şAúÚÚ‚QA¥+!Ë‚¸ÕMCµ4Ó¡ÉLççN8ß¹Ü¹¼sÎ™™{>NîI^¾2zĞ(©„fÑ¾€LR÷Iáˆt‚	¶ªÍ¶»/§4î5ßíz øÍu{Íÿ÷z&
+5ï×Ì;ïéÏµô#Õ€[?Ğc˜8îìïmV[Æµø€6dLØİ¨şÕ@*À
+üæ:ÇUúL°½n·aï`ÎÖ:ÇÛî„í6Éï~²+«wG¤ÿ[’¾Àh dR<†âptš–šÁàğ%l~)7Ûk7¥q¯ùn×eğ5óÎn-}Y|`ısY8¸qÇô¯ŸÊÊÖ>Úmxû®akãÁ®^ —$ÍLˆÑ | 'Ôm‚Fú| > €øÊêêb³R÷šïv]¿	¢ø'ÿÓ,>°²²(œŒÜ3}àİ‡E=p÷ xûŞnÃû#S¶Ö9Ş|`hè‘ğü$|@|`’ 8%8Åâ_Åçø | > ü= ¤oJÍ?Õq¯ùn×#ÍÜ®GÂªî:÷$ßÒ×FépË¯Ká‚çÆ˜éåW¥8ñ Xzi·áó§y[ëW	ÏõóÇŸIçâwD LÀto‹õoËá'”l`ø€’–‹Í?Õq¯ùn×eü¾`¾bŞõôD¡¥ipêšEéps•¢p>0c˜>0[.Æˆ±aiÉnÃüdÁÖ:Ç/ü[Ğ>`ŒKÿ}Ÿc‚SL€	ğñ€¢~|Ft,Ü	É€¨L" ¬?`	ùä?À®˜ÀÀñ\ œüúø | >À~ÀW8 ¬pş€%œ?Àùœ?@`BpÏÀ„óğCø@í> €°%óê„êXBıêP¿ ¦¡	&@Ô/à1ÿ&üöı'| > €øÊÁ–YÏ¼»/§4î5ßíº>°_3ï¼§?×Ò—Åö6«Âù@vÀôİj‡òíu»{s¶Ö9Ş| +;*<€]1&@h >¿€£Ó4| > €ø
+ùa…üKÈ €üx~á&h Àx6ÒÔ7„ÀàşÂùa…ó,áüÎàü˜~àœ?@pJpŠ	Ä¿ŠÏ3ğø |@ø{€úÔ/ ~õ¨_@ıê€h0 ~| sÒHÉö !(i`a¹ØüS÷šïv]Æïæ+æ]OOZú‘§®¡Y”7W)
+ç3†é³åbŒø@––ì6ÌOl­süÂ¿máÆØ¸ôßğ9&8Å˜ (êÇgDÇÂüø€Ê$òÂ
+ù–?@ş ùìŠ	LğLÏÀ	ÉØ©Sß> `?à/œ?V8ÀÎàüÎ 0!8g`Âùø !| v€ÀØ’ùõÂ
+õ,¡~õ¨_ÓĞŒÀ êğJşhG"è9«:8    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ŸIDATxÚí=kA†ßİ,ş	Û(IŒñT«"DÔÂH7_&E"¦0‰Wü~@~‚¢B¢ùj¬„”‚Øjc0k±d‡{of58óL7{†½3çÌİ÷avNrøh_.%•çâ½Yâ»J"÷@ s „l­Ö%I'†¤u»¸Ú=`{c?ïü«]’’#}ùæJãtö”G`ÚÙ×]í•ç@3ÛAŒÜéo˜T¼îjÇ¥¤-Z7³¥ûüBšüeºÏ³wm©^)¦½)ëËõÒıœCPª´KÚ»ü®ˆü¿ÒØ×„ à,åo}¾|o‹[šÁàğ,‘ôáİ¼$éäÙQ©Eİ.®ö°ùÀ±îëùû·Gpê\y¦}İÕ:ÆáóóŠÙûæÕ|¥˜ö¦¼}=_º_Ø|àøéë~ù€fÔ1€0	}‡`§í| > €hqqV’ÔÛ{OjQ·‹«=è$/İÊ]G`{Æ.ûÙQÇx Pìi|õJ1{Ÿ½˜­ÔÓŞ”ç/gK÷›\¾|+òı	| za"Ä)â”Dÿ(Î3ø | >ûs@’?–$ÕnOªUİ.®ö×)Ñ’×óz“Y#0í†šŒl?{Ú0ì|à¿{àîbö>|2]É¦½)s¿ëæ~aóş›ƒ±óèWD B@|/ü/HàßvÒ¸ç €À2IzğhJ’4>|_­êvqµ;{ÀË÷ƒıµ|f¡ñ&FÊ#0íìë®ö Å)| >í­L³wznªRíö¦nî6¨Åş}¯cÄ)! ÌèÅö×]Ôqä“ı,H$ö° >;`ÿ û&ˆSB@à„ìØØş€ÀXpş ç c÷ çpş â”ó8€ß	Aôâ•Oğø |€%ùÈ_ ğìò¿€ü„	 !ğş$üøù'| > €hkµÈSŞq¢ÈSŞ¬nW{Ø|àHG_¾¹Òx=å˜vöuW;ê„ÏºÏ³wm©^)¦½)ëËõÒıÂæí]}‘ï`ULğ €¤ÑwàË÷6ø | > `ÿ ûàğ?…ıq¾á<€à<	wÚÈo€À8€óàÑ{€ó8 >ÀùˆSÄ)!ˆşQœgğø | öç€Dşòü/€¿€ü‘è‚è_ÇÌB@şïøÀ·4î9@ $ğL’<*ò”yÊ›Õíâjwö€—ïûkùÌBãLŒ”G`ÚÙ×]íAŠSø | Û[™+fïôÜT¥8ÚíMİÜ/l>0:P‹ıû^ÇˆSB@˜ÑŠí¯»¨ãÈ'!ûXHì`ÿ | v>Àşö L§„€À	Ù?°±M~Cø |€õ çpş ê8zpş ç N9€óøøDÿ(^ù€ÀX’‘¿€üğÏ ùÈ_€0A˜àòßOÂ_Ò8ôš<÷Ö    IEND®B`‚‰PNG
+
+   IHDR          ãInë  øIDATxÚíKkA€kfÿ„¿@!!Ñ€<çE„€xğM£ÍBYÈã`LVı>H~‚¢‚1Í!Š§À…k¼¸˜xèmØæ±{{Lu+zz©­î™éú¨©
+Ù‡Šcqn@¸6@Ï=P€=P„%ø¶VMìêiOÓó$k~¦âcyz$ÍDDºO(Ë¾Ö”eZ‹·¾ÚıgÿÄI¿Ñîï¶{]O¿òèÆjÕĞƒN{ i^G<5/
+~%ló—Ã¿´ b›ğóGswYQúñónĞº¾ŞÚ¤¹8°°Á‘^·'"÷ï‚Ğ÷ó K€ğ@rzoÀÖÏ’ß¡| > ˆYığ8q°ÿô„HËxš'Yó‹ÁNQ–}z¯,Óz\ô8|`¿×*®¼{lèğâğwoÌİış­ÒÏšwƒÖõõƒ;uÉ-B3¢c< `º^‚Fé| > €Èòò\âàğğ=‘–ñ4=O²æ»_‚ıü³4OÁòäü9åÑ¥¥9C‡H1<ˆ¼xeîî—¯•~ñ‚y7h]_0øÀĞĞÏóø€÷‰œœ²Ş?Š÷"ø | >àûs@DäÉóJâàèµ)iOÓó$k~Gã‚¤ù‘ˆÈXÓ²jÓ²±”VMñÔÿÍ:±ÑÆ¯+.>«zA¢cø€ˆ<zjîîù¦~÷¦y7h]_ÿo<àš\½|Ëw>àı‰DÃ`€ëc±ûc9|`§ú½0 BˆDDf&Ş ­ãizdÍ/Æ÷“·•e3Ê2­ÇE[¿l§©„Ä¶”›nz°Üâaø€{ˆˆTæÍİ­õ©;æİ õøõÖŞá7F}ÿ¾€×1Á)KÀ°¼õí]¢cÏ7!ùHDÈ À¾?Pl>@ş ù&§,À	ÉX¯ÿ‚Ààœ¨?@ıëÑ1õ
+Î¨?@ı‚SêP€ßYïÅµMø | >À‘Œşô/°Ó¿ “Ğ¿€şô/ 0!0Áô/`	œ?	¿ÿø€Ààòm­š8ØÕ§úœëñ4=O²æƒtŸP–}­)Ë´=Øïu=ıÊ£«UC‡‡|şhîî/+J?>`ŞZ××>p¤wÄóüNÅ,ÀğĞ{¶~–àğø |€üò¬GÇäŸ?à÷ë>@`‚ğ |€'a£DCø | >@ıêØ©?É¨?@ıêÀ¨?@pJpÊ8÷À^€À|ˆĞ¿€şö…şçBÿú˜xo K@ƒ÷ÇrøÀN#ô{` „>‰ˆÌ.&÷1¿?®úœëñ4=O²æãû‚ÉÛÊ²™e™Öã¢Ç­ß¶‚ÓTBb[ÊMN7=Xnñ0|À½DD*óæîÖúÔónĞzüzkï‚ğ‰£¾_Àë˜à”%`	ØŞŠúö.Ñ±ç›ü$"ä?`_È(6 €ü‚S– à„ä¬×éo€p ş õìGÇÔ(8 ş õN©?@ı>~g	¼×6áğø G2úĞ¿À~tLÿ‚L>@ÿúĞ¿€À„ÀĞ¿€%pı$ü7i\D¬¦y    IEND®B`‚‰PNG
+
+   IHDR          ãInë  IDATxÚíIKQÇgFÉ—È'0 ˆÄ-’Ä³'$ „²˜à2æà‚DÜ.Èò‚Ñ¯ÄÜPD%'Ác@¼ê%NùtúakOÛÚ=S¿:ÌPİı†ÚºûÕŸšªøÍ[±)™B 0¶ ±¸rD ¢ä‚õÅ‰ôwqE‹ã"û¸oÈ^ŸµÜ¬b÷zİùwÁ!­-ˆ%•"¹Í{%?ë¸HÃËòÆ€}}¶üê¼h^ZÕræù+·€¯ÒeÕ¢ùÊÜ„ƒ?W€DÆ¯$¬_šwuAyHº4+’Ş˜Ò>eAèfZ7ÊÖEgşFQY¸;¢ğß	íû\€°@a‚ÛP½ [»ºS3ğğğ‡æ¦ÒßU÷’‹ìãn¼!{}ôñ¹Ñ ú¾Hnó^ÉÏúüÂfˆæ5µI¥øÀİ¢ù¯ï)}| ö¡H:óM$7¼1¥}>¿ğÛw†‹ÄHÍHLÈ± ø A¶ö
+n€€€€œĞôôHú»¾¾Ãq‘}Ü7d¯¶¼hè•ü¬Ï/|`jJ4ü¨C)>ĞğX4Ÿü:âà#‡=iI¿LŠä†7?`ŸÏ/| ®î¹òú8ø€úÄ$FrJrŠÔ?Š
+ÁÀÀ´?2™÷ŸûÓßÍ/{cçwãÙëËâ>¯»ĞÇ´Knó^ÉÏúğsÃ jü“hŞúª×ß]óø@²I4ûØïà#~¼}-’~ÉoÖÛçƒLÏÃÇ^<{£P¿#¢Áö¶8üm9øÀÎ^Bw  	ø€#7ïKw¶¾‹wÜ7d¯ÏÚ×şÿ‚¡1Ñ «M$·y¯äg} É©¯Ô,È€<Ö¼»Ígä<>Ğ“ÍR}>ÚøÀÑGo»HÚ?*’Ş}şÊß×Š$›šµÿ¿€×1É).ÀÄ€z€bs{ŸìXyR?À†$“¡~€úËõÔP?À®˜Ä„À¹) 8!õË›ÁÀÀØœıè?@ÿúĞ€Ä„äTgbBÿb€Û|`a| | |€-Ù)1¿€ùÌ/`~ó”¦f$&¸ 0¿€ÛPı“ğ÷Ÿàààà'´¾(sÍ‹+œÛíãn¼!{}ôñµÑ ¤R$·y¯äg}~á«ó¢yiU‹R| ¬Z4_™›pğÑÇÊkDÒ¥Y‘ÜğÆ”öùüÂŠÊ•×°+ÆX €$Ô°µ[ > > > >pBÔP?@ı õÔè|ƒ˜`, >À“p¯€ù†ààà§DÿúĞ€şôPú.  ÿ É)É).Pÿ(>(  ĞşÈd˜_Àü‚Ëó˜_ÀüÒsb ähv¬~[>°³—Ğ B>àÈ‡Çe®yg«sî¹}Ü7d¯ÏÚ×şÿ‚¡1Ñ «M$·y¯äg} É©¯Ô,È€<Ö¼»Ígä<>Ğ“ÍR}>ÚøÀÑGo»HÚ?*’Ş}şÊß×Š$›šµÿ¿€×1É).ÀÄ€z€bs{ŸìXyR?À†$“¡~€úËõÔP?À®˜Ä„À¹) 8!õË›Ì7 `?pJô ÿ ıè?@ÿ’S‰	ıˆnCğ…ğğğ¶d§Äüæ0¿€ùÌ/Pšš‘˜à,ÀünCíOÂÿ¢”xş7¹    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ‚IDATxÚíKkAÇg7‹_ÂO  HĞ˜ÔˆgO*"âÁG”l\=D%A–à#³É
+>>ïàÍÃ¢â)£ ^ÍÅ ‘MoëôdÆš‰Ñé¥~}X¨ª.RÕÕ3ÛõOmWaõÚA£ä<r7 TÈÛ€  |<Ø>„àÃËºÃ\×QvhI—¤oùa:v¤UY®<ÊoĞ¥0cıfcáûéºCKr‰N½â,ü×´ó¾›2–oè4–GWR’K´ÕËWtHÇÍwV ½Ëxöv²îĞiåÒ
+1òR14«ÑXizÉ[°	Áë	ãÙ¦îr¦MeçKú–ÿêE=>ÒÒ–9ïOú…5íùˆòÿ.(j?V€(yÕğy®Mwj> > >°‚©g5‡Ù¹­âĞ’<:/IßòÃ´_ø@×vcáäÓšCKr‰n|`â‰±¼»§›JIr‰¶úşâ[wÏ?®9tZyëãOÏzvV2m*;_Ò·ü'ká·ÌHÍHLÈYğ6aŞ!˜o[> > > ><x0â0wïphI—¤oùa:ÿÄy–äI’\¢[¸ßX¾wÏ@l*%É%Úêû‹ìÛk<»{oÄ¡ÓÊ—…üÏ=¿¡I·ïÏöïÈôì|IßòoİñØµë°òúø€úÄ$ 9%9%ê_Å%ğğğíïÆÇÕ›Ã³ïèCKòè¼$}ËÓ™ò‚¿•Çå>PnZXoZXx’$—h¿ñ0cü†±¼ÿX¼å’\V_|
+rÃ*½Æ³±ëÃVŞ¢ø@ˆ1zÍxvúøP&ÈÎ—ô-ÿJs^!ğ8rè„v|@ı‰ˆ†`@ŞÇâüåà_ç‹º÷ €€,æ†—Ç«óLÿy‡–äÑyIú–¦ıú}ÁÙ“ÆÂKcU‡–äú)Èúïø• ¸Ø´ü\‚å’\Vß_|`°b<»P«:tZykâaÆğ¨ñlèT¶Ûù’~t^à>PéíÓşû¾IN	!`¨(f¿ü ;V¾	©à@Òø ~Àê¨ ~€úNÅ$&ìB Ó pBêŞÌ~  à<ÀıK<ãşîàşî 1!9Õ•˜pÿ {€Ç|`z| | |€#ı~úĞ¿€şô/Pšš‘˜V€ş<†êß„?}   >¼t{Ò¯ëp;ºKòè¼$}ËÓ~áë7ßO×Z’Ktëàï¦Œå:Ë±©”$—h«ï/>ĞŞe<{;Ywè´òÖÇ^OÏ6u—3m*;_Ò·üW/êákÚ(¯àTLXV | ¨Ş€ÏsmààààÔüÔP?@ı õ:¿ÁHLXV |€7á|ıÁÀÀ¸`©gÜ?ÀıÜ?ÀıÊ¾À¸€ä”ä”¨/”ÀÀÀ´¿ô/°ƒşô/ ıHÏILØ„@iv¬şX>ğu¾¨{` 	øÀbnxyÜíI¦ßí[.É£ó’ô-?Lûõû‚³'…—Æª-É%:õSõßñ+A;+p±iù¹Ë%¹4¬¾¿øÀ`Åxv¡Vuè´òÖÄÂŒáQãÙĞ©l1¶ó%ıè¼À| ÒÛ§ı÷|“œBÀPPÌ~ùAv¬|R?À¤ñAı€ÔP?@ı õœŠILØ„@§à„Ô¼™¥¿!ø ø çîXê÷pÿ ÷pÿ ‰	É©®Ä„ûØ<†àÓ3àààÉè_ğ{Ğ¿€şô/ ÒÔŒÄ„°ô/à1Ôş&ü	"ĞÇO†1ç    IEND®B`‚‰PNG
+
+   IHDR          ãInë  €IDATxÚíKkAÇw7‹_Â›7…	ƒ/<‚'Dñ`4j6®|`|ÌKğñ	|Ÿ“ø@Q<	9
+âU/†NÏnOz¶{v$3Cıê°ĞU3Í¿«zfºşôv—¯Ú7WHQJ…”%u åbÚ 
+EáÈÀÈR>½7Œ­«Şe×úÄpy'ÊÇ«åùŸÓjmë#÷µûö·ÈÍ8Êîã‰âŠ¶Ú·àÃ”B¾ºÓD®õZâÚcÏÿí	ï§ ½K!?9n´Ãö¨ş]÷[” ÛJ‘Å½>Á›	3†k»+VW¾}e¿.É$´~|CXŒÙ¶ö±²=İQúß‚’ôõ !Àx \â1àÛÏÙ©ü ü ü€‚©#†±scÕªwÙµ>?üÀäs5‚®M‘ûÚ}ûË?ĞÚq ÈŒ&)äİ›MäZ¯%®=?üÀ†-
+ùË§#F;lêßuvùgÍnŞZµºòùûuùæÖ¬?.?P 5#1!;ÆğLÂ´C0Û²~ ~ ~ ~ G®Æ;O[õ.»Öç#õ#p!÷µûö—~`ÛöCAfôà¡B¾{—‰\ëµÄµç‡Ø³[!¿ÿàªÑÛ£úwİû=7¦Í¥çÿ.ºsÏŒáŞ=§­Ü½o¿.ßüÀ‡„ï(ÂˆOL
+$§$§„@ü«x®? ? ? ı=Pß¸~{È0ö°ê]v­O<\Î)6yß"Œ/Œ â@îk÷í/üÀÁıÇ‚Ìhì–BŞÄD®õZâÚóÃT{òÑ›CF;lêßuFù?×n˜1<uÔ>Òáˆë’¤çéó=IçÄ¯ˆ h Ò^§¿,‡ø1[’=  C?`ğWÆã™şV½Ë®õ‰=°dÿ/¸<ªFpöDcä¾vßş=Í2"‰2£ã=}Aftiù¹r­××~à|U!¿82h´Ãö¨ş]÷g“˜ÿ6c8pÒÜ÷ºÄß‚%åª½}Òÿ_Àç˜ä”æ€x‚bæû²cá“ı,Hêì`ÿ ûØ? …ı¬ŠIL˜„@ xBö¼›ù? ? ?Àz ÎàüÎàü-œ?@bBr*+1áüæ !üÀôøøø–d5¡~õ¨_@ı-Ô/–š‘˜<@ıCñoÂÏ_ÃÀÀÀòéµY×¼µ£bÕ»ìZŸ~àã´AÛºÆÈ}í¾ıeƒXÑV«üşaJ!_İi"×z-qíùáÚ»ò÷“ãF;lêßuvù7f×vW¬®|ûÊ~]¾ù•íû„ï`ULğ €(‰ğígü ü ü ü@ ì`ÿ ûØ? …ı²>Çğ$&x Àğ&œm¡¾!ü ü ü@M8€ó8€ó´pş€°oü çœ’œñ¯â¹2ü ü ü€ô÷@}ƒúÔ/ ~õ´P¿€ôœÄ„9@„eÇâ—åğ?fK²ç  `Hà~àÊ˜Y×üLÿ«Şe×úÄX²ÿ\U#8{¢1r_»o‹‚f‘D™ÑñZå÷KÈÏ…k½–¸öüğç«
+ùÅ‘A£¶Gõïº?›üÀüÏĞ°Ã“vä¾×%ş,)?Píí“şÿ>Ç$§„€0Ä3ßÿŸ„ì`ARß`ÿ ûØ?Àş-ì`ULbÂ ² À²àİõáàXÔ„ó8€ó8@ç˜œÊJL8€9Àc?0ı~ ~ ~€%YM¨_@ıêP¿@õ„¥f$&„ P¿€ÇPú›ğ/í(ù–7‘1    IEND®B`‚‰PNG
+
+   IHDR          ãInë  IDATxÚíİ½nQà]{£PñSÑĞ)¢¢£@é¨(SĞDHˆ'ˆRQQ!Ä 
+^!M
+Dë"Š”d$S¬_`L…)NÚµI(bñ|®®ì-æœ™;3;¾·ÜÚÚ™ŸªW ± z(  À”!Äè£ (HOA¿Ç,Àÿ>|ëzv÷j³èj0®.}hc­[ÆrBÛ1
+ Xµş@É‰PeT €è¨ŒX @I¥8pñï†§íúÅ½«ç«6ë>ğğv·6vC…É<, )%Âğùh–
+^ €ş@úİ°Ô(Ò{8@4pÎo¶ëİ×æ ü½?°½Ù}_O¤d+]§ï”jPÄ»a‘}~@$dĞ¦‹·€´ ØtH–ñÍéËO?Úõ«G×ç`Ôü9Q¸sÿV»5«®uH¨?°L¹!7D  {u¬?@„â 
+X`ÀŞÁ÷vıúñÍÅ 8ª»´|{óF»ıV<+6? 01?€`Å©âÔ‹K `/0?°,ó‹œ˜ı”OŸ<w8 <'Âh8€ğ dÅéİĞùé+#q€hàí‚Î8ÀÆZ÷ÿ‚ıã		/@ 	ûÚtD(»¿€¢ÀıÎ®w„Ç÷_İO0»	ş	Àß÷#|9µÚQ @Òş 7$BP¡ (P² °À`\É	mÇ(  yÀü 
+Åæ¸!
+ôTFæh@6ëvC…I°$¥Dèü…	/ @ ınèüÿ=h€Â5PO‚ûR2÷¸¿@eäş‘X@›ÎáùÒrq  n¨C^˜Œš~r¨DBı% `Ê¹!
+X ÙS2ı"PÀÑ jiyú¬Øü€ÂÄü 
+X€§ŠS/.Q €½Àü@úùŸOÄq@yN„Ñpş /à ÈŠÓ»¡óÒWFâ Ğ@¸öõx
+ ÈŞĞ¦#B¡ØıÜÎ-wv½ûh }8t³cî#ÑÃ    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ZIDATxÚíİ1Â@À»$¿â%<’†‚
+‰”‚&| 5áFÚáÖîÚgoß´ß¶Vø›†Şš jP €ò 6iH„4PÀˆ  ‚q€  Àå5é	Ç(@¸?Ğ¥!šŒ
+dÀdâ :tu 8€yİ9&ÅhJ‰°üş@µ»ÁD€?vş@‹Ïu€h ZË»ØĞ’õø:ĞQ`2jé÷TB@€MW€¶ppHâ¿œ>×1\æ•?ğlÒP¢ (HoÉøD¨  Õ\my|Wìş€ÁÄı@ †SÃ©—(€³ÀıøûçûGPŒçDX€ı²@@WŸ†öÄOFê Ğ@¹7ş€,@ Òı6*ÅŞ/†(°·ÜîzïĞ€:pz|†c Ü†DH:"  fC@ —×¤'t£@ áş€ûD¨»? QÀ0¹?@êÀ¼îÂğ§WûˆĞşûdığŸSûìà’©4@Ë»ØĞ’y¿Àû&#ï¨„€ ›Îò|m¹:  iÈ!)Lë®sJÈø
+<´J(€ 
+â§cş ª(€@u ×E[ß»?`0q €€áÔpêÃ%
+à,p şşÀùî}CuÀxN„åØ? d tÅñihÿ@üd¤Ğ ”kàxãÈ İ`Ó¡Rìıiˆ{Ëí®÷~Ä×]ï?R	…Ï    IEND®B`‚‰PNG
+
+   IHDR          ãInë  gIDATxÚíÏkAÇw¶[ªÛrW
+æØƒB.RZÏ9¬Å›´PŠPo"Q(ş	¶"Şr(ñ&DÒäØCÒS@H4‡àî’]gÌÌ¦ó	ì!°™ùæ½÷}3ïñxOÔëÍ‰cğã¹Âq `€‹
+ `Àb„Ø€Y K¨  ëU°ä"$`©Ï…9	¼ÿ%Jd­¾§}Óeî„Ç¨  eÊhˆ9¨  6D†›%ğîçØŒ¼ı16çŞ|—ŒEë†µ
+§!IT\J1Bãõ¦P˜À °ş4äëY€°Ñ^™±Wí‘9	¼<•ÔzC=ùFu…+YY£cë3¥$(ÌÓĞ±½~ Oˆ i:ó 4C à,ĞLƒç_.ÌĞğ0²±V	|¾(q`ÒõÕW67×qÅœäPA’
+&Ğ¢$€
+lÉ`„ø[ ìŸBßvÖô¨`ïdH©},€¶{ê®åê*4\„[1õ&Ô $€N	N©@ à,Ğ@ƒhÍÀÁkzhW30tøˆ2	$ÕšL>}û­dáZå*~ ?@xÊJ€ş°  €àÔzÒÀ±øËlÁ>ÓÏ“[WôØÀ¼>A@OoÿâN%Pä·yàì}c60ÛWloí2ßOˆ
+ `y~€4Fˆ+f~4DÌ/`~óTI`:› øyxÓÕcÁÙó =ª†¸S?PÔ·y`ğ7FXÜSÔëMòÇ¨  –ç !Fˆ¡T€
+È ¢%ğ¡şG÷¯OôHàø\$jŞ˜ÄJ ï·yà¼ßjµy{y­¾—{áe¹÷Z}î„Ç¨  eÌP?€âŠ©€†¨€ü Ñ1õEJ@¶f pH[3Î¨0R?·×ñóÍ7¬UäŞëøœ†&qàRŠÒ€À €ü€õ§!ıè?€¸6 Óg@‰¤é35ëê3÷(·ÿ­ïõ†ÙòªÜïzC®d¥™_À•Œù¨ 	 æĞ<ŸĞ €³ '’f(¥¡Ìl©è9Kn nó(@™µ”&2k{]?}Eass]ê½®+æ, ?€
+¤T0†Ğ T`{tL~ #Ä,*€ıÓAèûÑÎšì½¸›ˆ;•€ì·y`š5•aš5½vOşZŞ¨®J½—fMhHı 	§!õxB$€N	N©À `1i˜·f 3‹ªçÔ(­H»xpï1óğ„ç¡i	Ğ À œZOCú8Ö³ ?°H6§Ï@.(¢Ï@æü@Q}”÷ÈºØŞÚ%?€'D °<?@š#Ä3¿ ¢æ0¿€ù²È2› È3›@*ªV9›@æ)„yÖøk»ûeæ³é    IEND®B`‚‰PNG
+
+   IHDR          ãInë  =IDATxÚíİ1kQà™ÙµQ¬ì#SÚXID¬¬ìdAñØZHğˆØ‹ viDRØY­l	!«?`‹ÄjAØ‘ÅÅ•D«ÌîÈî9Üsî}÷¼}¯\_ï7EàO]•E@,€
+ „h¤!Ò@,€
+P€‚ôô*È×ß–Ü^é¶E«ÿ|ãÕh¨¡ G*àå^YÌôqÜOıWtè£^=Ñ;òÃ÷_õ„–c Á(¥!šŒ
+Èş€éX‚„7$/¾L/î^ì>KÓñóÏs0÷Öºrè_zöiZÌêCOé´\9úĞvÆVCƒIWĞ”aøşh–Y   ıjXòŠôY k z:œ³(D=ítüäÃ¤Esÿò©î#ğû‹ÇƒILşéX§o­]zct %K7§wJñiXdß? Š€°éâ#`4C Ö‚à4(W®Î¿ü¾qíLŒCòë—wßã’E8"4Ğ¿tnñbw!Âô¥ØZÀ@A™Ş iH„–c‹†"DSP=x»ßnåzZ 2
+íşÁ¨‘†™»bû&ö @DÀpj8µ  X|Ó*ı7¯·¶¨ê€ñœ£#àüY  Ğ§OCç¤ŸŒÔ plù²  d÷ØtD¨»¿@¢Àıî/p¨o>N­†–c Ü†DH:"  fCèTİ= ¡¼qıN“[ L àØ?@„J±ıÒü³¡ı4 ìŒOZ&ÁĞ”¡ó&²  ş@úÕĞù¾{®Ğ „k`tìhÉÜ_àş“‘ûTB6Ãóµåê  ÒC>˜ì{É5`.P	ùÿ4”†(doÉøD¨ @¢FÚòô]±ıûP "`85œúÇ%
+ °Ø?~ÿÀÖ¶ûÕã9†GÀù²@  +NŸ†ÎH?©4@áØòd
+ Èî°éˆP)v4DsË]ïşH_~kÊdQ´…Û‡    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ZIDATxÚíİ1Â@À»$¿â%<’†‚
+‰”‚&| 5áFÚáÖîÚgoß´ß¶Vø›†Şš jP €ò 6iH„4PÀˆ  ‚q€  Àå5é	Ç(@¸?Ğ¥!šŒ
+dÀdâ :tu 8€yİ9&ÅhJ‰°üş@µ»ÁD€?vş@‹Ïu€h ZË»ØĞ’õø:ĞQ`2jé÷TB@€MW€¶ppHâ¿œ>×1\æ•?ğlÒP¢ (HoÉøD¨  Õ\my|Wìş€ÁÄı@ †SÃ©—(€³ÀıøûçûGPŒçDX€ı²@@WŸ†öÄOFê Ğ@¹7ş€,@ Òı6*ÅŞ/†(°·ÜîzïĞ€:pz|†c Ü†DH:"  fC@ —×¤'t£@ áş€ûD¨»? QÀ0¹?@êÀ¼îÂğ§WûˆĞşûdığŸSûìà’©4@Ë»ØĞ’y¿Àû&#ï¨„€ ›Îò|m¹:  iÈ!)Lë®sJÈø
+<´J(€ 
+â§cş ª(€@u ×E[ß»?`0q €€áÔpêÃ%
+à,p şşÀùî}CuÀxN„åØ? d tÅñihÿ@üd¤Ğ ”kàxãÈ İ`Ó¡Rìıiˆ{Ëí®÷~Ä×]ï?R	…Ï    IEND®B`‚‰PNG
+
+   IHDR          ãInë  õIDATxÚíİ½NQà]X”T*úHF"©èR ”!AIAc(P Š IŠ¤Ey€(â! IKÑ;’A²_À¤J…SÅ˜äÿ°Ş5Şo«ÕbÙÇsÎÌ½3îÄËËåf”ã•LÄQ@¾ &P @î šÜi _ “(@
+
+OÁä° ÷/o¿áv©™.â ˜ù» ’³z2 ¥©ğó³º=¡å ŒZ} æ†D(3ŠPÀÔdF,3€˜â1ß~Ş´îw_Ldg¯•› ˜7/ÿ‘TOR°4~^iX%&!Ø”aîıy‹0–˜ğ Ô
+¿ÆêQá½@ qÔÀ—¿[÷o_=ÍNŸÛ>¸Ì»{@$µëôêá÷ª]Û’tv\øJ©Eşn½@$dP¦ËßR3 `-P!IÁ‡ï¿Z÷We—˜¼oûàv0Ÿº€Hªt:
+Ë‹³ÁçÕ†Pl-P@AW
+šÜ¢€PPôìX}€ÅŒ‹öO¯Z÷k3ÙY`ïä*æp½7ÉyíaÛò…éàó^ß—ê˜ÅúDB`É©äÔ—â  Üp<úúíH-1´g ıŠ·6wÍ/¤çD˜·œ?Àx vÅ…wCçD…÷q€³ú9g UrÎ@ÇúÀêÊ¶ú /@ ¯(Ó¡Pl~7DùÎ®7¿€½Ì&Šú™MĞS}`y¹¬>`9F ¯pC"¤™
+P€¹!°@¿8¾¼E¼]jfg£‹8fgşa ’³zÒÓKSáçgu{BË1
+ xìõıD(ëà†(Pê ~â@Z=}[ í; *îó—æÂÏ+«¡Ä$Ø”¡ó$&¼  õÂ¯†Îğ¿çâ <
+¤qÎÀ@Hóœ j×ëá¿Õ®mÉÆ*;6¿À–Ìü° ˜_àğ|©
+ °¨tAğÙJLÒ˜MĞ€j#ÜQX^œ>¯6ÆMò‘P}`(hrCnˆ@AÑ³cõ"P0ªØ?½jİ¬Ídg½“« ˜Ãõá€HÎkw·åÓÁşû:n8F»bıı(`œJNıp‰ ¬ú†İ3Ğ11Éªg ıŠ·6wÍ/¤çD˜·œ?Àx vÅ…wCçD…÷q€FIÃ<gà^dqÎ@ÇúÀêÊ¶ú /@ ¯(Ó¡Pl~7DùÎ®7¿€şÆaÌ&è)=şºÜ§1› —ëyîÓÙ%Òª    IEND®B`‚‰PNG
+
+   IHDR          ãInë  €IDATxÚíİÕTÇ×CxkL|gğ¶¦W½€R	$ B4àÀ|0008N‚Hğƒ€“Q$„øŸjKkÚ´={·{ï®YátïŸ‰ÉYÿÿY].NŒKïúÈ©¡çB+GcÓĞåm¹÷¬ML_¾—×²á+X/ÓW(@)Û9c*ŸƒÍc‰i+æò¶úçÙÔş<lOL­©—·Õ>wèlØ>‘˜Z˜ ¾‚“‰)eûËw?<T‰`÷TbJõ/µ‰àîi¿Ë©@ ôrlˆ¹b/Ç‚˜0`
+@,*@:@()€¦ÿçÀ;¼g5¸.æ‚	 €À‰À‚A˜
+R– D
+  °úqjltÃgbÇRÓ—o1a{6T°y<5m»áŞó¡‚›'RÓVL]×?ÃGMEtûdjjM­ñÛg¹´P’}ùIjJaú½úLŸ³a÷tjJIdÿ¹ã3){&Ğ¸w6eÏ¢Êrq ²„D*˜˜äŒÄP#ÉtD#š·' ğ6&\a…—3à‚ ©dd¹’¥hĞ­YÌ¥jN`^ ;Ÿf¦­¡¯Îşg1»ç2SË÷;¼ıÌTÁİó™)ZHÔÏM|}!3¥bÊ©úÙ-TD÷/f“ËòŒ1şt‹¡—²‚~;Ë$2ÑªX€¤‚‰ c¢F4Ñ,e@áíŒ$2k& 	RÉÈò$$˜—E;#Ì'Y3¬KÕœ*À¼ ¾»’›ZC_›íÏa
+¾ùÇÃ‘ËÛª?%x´’å3X‚ÇWó¨J¦|.T$îxïZ>*{¾¿šwÜ[.šˆH†Ö²\öh4¢YºˆfÖEÌ3òù€hDÃ•vÑ [3êKÕœ*À¼ ¯Ã&ôÍßSÊÛí­$
+²fûëº‚½á“"XCgE›Óg×‹Q±¸ãƒÍ¢£å³ç
+ NÌ/!ÑˆF#h–2 ˜ú bNÅf“hDƒ0õç~àÌ¬ÎHâR5§
+0/ ‰Nÿ€DÏ@§@¢g Ó? Ñ3Ğ>$zÚç€DÏ€ÚsP h4¢Y÷ŒfP`† ‘	ˆå³HH4¢é›]àÊœïHXr'€šSĞ|€rÎ€sş ×œçü®9Îù\s\g“)s\çD9£˜9®3D­Ù÷Ò ê@4¢™ç{F³(¨D78yClˆ`sŠõÛ1Dô×Ø?ïPeN õ†
+  ³Ê0wxí/ ÜMàµ¿€r7×şÊİ>gyWÅ1»	|Î	.ËCvøœ!æê½	¢Æ¤Ü ÖL@t
+pgäŞĞ÷bRsê{9©;»˜ µ¹²ó8³ µf
+  óÎ.ND´P¬IXe­ˆV&lr–dëE¬˜³FkÂÍcÉ¨¼6A:õ.J·'ÅÔı3J±WÅÛ'’DÊò“I#¹„äTRIàîé¤’¨3úæL¢ŞP`†V&0VŠ‘mp yóÓ“ ¿{Nù^:H\ ÖLàÿ›p÷8û¸zû8zFû¨{¼û¨z‚û°{Äúê¶@¢g -‘²üŞÙ´‘Àısi#1còíù´’¨3úá‚ö(€ôVÍÆf¾Y ú€ÄĞú`J!:	@d6©;–Œ7×ÿÕš)€ˆpÎpÎà˜30:€zÎ€×üÊ9.×œ—€kÎ€K,Ei9gÀ%¶ªøág™U¬eù£Ï³±üx9[»1Ù¿’u$âŒ~‘5³fW³Jb Ï¯e•DÍé‹5a€—ë:%pÇå”À&ïÉí9@4 V`»| »úµ]î .Å­ êŒ@@€cGÁàşÊİŞû¨ví/ ØMà# ÜMà# ÜMĞ?Ã&ò¢ôéZ>(–ªø§õÜ)¶²üçÜ*6€_6s«XÉ‹ù‚ØÑË›yG"ÖìÕVŞHàõ­¼‘˜9ıc;¯$ğ×¼’¨=¯œ‘ÔÅ“Í)ÆåV ª,À€*z{¨³€±WGÈËò¡ËÕ˜(€(À< ¯FR°·VIÁşza$O6
+*××mÌYMIöìz1*Ÿï|ŸsÚZ¨	6‹¢~”ì1$²¢ôùÂK¤Uñ¯7‹Q‘—å¿mƒ"xy«‹1yu»pŠÍ½Ş.¬bµf¿ß)Ä
+ğçN± vsú÷WE¥Æ˜pü³[t‘¤5g\¼N•øÌ4 Ê,  d¬?(²€qÀÑ¤0ôÿ™P ĞşùşÉŞª@¢g`¡€»gÀÙ?ÀÕ3@Ş?0Ö3ÀÒ?0Ô3ÀÖ?àê`ëpõ°öØzØûú="ıí‘şvÏ€˜;¶qw,y99@°7ä¾ÜiNÅ(‰h{Nq9zB2”ˆ50Œ½è ÎH@äçHÎ¨æHÍhæpÍpÎàš308€cÎ Ëü¡9ló\sXçØæ¸D`›3à™1éÏp‰Ôµç¸Dîë9m•Å(ÛüzÎ€˜;5&âîXòr€`o(yù< 8º$È’)ë`J0šˆæ³	(f“hD£îX ÉİÕş‰ıÜû
+öPî&ğPî&ğPî&ğZIfÛMà#Ôš°¿›ÀGèey{7ĞÚ»	|DâŒêİ>"³fån‘šÓGÓFeõÓş÷Z¢îxï€˜7|{İñ$o(yùò`¬&ÉË½Œ€Í‹„‚€T2ÂšÌ"#rhB¢ ÿ¦Nl€    IEND®B`‚‰PNG
+
+   IHDR          ãInë  	IDATxÚíÛnG†ë!rEÊäx†\ºã¹a.ğĞA ‚‹“e0>al08&& ‡“e0‡,p0!äø¹É+ä®ÃŒØÕÎÎôqº»S_ØYêWDäúkkë‡±=L`ãCL`“{™À>İõ…ègš³hÔ
+È™İÇ¢ 3¿ŸG) gá ŠV@ÎâA#9K‡XŒ,fA0sıó•€œ›G™W¬ä¬3o8	¸=Â¼á$ çŞqægk'˜œä¬ŸbÈÿŒFr8ññç»
+ ó/u˜Ø°¦·†R€©Í3ÆäÏwşÜ>ûÄL€‰ˆ­ñ-ıÅ­˜ˆØÒ)Ş)ì$ÀDÄë©
+²âNlş‚æÔÕ
+¨{ĞV„®pI€éÃ! Ìâ$€´CÀä—‰Àfö%˜İŸL*ÑÜ$*µ-Ù¥ƒI4¤=á•¯’((›Ò¥ÃIp´]ñò‘$(FmùwG“`	¸1œÃØ˜|,	‚•3úq$ñµ5»s<ñŠµ€Õ“‰WœÌéıÓ‰
+oè"@ü»Rğp4q¦kN]myGÄã±Äš’;n2èˆØ8;hD¹WËÕ+ góÜ ™ë‚¦Ş¯WÄ‹‰A)VŞĞUÄöÔ`-ÖæÔUÄëéÁÆæÔ—ˆ7ç»X¹c_3oÆÄVY3@Şo‹_§XN&°|,˜t;¢k#)
+¥–ìÆñ4:•ğæÉ4*µMéÊÛb!íŠoN£ lËïŒ¦ÁQ
+¸7–GkLÖÎ¤A1rFÎ¦JòX÷Œcköè\Ú¥×ŒÈè}^…±€'iIñ÷ÔádN¥ÅşûGúÚÓ©´DÅœ:È‹Êè±9Ôºc'K®*.!ónïDèÜØÎlèÚ±Ê€Â—«°Ñ„¤aq©;váÜ7	4vÇ®3o¾Àv0AÖŒ€'à‡3™Àn½ı&pg<˜Ñİsİ–lu"C¡Ô®MfÑ©4¥¦²¨ÔvÅ§3¯Ÿ1J^“¶åg2gLl[çY©€Ÿf3'l¼cş¼Ò˜<½YáâµÎhs.3¢¶¨m3²fÏç3%VÅßÑé5l]Ì”˜odN·2):Jsj*à—Ë™• ­;¶q@¿^É*4)î4ømq¨B¿›Oc­ü±4TÁdàuBò×Õ¡ÛşÏÛ„¤©G¬]áˆQXëc7š÷²¿dÍH 	øpÜäXâX›æ¸?Ã&°~LŠèÑ,G£Û’=¹À£!µfs<8ZsúlÃÈo^äAØÚ¶üù%î•{–ú‚­î•}S“——¹z??Î‹öÖP
+xµÈÓØ¾ş†;áÍœ¾YâÖxwÇ¿_åÆØ~ÚØÿù-Wâúnc_ãMfø˜8ğ5°à»¶º¯ øúú?	 $€öĞ÷0wŠı¬½îş ÆÎ@e öÎ@íş€ïSÀ×Î€+àcg 	Ğtg )ĞdgÀàº3`JŞsöşº¿¸î¨°Y’×:¼›SÕÎ@?ÁÜqİÎ@?®ÅÍiİÎ@N“Â½¡âµBÍŒ„œ(Ä˜HÄšÈ>¡'cBH 	 ût °îtï`Ü(İˆ}o r æ­Úû±î(ïÄ¸3 ¼?ãÎ€öş@è;F÷\o4Tw\É;Şşß“90İ°ÅõÛ»µŞ°ÿf€Š æ´s/@GPwüb&UÌ÷òóìî
+¾
+[™Óí¹İ¾‹[›St!„@ÌY@ğù€n@Æ„ @ù”_P›_;¯ ’_3« 6¿ VN4¿ FF2¿ t>6¿ d6Q~AÈlãü‚PÙVù!²	¬óšää¯ì5•ıƒ&Ùº?F÷¹4¸dx7§¥$†¹Aí¹Iî@ğù€.w ˜9íiúr¢	è’ç 	9”xÿ'$®³ ”rF$€ ­€±=L`ãCL`“{™À¦9˜Àì>&0ùıL`˜À2	,bX>Ì&pı˜ÀÍ£L`RX³•aæDŞÕª^7Y/ÜaÆèúüÎsºÂszï8SÌu—XN0)A­Yï–õS¬BpoXNŒ„.,°1¯¸tBU@ÿd$fq©;Fb€ö¨èÆ¤5’VŒhhFDh€öh€öh û˜»Åş ÖŞ@NÑøÜ0İ(õ„¾öz1)\²f1ö”Ş0Æ€Öœ†Ş0rÇ±iI FñöÀ*^IxDsÍ·f@Ñš		hZ9¢!{N÷èş İ ûí¹?€y{ ¸?€y{ ¸?€qs ôã8ö½J?àzO@†5/¸Ş¨{Ë§°àû€µ/ğ}OÀZ€ï{ïŸ7$$ Ö ˆ7lÅ	ˆ¦B k2Ì·bFd*$ª9•ı_Föœò(¿€òğó0³Šü¬Ü‚n~FfA)¿ #³ ”_+§@î#d(ÓÜ\¤Á&w@•Yàú4¸æ5#$`gî´ò­Pø,ŞÈù(ŞØš5)ìÕºjNuEÉ·KÀİI.0Õ).0µi.0û3\`ëç¹ÀÍr	<¹À&°1Ç&ğlL`ó"˜ÀóK\„B÷#:¶¸qOøò2òßèıµ)MÖÃµ¾àÕ"WÒt3›œ	 $àÃPX“…­œQ¨âVÖÌwagoè«°7sêR”ì9íĞş íĞş íììıİêşç!Ö@/½ï—=ş—n©{ŸĞvOÀfßÀD@H@t•Ût±æ Jc‚Q¸ÖÅ.^kÍbÖzÃĞ…'$dÏéş İ ût€îĞıİ=:dï+Ì©ï{2úß×µç¦wênØRwŸ T÷\î˜&”ŠĞ ĞhbŠ sJv¶ £Ût–¼ä°
+7àÍa¶ÑD5§¡‹’=§üÊ/ üÊ/ ü‚‘_ ûñ­{×š¹æ˜ {ÉœÚfØ¢Ë4ğ’_`;@±çèd" s:B#Ñìœù€ËgÏNæ4ˆ/À4¦F‚;#¬ÂRÑ½!FQ²ç­ğ?ºbÎ&%ÓÛœ    IEND®B`‚‰PNG
+
+   IHDR          ãInë  	IDATxÚíÛU†ë!¼5&>À3xÛ¦¯ö4-€„	!N3ÌF‰‰Šår&„ø&Şø
+Ş•tãŞöîİ«»ÖZU«zfêâ‰™½ş/pÁúÿ©]ÎíÏ0¥>İ÷ÅœàâS©m^,Ì0…ºÌk€•2Ãr¬ÊPZ.ó`óp†’ê3¯¶d(©A€ëG3”Òyğã±%D1¯~:¡„È 7NdÈ©>³?ß· ¸y2C.ùš× Û§2œªëCíÿ×üy×ç(Æ3€ß—2¬Dı õïvèœÀı3™×¸šæ5€¦ùx >úì“^‰™KƒxH€pÂDPa\Ÿa‘€ ,™c*u^ËWå˜Bît|8Giõ“#9J«àÚÑ%5Í~ø*G)ÑÒññ¥DKÇ'r”9ÿr2GnQÍk€_OåÈ-/€[§säRP:¾³”#‡B2Ü=“c¥¾N`ªéÏ6Ík€góä€¥cèÍ†ê ©A@³Ù¹Ih ^PX22 0€ €ë_OPZıÑìÔ%5ÍNOPJ¤`òóÒ¥D‹fg&(!r4»yv‚ÜòÊ†Ûï?À-/€ß¾™ §|Ìk€»ßNK¾æ5ÀısäRÀÃóŒ•oHx|a‚1
+MÈ3€¡N ÒÓK“qDó@£°tl ã+(FÓŒ¢¢]CÂÙ¨÷£)(FÓXEc PÜ>_ ¤†“Ñû’-],PBä`rïR"<ø®@nùE³å9å_.SŞ ¬È¥ tülµ@…˜× /Ö
+äP0À«õc;ø÷6¾Ù(‚Ú	Ìı½İ,Û	ÌhtN€”R¬h¬0€½9C"Ù$íÔ|@@«I^PŒ¢#ê±tl po¹D	ÑÃéå¹åNWJä”w0y´Z"§¼\)‘KAÑìéZ‰U:ªş£àlX™wéùzé%v€J/7J’BÍÿøç/'ÄëÍ²W1æ *ó¶Zo®–NÉ t@¼½VÎ‰ë‹òn€Ä»­r¦ØN€Ô´şü¾dë¼
+
+‰N@­P¬h4 ¬¢±x>N€ñ‡Ñ£iH¬¢eEÓ²x¾ûçü&«fÄæ‚‚ÉĞ@u%çèè«SÅÎ8ç(æSÅÌtÎ8Íz’sèÌÀÂü@§)1´Æ§cóD¬ù" Å¼¡ÀõEù  ®N`0‡‡@€F'4œªV4šíˆU4VÑŒ£¢ÑürƒW4Å
+n¨dÄaÍbŒY³aˆ±h82µx¾{÷øŞˆ«ÏDï¨nÓ”=lûº2bT0ñÙ'à
+©Q Ô}æäı® Ë’‡v	ô¥g€¡}’æ¤ıRôäıâ }{¦ÆÜ€×ş‰NÀÏ›û$;Ş~ E' ŒÔ¼*ÍvÄ*«h¬¢Q)(¼‚‰¤±W2’2÷ŠfÜÆÁÙË˜-œ†˜Z<ßïø^Å¦ŸÉ·	†T}$ß& İˆ$ß& H¾M@|›@ôı6 É·	DŞ/à4z¿€Àõd'0Ğõt'ĞÏ«·Ru ©;‘\ \Ñh¶#VÑXE³w+š¹kyÊ. 7˜¤6v&£”æÎh–Â˜­¢IN¹L-àÜşcäûïû7±pñ@†¡
+½†Í,Ì0D±·áÀJ™aˆ¢şû-,¬ÊĞW\©¨Ø<œ¡Ø³áÖ‘}Äpıh†Tq›hHeH‘„ù‡†äx†‰Ü8‘áT©:ù)š“VJÙ	DßŠÕX+­b‚-˜¨XEcU4ÔØ&
+•´Œ£Ø’‘–ñ\6Ô0&5$Ïm~@jf )Ğ˜h
+4fšgÆÌ@ó,Ğ˜¨4=4fš5hÌÌhÌxÏH™“çD4:ï;¡:€$hÁ×r«h¬¢±ŠfWU4¬)]@Û|áTËØ@4i÷$Í†¦Ïwşş=.yïıGÇu×şØû»ÎôÚ?Ğu&yÿ ×°}.iÿ ÷U¼yöàşm€æÙƒû¤"ÙôüŞıÒÉ¸òèİ? à¼”¦0¼«¤‚°ŠÆ*«hönEÃ6]jÌò»c*DP8Mµ2"hšÏ ,œ€½_ õ6A¥¡ó@òm‚Y
+ê9$ß&˜KAsAòm‚¦\çB×[\o´ÕuöÜû]â¾¶ÏŸ½_à7@ûüúı—¤²@Ó­Ø%éH6õkv)E0­|f’WëE­”İÀÂµ<µyg.P°ŠÆ*š=QÑ‡SNãàtÌeÕp{ÿî˜
+aáÔ À vÀ½å)ò£ÄsáÁå‡F	gÃÃ•ûFÎ‡G«%ö)`è|xr¥D—¸n@}ğt­Ä.qßı\>ğ|½Ä.q¸|àåF‰mIİ€»¼àõf‰MIç€¶¼¹ZbS)ÒPÓŞ^+±’F4¯|áİ–ù\2RĞ„°ŠÆ*ñŠ&z²ZÊØ+K{÷ÜÆ½“ÕT&` °wæ¸g¼æ$fÈóR3äù©™Òü€äÌÀàü€ôÌÀàü€ôÌ@ïü@Š™çü@ª™¦@cf )Ğ˜¨4W ÍhŞù¼ XEcT«h|ï€lMìe4¸¢á~ TÑX01 0€½»€sÏ€÷şî=^û$ö¸©ö¸©ö¸©ö¸©ö¸©ö¸©ö¸©ö¸v$Ï†ÏOæ¤N_˜X<7 «hB»€èŠ&¶®h¸ŞF÷®h¸»€.Ÿäß¾oû©æu ‹f` ã~¿€ãmŠ@òmŠ@òmŠ@òmŠ@òmŠ@êmê› õ6õM|›€ò.‚øµ|èm„$¹ ïm„¤ÁäÖé|AjÉèÎR^Ë²¡ ¤ê¼ $z  wò¥ìß¾÷G€T=€KªPè±hf  ğ/Féè’şGÛp    IEND®B`‚‰PNG
+
+   IHDR          ãInë  
+XIDATxÚíÛU†×CxkL|ÁgğÒÖ¾q_@³$€@ğ@P`˜a``pƒ‡ ¨ !ˆˆxxo|ïZºuïìİ{ªÖªÃv\_L´»ë¿rêÿ§¦Ê<ûüKmˆcÛ*VLL@Çñí K;*À–mÅX@ÇêÎŠ”€µ])hë»+RĞ:6öTd$	èØÜ[‘, ãâ¾*óôÏ·cR…|¼¿Šâ{gF@ˆ1—T=ĞççPˆÀà )Â+@JDP€„ˆ¨ n œ"À¸D pˆ@ 1ı­$)"|ßI€ú†yê¹gÚ!B|Ïk9¤
+	á«@%$ôm€Tï‚`„`¾‡à”ú~¶€\Š€`[¾ôjÍNÔ¬ì¬Y“Õ]5 gw×l€­Ùù=5(oøŞk59(›ûjrĞîøâşš”${şÑšŒä|à“ƒ5	&·ÃıôP%ô¡ìõ??\÷`7™€×˜¨ĞQ"šÑü"{NU4+ (>Ó–S†YæT" 9#Éâ^k&Q˜,¢5§TE‹=_ü|`ãõ‘Ş¶|óàH„ /¸xhÄNPÀ‡‡GìDÑ'GF¬€¬Ù¥7Gl€\~ò `súÅÛ#PîøÊÑ9h{şÕ±)ÉùÀõwFQ ïŠŞşæ»£ìóF+¸ubÔ£& ãöÉmD“eÍJDS"š-Ñ@®ÑÈĞù@Nñ˜Õ3T™@²/¶ã¤Hœ‘Vá¤ˆFÔœr-ö|±óÏŞiDqö„_<ùRx›Ò+Ç¼®hD¶å×N6ìD}Áõ¥†•¨€›§V@Îè›å†°5ûv¥aå¿[mÈI2§ßŸi¢@ßÉvÇ÷Î6=ØçÇ¨ØóûkÍµ|àÁ¹¦G5 øi]Y@oÍÔ”ˆfËE4Xƒk42P@-ò»g9$÷-€Õi
+õ†E‹=_Ì|àê’Ua¦!¹vÊŠ3×]_¶¢Ì	¸±bEqö„_Ÿ¶bx›Ò[«V¯€Ûg¬Á¶üÎYËNÔÜ]³¬€ŒÉ½s–”3ºŞFÁ¾“lÍ¬ÛìóCD½áÃvqsúhÃÎ â¿o'¨Ùó_7mj>ğû¶$$[$¢IıíûŒ1‘Ì¼ÖZ<5 {C®,`±Í©–I-î¸(ŒÆÌ€s~@rfÀ;? 53àšÎHÌDç¸g¢óÜ3 ùÎ™ğü ×Ì j~€cf i~€rf {~ wf@e~`zf@m~`<30Ñ˜˜FÅş|¡™ fNy¯éQuÇ¿ml× ^	ÅY8[ &H^Š•›	doå¢Ì‚æ´8£" (THîpîÚ3Ü? ±g ¸@bÏ@tÿ ÷ĞşÎ= ıœ{Àû¸ö öpì@ï Ş3¼€jÏ€TWœ³gÀ»1ïğ!âŒº=>Ä¬Ù÷§FND½á½åÑâîø‡•Ñ*öüÇÕW&K.’ì¬NÉH—fc2ì©Úé	-^ŒIP[C€Ä‚àıîûÑûœ·	@÷8o€ïpİ&@İ/à¸M€º_Àq› }¿€ú6AÒıÊÛÉ÷¨ndß/È½M Ü–§Ü&€ÀêŒ®©£°[³koÖADÌé·k/bîø›£µQ{şí±zñ|àÎ»/÷LVÃIZrçu?É,Àõ‹ğ,{NqÍ¤d¬[¹Äÿú¾“" (Ô´^n‡ÛV‰áĞq|{%‚iÿú£õ‰XÚQ±ó€i"–mÅÊ¼ ‡ˆÕnk»*6@ÖwWlôILÀÆŠIG±¹·ba¦%ó¿¸¯bÃÙ”|¼¿šcøëÑ¶¼pé@öİ³X¬Ùåƒ6oøåá*
+¹7œ„9Rya1§Î!˜7*'búİ6oU3»cP8qôE÷êxÎ tİ3€¸m=§ºÀmÉƒ$ÿø}N€¦'PP¬YP,şü@ï%ç|6}¶ùHñ‰[¦ğ„dóÎ¢ ÇÜA2? .î‘=?€*îrÍ¹ó¹HærÍ DÎ@ŠçÎŒ‰ú_ÁÜ™6k™`÷†¡yo˜:3@fNSgÄLÏ¸c?’7Y f0ŞPgØ©|Cu$oZHÒyA‰,À)@2 JH4B‰…IHŠ7,Š€ÿşşŞšåîÀì
+€dèıĞ=˜ µ ²# %À ïˆíÈ	0@ûB»PÅ="¢ûB»ĞÅ"¢ûB»(„¾ß÷¡İ \ßuvÅÃ½ ®â¨,aêıéï‚|vÏ@¨øô®Vkæ0Ş3 â]ºYŞ-bğÿlsš#¢Û/ "`¼g ËsfN99@Î=“›änô799 Å9#F°¹cu9bŒf:Rò" Xš·úûZw&÷4nÌÜ/à¼MĞõ…Ñû”· áÅÜıª;˜eæ~Å‚”er¿ ÷ş@N‚Òß/È¹=’ Ìõ9·0Åƒ¾ õ6T ÊaoÄˆX³Ôâ|°8[@‘dN)E¨
+@­ÂAc"U<êŒ¸‹ƒ­Wq”7¤.œlN)‹g»cu)BŠ5+Š€ÅpuÉ¶š˜k§l«‰¹¾l[MÌÛjb¾>m[MÌ­UÛjĞÿRóÉ?Íí3¶•À—˜;gmËM(-1w×lË‰ë·§Óé‰¹wÎ¶\Äš“N„¹Ş¶!æ®ôEƒvFÖmøRß¿Ï»³f/Ø9Ä½á£;!©+¦0¦ß·ém¹º;Ö,-€ÄiŸ±fÅŞP²8*¢¡.rÇ\E“ì¹º Š,À¹$³X³" (óe~€s~ éü@
+dó©Ìä=?KÖü@ˆaoà{.k~ÀE¬I>o°3!0İÒø“230~~š”~°hRÑıµf‚š7|p®Ñó†êætë¸c­ÂIX¬™fq° Vw<>Œ(]xÆœJÛsu\9@ÙÀP’" ì`Ù?@Áî Æ`vp` {¸0œ˜Ø~ nLl? 7ÁıX†?j!ï÷@‰5¡wÍpï@ÇÜúwÇ3¾}!\ïÌé]¾}1†ß@[³Ø>ãotMcÚí&øo™Óÿ¯;fuFšÅ£D¼¡fq§ qw¬™,† É,@Ì/ÌJˆ˜bN‹€Å¾_ ¡¾G|¿@Cu‡ ù~Å‚¬û¹÷²ïäŞÈ¾_{ û~AîıáO7ôı‚Ô»±³àûÃ›Û˜†#vÃÀ`o¤´]¡;bŞĞwË@ü7§Ã{*ætú¦AqÇ‹gN¥ª¾;Ö,î</Xò… ñ‡ÙÎ(§0¹5KMWŠ9-Ôüûñ¨ÄùÜ—    IEND®B`‚‰PNG
+
+   IHDR          ãInë  	YIDATxÚíİrUÇÏCxkYåø<ƒ—37™2ŒHŠÈ7!@‚P(` >B¤¢(úŞø
+ŞµÌÀ.;;sfÏGŸî|ôÅ?Ù™í_ªR5çÿßŞn5²7N©ÑÁ8¥&öEÀ)5•EÀ)5³?.}¸çPs"àP^¼ ˜?µZÅ€…CPª³x°x8*µŠ¾ÿñ¶ÔÕ#P¨»pàúÑBKW¼ ¸y,‚j*^ äÜ:SSñ6@®ï‡"tõ*^Èuo8B“Iñ
+@®•/"9äzøeä%ÓâZ€\O÷YË¦pO€\ë#}ÆÒxï£Õ°q¦ÏH.…Û u7wB<ík”káF€n˜Íñ¾Š|W :iúäZ´€ñ&    ^ ŸÆÀ)5½?N©™1pJÍŒSêâ¡8Ô6§—?‹Zew|$JUìùÕ£1P©îÜ©¾9…tçNuãx!ÕÓ|{"†P22&·‡b!cg´4¶¬­ÙòÉMÎŞğş©Ø[ŞæôÑéØK(îøñHì$—âZ{¾~¶ßX®…{æcı=eë­ ÷7ÊÇ¤– ê2–6'ûk…åK º€âÅT[˜¶Ü8 QTŒ‰ € l-€…Ïà”Z< §ÔÕ	pJ]J€SêÆp”ª˜Ó›' R­;¾õú
+é~êÎ©B«és)µt:Pj:êµî$€-“Ï¡Ú +gÀ”)) œM KNÎhu,9[³µñ|ååŸL&à#sº1•8Í?›N¬å[¼âš0Fa­=ßœh”O`ğbn@+ß,À8 xya "Œ, @÷ x5?PóÜ@‘ÔF4bL@ €à»3)pJİyıƒSji4N©»c)pJ-§@¥Zo¸2‘…´îøÁd
+¡ÕhÏM¥RMÅ€ÇÓ)`Ê$(ü0“†l2À“ó)øÊ6(lÌ¦à#7Tøq.WùX²6Àó)¸ÍnÎ§`+Tsúë¥l…î»œ³xÉœ¾\lváZwüçâ`EX9€À_WÛÂÎŒóP9@O€Ğ9€€*`0Šh¨;€xC€
+Àİ‰8¥–'3à”Z™Ê€SêştœRÏeZµßk}ûšZÉ ¤zšÓµó„R¯âÀúl!dR¼ x:—¯l3²;¾«\3²;¾˜‹|2Àóùlå›	” ~¾”02À/˜
+Ë– ^|•‰°Mià÷ÅLÌÿq%ƒ^
+U¼ xõu:…,\2§_Ë
+…Î´ TY º7d@‰h8B‰àîXñ†  Ò? ı[ª Ît¾®8zHúŒİ1GÏ Jÿ@÷s½õ{›âNı™€sÿ V&àÔ?€™	X÷`gå„„¨O@@Õ' MH¨ú´UŸ€ÖPõ	Xv JEH8{Cv€P Û?¢±k&  ódşÀî™?Pw®»NQÍèVëZE5g€dş€mqëùİÏöÎ×\ŠÏÀÎ¬æ„ÈÊ!ò<k ìyÖ=$Øó¬ìyÖ		ö<ë€{€µ1Á'`ÀY¼dÍØ¸@$¢ÙÙ	‰L` ı²¿`÷î/¨;|ê®U!wèÔy½
+¹›ÀÈ˜„ÜM``»w î/{îºw uOñÀuï F8Q ¸î@KH\÷`A(×½h	‰ëŞ´„Äuï€/ÌÖqÇ  Ñì˜„ÄyH&çğÖ€BØ: #{#à”Œ€Sjb_œRSYœR3û#ÀRİá³×=jî@29‚×İ§æFà+/k¶p(y›ÓÅÃt«û‘YwM.ßâo’#´ÔëğĞy-FñàúÑrQfå-Ç"òL À‘	  $$\Á:€M& ŞP @ *î˜"Ø¶\B"îX ¤@ú‚öØô ÷Øö öø»c†Úş“>¬+gT×[€jÏM­ŞÌâÖŞ»¸“9e„#g$   Æ [~H¦Lk&@æÈüİ9ÀtÎ€NŠjÎ€î~E5g uş@0kf2ƒ€Äêæ»ãÎ9!ŠyÃ|A¨âÆæ”@ìL xƒÍ ÖL XŠS1gqr€Z_@•x;#ìÂ^Ö£°˜Sı²¿`gì/èµ›ÀD*än“ûUÈİAö ›A­Y¯½dæ´no¹;îÜ[²x£5kí.` '¶_B‚•	°æì •»6!a1§µŸœr:c2€Æc9GÑZcÂQ\ëŒ(
+[³P…Åœ
+ÀÖ¸;‘§ÔòdœR+SpJİŸÎ€KÅäá¹lUw¸t}µ:“LÚ6÷+ø÷´´v>kT_Ğ	k}6«U0cÒëé\VRPgÿı…º 6.d…H¼¡"tñ’/è† (^1&ì T™€‘9e™	Ûsv€Æ»"!ÑƒJ9q ëc9GQT ocÂU¸ÖšQs* Ò? ı¹ŠÇ1WßÀ»±á=åÕr=åÕr=Fı¹=Õ3PÛ?P—PxD•÷p×&$¤î¸TømF@ê»‹“t'$”Å+Îˆº¸S@¾Á# uÇ»+!iúğ3(€íA åTÌnN9Š:3&\…{ˆ9 ™?@¡7ƒÓ™æ¼Ç0s ô4¤7P]-G4g@÷ŠjÎ€öDD5gÀiş ‰1¡š3  š3 èœ1rÎ€ Ÿ/Ğ‹9]K %€µñrq/ Lò7(¶ÅWÅNlï„Ä¤:€Oà€yn7vÇ;Ûœr¯ °8#®ÂbN@ö´Ÿ;J#ê}•§!å®‚ÚÇqÈİ½Ş£ ¹›Àä~r7×ş2cr7@ÈİF ­½!vÜŠ!›9]!ÀòÉ˜×soØ0@vÖŠÉ  ¶_ˆFğ™ÖfZ¼Öœ†Ê¶®9c"   Ü ÿÂ…³|Tır    IEND®B`‚‰PNG
+
+   IHDR          ãInë  	“IDATxÚíÙnG†ÏCä6Š”'È#ğ¹L'}Õ0TˆA 2›ŒâÈIY`™=,"ˆ¬ÊCu2-zÔ3ÓÕ}ªê,c|.>.,OÕÏ•ëÿıû˜Û•”¼¿ëcõ÷Ã¹=YIöò!õg`~oVRryÍğs°è²2•˜Ëk`òËû² R.oĞduæ%õb” 	ô¼ûá.}5ê4„´
+á %¢S€„” Nh11Ÿ‹Šº€¦UCàŞ+‡¨Ğ2%@ZD« I!$Ä ÄÁœ,€`L Ìš—T ]qã3°´//)y†5?Ëûó2•˜·`ıYX9—)¤<H‡Ÿ3§WæA¤¾ˆ‡gxİñµÏs/o—=73‘h¦$³—ÌDDc		w& bÏÕø„ìÜ„Ä"šÙh¶mB{†¨3RĞ&ÆÌ©	Ğpı‹¢Lûúiû,¬-ÊB_mŸ‡cEKÌpòøöxQÆòmSY³'Š R_ÂÍ³¦¼áÍ“…Êçx}¦ª9ıI[À­S…å&À:$3œpfbæT] FÈÎJH,¢±ˆ¦5¢‘ÌDí¹º ¬3§&@_Àge
+Ø‡‡ïópëÿb	rA3àö¹ACÌû¯í¸s~P†’ò<6/ÊR_Á“ç9£­ùÊ§xó\5kvaP¡&àáâ BÕœ>^RğëòÀò0c	‰T&ÀêŒÔ„
+yû‹h,¢IŠh¸şØaL€TàûÏt(aæÔÌ€;ó®ŒmF{ÎÍW†dF{Î‚­EW†eF;Îƒ{K®Ä’òøô	.ºCêë×wnå-;/”Oğ¶óÅÉ“KnqOWÜ*Öìùª¡"àÅe7BÍœ¾¼â*Tİñ«5e¯¯:(º
+‰¡ ‘	°9#KHfªCbFDõ,—Î¦|wĞ‘ìŒR³ Rk–z±™S°½û©¤ş Eg º?@ÕˆêPv‚ûÔ±ş€Fg@­?Pwš€Fg 	htš€Fg ‰Š7|vi0BÍœ¾XTè%$«ƒ
+İ„äò,vH¤%‚F&@jÍ,!‰1å¥DxÍ)·ï«X"è|–seÁÆDãr¯3’¸mÍ¸.6sj¶çü”9>@jÎ€š3à¤æø ©9>@jÎ€_0œ3àCDÀpÎ€1gtûtÑŠ˜€»sE+¢ŞpëL1…¸9½¶C\À£óÅ*öüÉ…b„Z>ğl¡¨ L Êˆ‹
+ĞÈj~[*h78ì¼„$4˜„=¢A=J¥í8›=¹œL@’/Ğ¼<I ‹5“¼ØÌ©	Ø~ûbv` Îİ€s7àÜM€8w` Îİ];jØ}Áú¡¼v‡óNDœÑwGr/"nÍ½ˆyÃå­ˆšÓŸçSˆ
+¸}"ŸBÜoÌÇPÉîÊG¨lpxx:áDÕ'šË+TWL>=û‰nBeÏS² Ö%›¡Ñ:i;NêIåZ®8J ‹1Ñº%ÀÌ©	ØævgeØŸj}çø€s{²ÒGÈÕ®sº€ù½YÙFÌÏvßY]À¢ËÊIRmçuËû²²Iêgò¼>`uV¡|fÕgb`ók2l®ÌP°:£õÏ²^XlÊza÷†ßÎ:1§7d^dZ4G3/böü—ãY+¢ùÀİÙ¢¶¾Ì¦ épâÁWÙ*+&Ÿş¨eN¹DŒæ–SÛñËƒìyJĞõG4 aL›gÎ®9óš—O	PqFZ›95Û£?ÀÕ@õ8;½ıîÎ@g@¢3àíHu¦úÒöş@_g€½?Ğ×étuDú]±ş€¯3 ÚhëˆöÚ:âıÉÎ€J ÙëˆÍ itZû"3HŞtšˆ¯˜D™S©Ë;İ1UĞ7Û‚ô7§1Ã6A2@¹c3§&À˜ ›?À5g =€kÎ jş çœŞùÜs:çHÌğÎš3 2 kÎ€Èü®9bó|sÄæøæˆÎh›3àƒÍNÎğÁ&`rÎ€VwÜœ3àƒİ×s|°¨çø	(†s&ó†Ò™@«9Õ¸|ÊSä !—På ]—³¿Š£ÿüß|	0&Àpî&Ş_@½› hÇnÀ¹› Cò›³ÿ sçnd¯â¶İÈ´í&À@ê&w` 0¹› ¹3jî&ÀÀbÍêİXÔ»	0°™Óán¬îø÷µA/¬ş¼:è…=øûÚ`DÓ+Ö_-[>rÇš—W¨²€˜Ë[P”B&ÁƒdĞ&Æ|	0&ÀÀyWA›Ñ7ßOl.„í·~?%Qï­EGFôƒäŞ’#!ZÀƒ‹„¤'Ù£e—Lò›ğÉ%—D²€§+.	’WñóU‰€—]4d¾àå©1yµæ‚!ğúª†ÜšıqİÁâÿúÚ¡ağÏºCÃfÏÿıÆU4}`ıµ& eËÉóØùv yù”;¹<u+HfQ8şØAM@›sF&À˜ ĞèŒõ4:cıÎÀX@£3ÜHíôR:dıØÎ Y ¶3@Úˆéöb:äıĞÎ K ¤3ÀÒé°õ°Öş ¦3ÀÚÀtØûm= éŒ“í9ÅZ:Ğ¼<H@jĞkÏ¹s Ñ|@]@ˆĞLGvnD3‘µhLÀH€Ôœïü©9ŞùRs¼ó¤æxçHÍ ›?;g€tş@ÌœÒù1sÈç„Î Ÿ?:g€eş@Èœ¶ùØ9ló°sXç`æ°Ïè›3À> oÎ ûüæK·mŞ€wş€¦3@yy° êË½¸² rk¦.€BhoBbÍLF4fÏ·g>²› µ¿€s7jçnÔşÎİ¨ıœ»	Pû8w°ì/ÙMÀ²¿ d7Ûşìn¶ıØİ¬û0»	Ø÷ôí&À$ o7†ôA(»	0¸cßn‚>Èºå¾İ>X~{Ş¶›`’$wÌáŒÑ¸.G	à¼¼ÓH\6&ê8E€V2bÍhÇ¥F*ÂêCW’˜;6ÿ.·|oc     IEND®B`‚‰PNG
+
+   IHDR          ãInë  àIDATxÚíØ±­Â0Ğ,ğÊßÓ¥``%&`*6
+’Q„âÇÖ·!9Å-"ûTæ¾×ıü†–é                šî×óğW n—ã3ÿ,  `?€¾?½R0ı1½<¤ê¿!À;B#      ø(ÀÒ;Ş> Ôò\ÀR­O”  `€Øî d¿ü§LÎ9Ó5Àª>rğÚı‚F      P›·XÚ/TÄ  °/ÀÜî ÚS›œªö¹İF                                                                                                                                                                      Ğİ¯çaÀír|¦: \  °_@ßŸÚÆ4{ŠZ^®      Dab^›ï„jÈ©ö³€Ò   l†Ö÷ıAÊ7ÅOñôàØôœò@QH9¸ôr     `ÌHêYØI3İ    IEND®B`‚‰PNG
+
+   IHDR          ãInë  šIDATxÚíØ±Â0Ğ,@CIO—‚€•˜€©Ø,HHF‘eÇN„_ñ7ñ«œ×NÇaËt                                                ›÷ë0€ÇíüÎÏ á‚¹   ´èûË'U ãÃøòªC€¡      ì
+07E—÷û„Z^
+˜«õÙ€µ  øÀ·İÁšıBöSœ39—L× ‹ú@Î‡—î4"      €ª€ÔôÜ`jÇP
+  @{€xPõ)NMÏ Õû@¼?Ğˆ                                                                                                                                                                      ^Ô|nç±²ê    IEND®B`‚‰PNG
+
+   IHDR          ãInë  šIDATxÚíØ±Â0Ğ,@CIO—‚€•˜€©Ø,HHFÈ2ÁÈ+~“Â~•óïºÍn;,™                                                                               `qÀõ|ŞàrÚß3 ^  €õ úşğÈì€üÃóå)Mÿ† 9B#      ø*@Í$ïjùTÀX­>  À ^í¦îBOqÍä®Â} æàÈ~A#      h
+(MÎë ŒíšJ  X ß4}ŠK“3@ó>ï4"                                                                                                                                     €$yváîÌh    IEND®B`‚‰PNG
+
+   IHDR          ãInë  šIDATxÚíØ±Â0Ğ,@CIO—‚€•˜€©Ø,HHFÈ2ÁÈ+~“Â~•óïºÍn;,™                                                                                                               `qÀõ|ŞàrÚß3 ^  €õ úşğÈì€üÃóå)Mÿ† 9B#      ø*@Í$ïjùTÀX­>  À ^í¦îBOqÍä®Â} æàÈ~A#      h
+(MÎë ŒíšJ  X ß4}ŠK“3@ó>ï4"                                                                                                     €®gyvù2³     IEND®B`‚‰PNG
+
+   IHDR          ãInë  šIDATxÚíØ±Â0Ğ,@CIO—‚€•˜€©Ø,HH"K¶Qì@^ñ›ö«œû7NÇ©g                                                                                                                                               €î€çı:}
+Àãv~g@8<'   ûŒãeÎê€øÃòò¦C€a"      Ø §M—Tüß„Ñ¼í‹ß  à? ©ıAÍ¡ø)ÎiÏ% jÈ98wÇ`"      hˆ[ó~ ©ıBs@  €}–½±ùS·f€.ó@w€‘                                                                    `S€VmúŞSõà    IEND®B`‚‰PNG
+
+   IHDR          ãInë  ŸIDATxÚíØ±Â0Ğ,@CIO—‚€•˜€©Ø,ˆHA‘%KCl ¯øM"Ù¯²ş]·;ì‡–é                                                                                                                                                                                šî×ó	ÀíróqÀtp4   Ûôıé•UÏÒóË§¬öä~Ô¸\#      (D§éèxÿ;€©–—rµ~1àİ   ü ·;(Ù/,~Š#“ó’é ¨Dî4"      €ê€tjŞ ·_¨H  °MÀ|n¬ş§S3@“>Ğ ’                                    |à"yyvŒâŒ%    IEND®B`‚‰PNG
+
+   IHDR         óÿa   DIDATxÚcè“4üO	f Ø€!•ÿÅ"ÿKE4ÿç	«ıOTú% ÿ?V@á?²\.¹QF$èèü§¼ r ´*S?    IEND®B`‚‰PNG
+
+   IHDR         óÿa  2IDATxÚ•“AvÃ D¹CvĞeÓäX½FbzgÊçé·¼î²À1H£‘œ¾Ï·ö\¯í±~´¯å½ånñİÇ{œ¯í¾^ÚŞ×}¹ìÖ-w	 — sÉ¹ö}3IÄ±“øùóôöÒ2`‚Zé”pbÉÅ%=ƒ¶†Ë=ì— qÖĞFø}X"›úÈ€D	ğì¬ßìØ+2YÁªGBÉ%P@2ópŸ”çìİÀ†°É¶È uÍ¬dbmËŸ^–™Ã¨92)`-J+[ƒşÎN€‘êK½}±X¥ÇÕ@OÅÍÊ¾L]àİĞ@Š:ó¿eêQ#ÀèÈœ3Q–f¿ÅÉÀûtL^Yj3i›ú¬ux¬=G[· Ë!¢s€•5û«ûØ®øÛ“ü¨jÅ­Uùqf    IEND®B`‚-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- GENERATED FILE - do not edit.
+-- Regenerate with util/content/generate_luanti_web_textures.py.
+
+-- A 3x5 pixel font. Each glyph is 5 rows of 3 columns, top row first;
+-- "1" is a set pixel. Shared with the baked textures so the banner in
+-- the plaza and the title card on the screen use the same letterforms.
+
+return {
+	glyph_width = 3,
+	glyph_height = 5,
+	glyphs = {
+		[" "] = {"000", "000", "000", "000", "000"},
+		["!"] = {"010", "010", "010", "000", "010"},
+		["-"] = {"000", "000", "111", "000", "000"},
+		["."] = {"000", "000", "000", "000", "010"},
+		["0"] = {"111", "101", "101", "101", "111"},
+		["1"] = {"010", "110", "010", "010", "111"},
+		["2"] = {"110", "001", "010", "100", "111"},
+		["3"] = {"110", "001", "010", "001", "110"},
+		["4"] = {"101", "101", "111", "001", "001"},
+		["5"] = {"111", "100", "110", "001", "110"},
+		["6"] = {"011", "100", "110", "101", "010"},
+		["7"] = {"111", "001", "010", "010", "010"},
+		["8"] = {"010", "101", "010", "101", "010"},
+		["9"] = {"010", "101", "011", "001", "110"},
+		["A"] = {"010", "101", "111", "101", "101"},
+		["B"] = {"110", "101", "110", "101", "110"},
+		["C"] = {"011", "100", "100", "100", "011"},
+		["D"] = {"110", "101", "101", "101", "110"},
+		["E"] = {"111", "100", "110", "100", "111"},
+		["F"] = {"111", "100", "110", "100", "100"},
+		["G"] = {"011", "100", "101", "101", "011"},
+		["H"] = {"101", "101", "111", "101", "101"},
+		["I"] = {"111", "010", "010", "010", "111"},
+		["J"] = {"001", "001", "001", "101", "010"},
+		["K"] = {"101", "110", "100", "110", "101"},
+		["L"] = {"100", "100", "100", "100", "111"},
+		["M"] = {"101", "111", "111", "101", "101"},
+		["N"] = {"101", "111", "111", "111", "101"},
+		["O"] = {"010", "101", "101", "101", "010"},
+		["P"] = {"110", "101", "110", "100", "100"},
+		["Q"] = {"010", "101", "101", "111", "011"},
+		["R"] = {"110", "101", "110", "101", "101"},
+		["S"] = {"011", "100", "010", "001", "110"},
+		["T"] = {"111", "010", "010", "010", "010"},
+		["U"] = {"101", "101", "101", "101", "011"},
+		["V"] = {"101", "101", "101", "101", "010"},
+		["W"] = {"101", "101", "111", "111", "101"},
+		["X"] = {"101", "101", "010", "101", "101"},
+		["Y"] = {"101", "101", "010", "010", "010"},
+		["Z"] = {"111", "001", "010", "100", "111"},
+	},
+}
+-- Luanti
+-- SPDX-License-Identifier: LGPL-2.1-or-later
+-- Copyright (C) 2026 The Luanti Contributors
+
+-- The showcase world.
+--
+-- The map is *authored*, not procedural, but it is not a committed map
+-- database either: the layout below is the source of truth and the world is
+-- stamped out of it on a singlenode mapgen the first time each chunk is
+-- generated. That keeps the repository small, keeps the build reproducible,
+-- and means editing this file changes the landing world on the next fresh
+-- world instead of requiring a map blob to be regenerated and committed.
+--
+-- Walking tour, south to north:
+--
+--             [ theater ]                z = 34..62
+--                  |
+--   [ library ]--[ courtyard ]--[ gallery ]    z = 4..32
+--                  |
+--             [ plaza ]                   z = -18..4   (spawn)
+--
+-- Everything fits in x = -36..36, z = -22..66, y = 0..30 â€” small enough to
+-- walk in about a minute and small enough for the WASM heap budget documented
+-- in wasm_porting.md.
+
+lw_world = {}
+
+local FONT = dofile(core.get_modpath("lw_world") .. DIR_DELIM .. "font.lua")
+
+--------------------------------------------------------------------------
+-- Layout constants
+--------------------------------------------------------------------------
+
+local GROUND = 8            -- topmost solid ground node
+local FLOOR = GROUND + 1    -- first walkable layer
+local WATER = GROUND - 1    -- moat surface
+
+local ISLAND = {x0 = -36, z0 = -22, x1 = 36, z1 = 66}
+local BOUNDS = {
+	min = {x = ISLAND.x0 - 8, y = 0, z = ISLAND.z0 - 8},
+	max = {x = ISLAND.x1 + 8, y = 34, z = ISLAND.z1 + 8},
+}
+
+local SPAWN = {x = 0, y = FLOOR + 1, z = -14}
+
+-- Theater screen: 6 columns x 4 rows of cells on the north wall. The audience
+-- looks north (+z), so from their point of view east (+x) is to the right and
+-- the top-left cell is the westmost one on the top row.
+local SCREEN_Z = 60
+local SCREEN_TOP = FLOOR + 8
+local SCREEN_X0 = -3
+
+--------------------------------------------------------------------------
+-- Build op list
+--------------------------------------------------------------------------
+
+-- Ops are axis-aligned boxes resolved against whatever chunk is being
+-- generated, so a chunk only pays for the ops that actually touch it. The
+-- alternative â€” scanning every node of every chunk and asking "what goes
+-- here?" â€” costs the same work whether or not the chunk has anything in it.
+--
+-- Later ops overwrite earlier ones, so the list reads like a build order:
+-- ground, then shell, then openings, then fittings.
+local ops = {}
+local labels = {}
+
+local function fill(x0, y0, z0, x1, y1, z1, name, param2)
+	ops[#ops + 1] = {
+		x0 = math.min(x0, x1), y0 = math.min(y0, y1), z0 = math.min(z0, z1),
+		x1 = math.max(x0, x1), y1 = math.max(y0, y1), z1 = math.max(z0, z1),
+		name = name, param2 = param2,
+	}
+end
+
+local function put(x, y, z, name, param2)
+	fill(x, y, z, x, y, z, name, param2)
+end
+
+-- Four vertical walls of a room: no floor, no ceiling.
+local function walls(x0, y0, z0, x1, y1, z1, name)
+	fill(x0, y0, z0, x1, y1, z0, name)
+	fill(x0, y0, z1, x1, y1, z1, name)
+	fill(x0, y0, z0, x0, y1, z1, name)
+	fill(x1, y0, z0, x1, y1, z1, name)
+end
+
+-- Rectangular outline drawn *inside* a single wall plane (constant z). walls()
+-- cannot do this: with z0 == z1 its four boxes collapse into one filled slab.
+local function outline_z(x0, y0, x1, y1, z, name)
+	fill(x0, y0, z, x1, y0, z, name)
+	fill(x0, y1, z, x1, y1, z, name)
+	fill(x0, y0, z, x0, y1, z, name)
+	fill(x1, y0, z, x1, y1, z, name)
+end
+
+local function label(x, y, z, text)
+	labels[#labels + 1] = {pos = {x = x, y = y, z = z}, text = text}
+end
+
+local function text_width(text, scale)
+	return (#text * (FONT.glyph_width + 1) - 1) * (scale or 1)
+end
+
+-- Spell `text` into wool nodes on a wall plane.
+--
+-- `axis` is the direction letters advance in ("x" or "z") and `dir` is +1 or
+-- -1 along it. Which combination reads correctly depends on where the reader
+-- stands: Luanti is left-handed with +x east and +z north, so a viewer facing
+-- north reads +x, facing south reads -x, facing west reads +z, facing east
+-- reads -z.
+local function write_text(x, y, z, text, color, axis, dir, scale)
+	scale = scale or 1
+	dir = dir or 1
+	local node = "lw_nodes:wool_" .. color
+	local cursor = 0
+	for index = 1, #text do
+		local glyph = FONT.glyphs[text:sub(index, index):upper()]
+		if glyph then
+			for row = 1, FONT.glyph_height do
+				local bits = glyph[row]
+				for col = 1, FONT.glyph_width do
+					if bits:sub(col, col) == "1" then
+						for sy = 0, scale - 1 do
+							for sx = 0, scale - 1 do
+								local offset = ((cursor + col - 1) * scale + sx) * dir
+								local oy = y - (row - 1) * scale - sy
+								if axis == "x" then
+									put(x + offset, oy, z, node)
+								else
+									put(x, oy, z + offset, node)
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		cursor = cursor + FONT.glyph_width + 1
+	end
+end
+
+--------------------------------------------------------------------------
+-- The island
+--------------------------------------------------------------------------
+
+local function build_island()
+	-- Moat first, so the island overwrites it where they overlap.
+	fill(BOUNDS.min.x, 0, BOUNDS.min.z, BOUNDS.max.x, WATER, BOUNDS.max.z,
+		"lw_nodes:water")
+	-- Sand shelf, then the plateau on top of it.
+	fill(ISLAND.x0 - 3, 0, ISLAND.z0 - 3, ISLAND.x1 + 3, GROUND - 1, ISLAND.z1 + 3,
+		"lw_nodes:stone")
+	fill(ISLAND.x0 - 3, GROUND, ISLAND.z0 - 3, ISLAND.x1 + 3, GROUND, ISLAND.z1 + 3,
+		"lw_nodes:sand")
+	fill(ISLAND.x0, 0, ISLAND.z0, ISLAND.x1, GROUND - 2, ISLAND.z1, "lw_nodes:stone")
+	fill(ISLAND.x0, GROUND - 1, ISLAND.z0, ISLAND.x1, GROUND - 1, ISLAND.z1,
+		"lw_nodes:dirt")
+	fill(ISLAND.x0, GROUND, ISLAND.z0, ISLAND.x1, GROUND, ISLAND.z1,
+		"lw_nodes:dirt_with_grass")
+end
+
+--------------------------------------------------------------------------
+-- 1. Spawn plaza
+--------------------------------------------------------------------------
+
+local PLAZA = {x0 = -12, x1 = 12, z0 = -18, z1 = 4}
+
+local function build_plaza()
+	local x0, x1, z0, z1 = PLAZA.x0, PLAZA.x1, PLAZA.z0, PLAZA.z1
+
+	fill(x0, GROUND, z0, x1, GROUND, z1, "lw_nodes:paving")
+	-- A shallow lip so the plaza reads as a built surface, not mown grass.
+	walls(x0 - 1, GROUND, z0 - 1, x1 + 1, GROUND, z1 + 1, "lw_nodes:polished_stone")
+
+	-- Colonnade down both sides.
+	for z = z0 + 2, z1 - 6, 4 do
+		for _, x in ipairs({x0 + 1, x1 - 1}) do
+			fill(x, FLOOR, z, x, FLOOR + 3, z, "lw_nodes:column")
+			put(x, FLOOR + 4, z, "lw_nodes:gold_trim")
+			put(x, FLOOR + 5, z, "lw_nodes:lamp")
+		end
+	end
+
+	-- Fountain: a ring of polished stone around still water, with a lip so a
+	-- visitor walks around it instead of straight into it.
+	walls(-3, GROUND, -8, 3, FLOOR, -2, "lw_nodes:polished_stone")
+	fill(-2, GROUND, -7, 2, GROUND, -3, "lw_nodes:water")
+
+	-- Welcome sign just north of the spawn point, where a visitor already
+	-- looking up the plaza will see its face. Poster panels face south at
+	-- facedir 0, so it has to stand in front of the player, not behind.
+	put(4, FLOOR, -13, "lw_nodes:pedestal")
+	put(4, FLOOR + 1, -13, "lw_nodes:poster")
+	label(4, FLOOR + 1, -13,
+		"Welcome to the Luanti web showcase. Walk north through the arch: " ..
+		"library to the west, gallery to the east, then the theater. " ..
+		"Press i for the palette, /stuff for the starter kit.")
+
+	-- North gate and banner. This is the first thing a visitor sees from the
+	-- spawn point, so the title goes on the wall above the arch rather than
+	-- painted on the floor where nobody would read it.
+	local top = FLOOR + 16
+	fill(x0, FLOOR, z1, x1, top, z1, "lw_nodes:stone_brick")
+	fill(x0 + 1, FLOOR + 6, z1 - 1, x1 - 1, top, z1 - 1, "lw_nodes:stone_brick")
+	fill(-3, FLOOR, z1, 3, FLOOR + 4, z1, "air")             -- archway
+	fill(-4, FLOOR + 5, z1, 4, FLOOR + 5, z1, "lw_nodes:gold_trim")
+	-- Two lines, read from the plaza side (facing north, so letters run +x).
+	write_text(-math.floor(text_width("LUANTI") / 2), top, z1 - 1, "LUANTI",
+		"white", "x", 1)
+	write_text(-math.floor(text_width("WEB") / 2), top - 6, z1 - 1, "WEB",
+		"cyan", "x", 1)
+	for _, x in ipairs({x0, x1}) do
+		fill(x, FLOOR, z1, x, top + 1, z1, "lw_nodes:column")
+		put(x, top + 2, z1, "lw_nodes:lamp")
+	end
+end
+
+--------------------------------------------------------------------------
+-- 2. Material library
+--------------------------------------------------------------------------
+
+local LIBRARY = {x0 = -32, x1 = -16, z0 = 4, z1 = 32}
+
+-- Filled at load time from every node carrying the lw_palette group, so a new
+-- palette node appears in the library without anyone editing this file.
+local function palette_names()
+	local names = {}
+	for name, def in pairs(core.registered_nodes) do
+		if def.groups and def.groups.lw_palette then
+			names[#names + 1] = name
+		end
+	end
+	table.sort(names)
+	return names
+end
+
+local function build_library()
+	local x0, x1, z0, z1 = LIBRARY.x0, LIBRARY.x1, LIBRARY.z0, LIBRARY.z1
+
+	fill(x0, GROUND, z0, x1, GROUND, z1, "lw_nodes:polished_stone")
+	fill(x0, FLOOR, z0, x1, FLOOR + 5, z1, "air")
+	walls(x0, FLOOR, z0, x1, FLOOR + 5, z1, "lw_nodes:stone_brick")
+	-- Clerestory glass: daylight without a floodlit ceiling.
+	walls(x0, FLOOR + 4, z0, x1, FLOOR + 4, z1, "lw_nodes:glass")
+	fill(x0, FLOOR + 6, z0, x1, FLOOR + 6, z1, "lw_nodes:slab_stone_brick")
+	-- Door on the east wall, facing the courtyard.
+	fill(x1, FLOOR, 17, x1, FLOOR + 2, 19, "air")
+	-- Title over the door, read from the courtyard (facing west, letters +z).
+	write_text(x1, FLOOR + 5, z0 + 1, "LIBRARY", "yellow", "z", 1)
+
+	local names = palette_names()
+	local index = 1
+	-- Two banks of three pedestals with an aisle down the middle.
+	for row = 0, 7 do
+		for col = 0, 5 do
+			local name = names[index]
+			if not name then
+				break
+			end
+			local x = x0 + 2 + col * 2 + (col > 2 and 2 or 0)
+			local z = z0 + 3 + row * 3
+			if x <= x1 - 1 and z <= z1 - 1 then
+				put(x, FLOOR, z, "lw_nodes:pedestal")
+				put(x, FLOOR + 1, z, name)
+				local def = core.registered_nodes[name]
+				label(x, FLOOR, z, (def and def.description or name) .. "\n" .. name)
+				index = index + 1
+			end
+		end
+	end
+	if names[index] then
+		core.log("warning", "[lw_world] the material library has " ..
+			(#names - index + 1) .. " more palette nodes than pedestals")
+	end
+
+	for z = z0 + 4, z1 - 2, 8 do
+		put(x0 + 1, FLOOR + 3, z, "lw_nodes:lamp")
+		put(x1 - 1, FLOOR + 3, z, "lw_nodes:lamp")
+	end
+end
+
+--------------------------------------------------------------------------
+-- 3. Pixel-art gallery
+--------------------------------------------------------------------------
+
+-- Pixel art as node art: "." is empty, every other character indexes the
+-- artwork's own palette. Rows run top down and must all be the same length.
+local ARTWORKS = {
+	{
+		title = "Heart",
+		note = "Wool pixel art, 13x9 â€” two tones and a highlight, no texture pack.",
+		palette = {r = "red", w = "white"},
+		rows = {
+			"..rrr...rrr..",
+			".rrrrr.rrrrr.",
+			"rrrrrrrrrrrrr",
+			"rrwrrrrrrrrrr",
+			"rrrrrrrrrrrrr",
+			".rrrrrrrrrrr.",
+			"...rrrrrrr...",
+			".....rrr.....",
+			"......r......",
+		},
+	},
+	{
+		title = "Sunrise",
+		note = "Five colours from the 16-cube palette, arranged as a landscape.",
+		palette = {y = "yellow", o = "orange", b = "blue", c = "cyan",
+			g = "dark_green", d = "green"},
+		rows = {
+			"bbbbbbbbbbbbb",
+			"bbbbbcccbbbbb",
+			"bbbbcyyycbbbb",
+			"bbbcyyyyycbbb",
+			"bbbbcyyycbbbb",
+			"bbbbbooobbbbb",
+			"ooooooooooooo",
+			"ggggggggggggg",
+			"gdgdgdgdgdgdg",
+		},
+	},
+	{
+		title = "Cube",
+		note = "An isometric cube: the trick a 2D icon uses, drawn at node scale.",
+		palette = {w = "white", g = "grey", d = "dark_grey", k = "black"},
+		rows = {
+			"......w......",
+			"....wwwww....",
+			"..wwwwwwwww..",
+			"wwwwwwwwwwwww",
+			"gggwwwwwwwddd",
+			"ggggggwdddddd",
+			"gggggggdddddd",
+			".ggggggddddd.",
+			"...kkkkkkk...",
+		},
+	},
+}
+
+-- Fail loudly at load time rather than silently building a ragged wall.
+for _, art in ipairs(ARTWORKS) do
+	local width = #art.rows[1]
+	for row, line in ipairs(art.rows) do
+		assert(#line == width, ("lw_world artwork %q row %d is %d wide, expected %d")
+			:format(art.title, row, #line, width))
+	end
+end
+
+-- `front` is -1 when the viewer stands south of the piece and +1 when north:
+-- it only decides which side the uplights and stanchions go on.
+local function build_artwork(art, x, y, z, front)
+	for row, line in ipairs(art.rows) do
+		for col = 1, #line do
+			local color = art.palette[line:sub(col, col)]
+			if color then
+				put(x + col - 1, y - row + 1, z, "lw_nodes:wool_" .. color)
+			end
+		end
+	end
+	local width = #art.rows[1]
+	local height = #art.rows
+	outline_z(x - 1, y - height, x + width, y + 1, z, "lw_nodes:frame")
+
+	local centre = x + math.floor(width / 2)
+	local apron = z + 2 * front
+	put(centre, FLOOR, apron, "lw_nodes:uplight")
+	put(centre - 3, FLOOR, apron, "lw_nodes:stanchion")
+	put(centre + 3, FLOOR, apron, "lw_nodes:stanchion")
+	label(centre, FLOOR, apron, art.title .. "\n" .. art.note)
+end
+
+local GALLERY = {x0 = 16, x1 = 32, z0 = 4, z1 = 32}
+
+-- The artworks are nine nodes tall and the frames wrap them, so the room has
+-- to be tall enough to hang a piece clear of the doorways underneath it.
+local ART_TOP = FLOOR + 11
+local GALLERY_CEILING = FLOOR + 12
+
+local function build_gallery()
+	local x0, x1, z0, z1 = GALLERY.x0, GALLERY.x1, GALLERY.z0, GALLERY.z1
+
+	fill(x0, GROUND - 1, z0, x1, GROUND - 1, z1, "lw_nodes:polished_stone")
+	fill(x0, GROUND, z0, x1, GROUND, z1, "lw_nodes:carpet")
+	fill(x0, FLOOR, z0, x1, GALLERY_CEILING, z1, "air")
+	walls(x0, FLOOR, z0, x1, GALLERY_CEILING, z1, "lw_nodes:polished_stone")
+	fill(x0, GALLERY_CEILING + 1, z0, x1, GALLERY_CEILING + 1, z1,
+		"lw_nodes:slab_stone_brick")
+	-- Door on the west wall, facing the courtyard.
+	fill(x0, FLOOR, 17, x0, FLOOR + 2, 19, "air")
+	-- Title over the door, read from the courtyard (facing east, letters -z).
+	write_text(x0, FLOOR + 5, z1 - 1, "GALLERY", "magenta", "z", -1)
+
+	-- A partition gives the third piece its own wall. Its doorway is two nodes
+	-- high, which is exactly what clears the hanging frame above it.
+	fill(x0 + 1, FLOOR, 24, x1 - 1, GALLERY_CEILING, 24, "lw_nodes:polished_stone")
+	fill(x1 - 3, FLOOR, 24, x1 - 1, FLOOR + 1, 24, "air")
+
+	build_artwork(ARTWORKS[1], x0 + 2, ART_TOP, z1 - 1, -1)   -- north wall
+	build_artwork(ARTWORKS[2], x0 + 2, ART_TOP, 23, -1)       -- partition
+	build_artwork(ARTWORKS[3], x0 + 2, ART_TOP, z0 + 1, 1)    -- south wall
+
+	for z = z0 + 5, z1 - 3, 9 do
+		put(x0 + 1, GALLERY_CEILING - 1, z, "lw_nodes:lamp")
+		put(x1 - 1, GALLERY_CEILING - 1, z, "lw_nodes:lamp")
+	end
+end
+
+--------------------------------------------------------------------------
+-- 4. Kinetic courtyard
+--------------------------------------------------------------------------
+
+-- Chasing lights are driven by one node timer on an invisible controller. An
+-- ABM would fire per node per interval whether or not anyone is watching; a
+-- single timer that re-arms itself only runs while the block is loaded, which
+-- matters when the server shares a core with the browser's compositor.
+local CHASE_LENGTH = 16
+local CHASE_COLORS = {"cyan", "blue", "violet", "magenta"}
+local CHASE_ORIGIN = {x = -8, y = FLOOR + 5, z = 9}
+
+core.register_node("lw_world:chaser", {
+	description = "Chase Light Controller",
+	drawtype = "airlike",
+	paramtype = "light",
+	sunlight_propagates = true,
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = false,
+	groups = {not_in_creative_inventory = 1},
+	on_construct = function(pos)
+		core.get_node_timer(pos):start(0.4)
+	end,
+	on_timer = function(pos)
+		local meta = core.get_meta(pos)
+		local step = (meta:get_int("step") + 1) % CHASE_LENGTH
+		meta:set_int("step", step)
+		for i = 1, CHASE_LENGTH - 1 do
+			local lit = (i - step) % CHASE_LENGTH < 3
+			local color = lit and "white" or CHASE_COLORS[(i % #CHASE_COLORS) + 1]
+			local target = "lw_nodes:wool_" .. color
+			local at = {x = pos.x + i, y = pos.y, z = pos.z}
+			if core.get_node(at).name ~= target then
+				core.swap_node(at, {name = target})
+			end
+		end
+		return true
+	end,
+})
+
+local COURTYARD = {x0 = -12, x1 = 12, z0 = 4, z1 = 32}
+
+local function build_courtyard()
+	local x0, x1, z0, z1 = COURTYARD.x0, COURTYARD.x1, COURTYARD.z0, COURTYARD.z1
+
+	fill(x0, GROUND, z0 + 2, x1, GROUND, z1, "lw_nodes:paving")
+
+	-- Water channel down the middle, crossed by two plank bridges.
+	fill(-2, GROUND, z0 + 4, 2, GROUND, z1 - 3, "lw_nodes:stone_brick")
+	fill(-1, GROUND, z0 + 5, 1, GROUND, z1 - 4, "lw_nodes:water")
+	for _, z in ipairs({14, 24}) do
+		fill(-1, GROUND, z, 1, GROUND, z + 1, "lw_nodes:slab_planks")
+	end
+
+	-- LED ticker wall on the west side with a chase-light cornice above it.
+	fill(x0 + 1, FLOOR, 8, x0 + 1, FLOOR + 4, 22, "lw_nodes:polished_stone")
+	fill(x0 + 2, FLOOR + 1, 9, x0 + 2, FLOOR + 3, 21, "lw_nodes:ticker")
+	fill(CHASE_ORIGIN.x, CHASE_ORIGIN.y, CHASE_ORIGIN.z,
+		CHASE_ORIGIN.x + CHASE_LENGTH - 1, CHASE_ORIGIN.y, CHASE_ORIGIN.z,
+		"lw_nodes:wool_cyan")
+	put(CHASE_ORIGIN.x, CHASE_ORIGIN.y, CHASE_ORIGIN.z, "lw_world:chaser")
+
+	-- Plank loop on the east side for the cart to run.
+	fill(4, GROUND, 8, 9, GROUND, 8, "lw_nodes:planks")
+	fill(4, GROUND, 28, 9, GROUND, 28, "lw_nodes:planks")
+	fill(4, GROUND, 8, 4, GROUND, 28, "lw_nodes:planks")
+	fill(9, GROUND, 8, 9, GROUND, 28, "lw_nodes:planks")
+
+	for _, x in ipairs({x0 + 4, x1 - 4}) do
+		for z = z0 + 6, z1 - 4, 8 do
+			fill(x, FLOOR, z, x, FLOOR + 2, z, "lw_nodes:beam")
+			put(x, FLOOR + 3, z, "lw_nodes:lamp")
+		end
+	end
+
+	put(6, FLOOR, 12, "lw_nodes:pedestal")
+	put(6, FLOOR + 1, 12, "lw_nodes:poster")
+	label(6, FLOOR + 1, 12,
+		"Kinetic courtyard: animated tiles (ticker wall, water), a node-timer " ..
+		"light chase, and a cart entity. Engine-native â€” no shaders, no video.")
+end
+
+--------------------------------------------------------------------------
+-- 5. Theater
+--------------------------------------------------------------------------
+
+local THEATER = {x0 = -16, x1 = 16, z0 = 34, z1 = SCREEN_Z + 2}
+
+local function build_theater()
+	local x0, x1, z0, z1 = THEATER.x0, THEATER.x1, THEATER.z0, THEATER.z1
+
+	fill(x0, GROUND - 1, z0, x1, GROUND - 1, z1, "lw_nodes:stone_brick")
+	fill(x0, GROUND, z0, x1, GROUND, z1, "lw_nodes:carpet")
+	fill(x0, FLOOR, z0, x1, FLOOR + 11, z1, "air")
+	walls(x0, FLOOR, z0, x1, FLOOR + 11, z1, "lw_nodes:stone_brick")
+	fill(x0, FLOOR + 12, z0, x1, FLOOR + 12, z1, "lw_nodes:stone_brick")
+
+	-- Entrance, marquee and title on the south face.
+	fill(x0, FLOOR + 6, z0 - 1, x1, FLOOR + 11, z0 - 1, "lw_nodes:stone_brick")
+	fill(-3, FLOOR, z0, 3, FLOOR + 3, z0, "air")
+	fill(-5, FLOOR + 4, z0, 5, FLOOR + 4, z0, "lw_theater:marquee")
+	fill(-6, FLOOR + 5, z0, 6, FLOOR + 5, z0, "lw_nodes:gold_trim")
+	write_text(-math.floor(text_width("CINEMA") / 2), FLOOR + 11, z0 - 1, "CINEMA",
+		"red", "x", 1)
+
+	-- Auditorium floor. The house steps *down* towards the screen, so the
+	-- entrance ramp climbs to the back row and each row in front of it sits a
+	-- little lower â€” the back of the house can see over the front without the
+	-- entrance opening onto a wall of seating.
+	local BANDS = {
+		{z0 = 37, z1 = 38, level = 1},
+		{z0 = 39, z1 = 43, level = 2},          -- back row, z = 42
+		{z0 = 44, z1 = 49, level = 1},          -- rows z = 45 and 48
+	}
+	for _, band in ipairs(BANDS) do
+		fill(x0 + 1, GROUND + 1, band.z0, x1 - 1, GROUND + band.level, band.z1,
+			"lw_nodes:stone_brick")
+		fill(x0 + 1, GROUND + band.level, band.z0, x1 - 1, GROUND + band.level,
+			band.z1, "lw_nodes:carpet")
+	end
+
+	-- Five rows of seats, an aisle down the middle, aisle lights at both ends.
+	local ROW_LEVEL = {[42] = 2, [45] = 1, [48] = 1, [51] = 0, [54] = 0}
+	for _, z in ipairs({42, 45, 48, 51, 54}) do
+		local y = GROUND + ROW_LEVEL[z] + 1
+		for x = x0 + 3, x1 - 3 do
+			if x < -2 or x > 2 then
+				-- facedir 2 is a half turn, putting the seat back to the south
+				-- so a seated visitor faces the screen.
+				put(x, y, z, "lw_theater:seat", 2)
+			end
+		end
+		put(x0 + 2, y, z, "lw_theater:aisle_light")
+		put(x1 - 2, y, z, "lw_theater:aisle_light")
+	end
+
+	-- Curtain wall, then the screen and its proscenium arch on top of it.
+	fill(x0 + 1, FLOOR, SCREEN_Z, x1 - 1, FLOOR + 10, SCREEN_Z, "lw_nodes:curtain")
+	fill(SCREEN_X0, SCREEN_TOP - 3, SCREEN_Z,
+		SCREEN_X0 + lw_theater.screen_cols - 1, SCREEN_TOP, SCREEN_Z,
+		"lw_theater:screen_off")
+	outline_z(SCREEN_X0 - 1, SCREEN_TOP - 4,
+		SCREEN_X0 + lw_theater.screen_cols, SCREEN_TOP + 1, SCREEN_Z,
+		"lw_nodes:gold_trim")
+
+	-- House lights, kept sparse: the screen is meant to be the bright thing.
+	for x = x0 + 5, x1 - 5, 10 do
+		for z = z0 + 6, SCREEN_Z - 6, 8 do
+			put(x, FLOOR + 11, z, "lw_nodes:lamp")
+		end
+	end
+
+	put(-6, FLOOR, 38, "lw_nodes:pedestal")
+	put(-6, FLOOR + 1, 38, "lw_nodes:poster")
+	label(-6, FLOOR + 1, 38,
+		"Theater: left click the Screen Remote for the next reel, right click " ..
+		"for the browser video overlay. Right click a seat to sit down. " ..
+		"/reel off brings the house lights back up.")
+end
+
+--------------------------------------------------------------------------
+-- Paths and railings
+--------------------------------------------------------------------------
+
+local function build_paths()
+	fill(-3, GROUND, PLAZA.z1, 3, GROUND, COURTYARD.z0 + 2, "lw_nodes:paving")
+	fill(-3, GROUND, COURTYARD.z1, 3, GROUND, THEATER.z0, "lw_nodes:paving")
+	fill(LIBRARY.x1, GROUND, 17, COURTYARD.x0, GROUND, 19, "lw_nodes:paving")
+	fill(COURTYARD.x1, GROUND, 17, GALLERY.x0, GROUND, 19, "lw_nodes:paving")
+
+	-- A rail along the moat edge so a walking visitor does not fall in.
+	for x = ISLAND.x0, ISLAND.x1, 2 do
+		put(x, FLOOR, ISLAND.z0, "lw_nodes:fence")
+		put(x, FLOOR, ISLAND.z1, "lw_nodes:fence")
+	end
+	for z = ISLAND.z0, ISLAND.z1, 2 do
+		put(ISLAND.x0, FLOOR, z, "lw_nodes:fence")
+		put(ISLAND.x1, FLOOR, z, "lw_nodes:fence")
+	end
+end
+
+build_island()
+build_plaza()
+build_library()
+build_gallery()
+build_courtyard()
+build_theater()
+build_paths()
+
+--------------------------------------------------------------------------
+-- Stamping the ops into generated chunks
+--------------------------------------------------------------------------
+
+local content_cache = {}
+
+local function content_id(name)
+	local id = content_cache[name]
+	if not id then
+		id = core.get_content_id(name)
+		content_cache[name] = id
+	end
+	return id
+end
+
+local function overlaps(minp, maxp)
+	return not (maxp.x < BOUNDS.min.x or minp.x > BOUNDS.max.x
+		or maxp.y < BOUNDS.min.y or minp.y > BOUNDS.max.y
+		or maxp.z < BOUNDS.min.z or minp.z > BOUNDS.max.z)
+end
+
+core.register_on_generated(function(minp, maxp, _seed)
+	if not overlaps(minp, maxp) then
+		return
+	end
+
+	local vm, emin, emax = core.get_mapgen_object("voxelmanip")
+	local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+	local data = vm:get_data()
+	local param2 = vm:get_param2_data()
+	local touched = false
+
+	for _, op in ipairs(ops) do
+		local x0 = math.max(op.x0, minp.x)
+		local x1 = math.min(op.x1, maxp.x)
+		local y0 = math.max(op.y0, minp.y)
+		local y1 = math.min(op.y1, maxp.y)
+		local z0 = math.max(op.z0, minp.z)
+		local z1 = math.min(op.z1, maxp.z)
+		if x0 <= x1 and y0 <= y1 and z0 <= z1 then
+			local id = content_id(op.name)
+			local p2 = op.param2 or 0
+			for z = z0, z1 do
+				for y = y0, y1 do
+					local index = area:index(x0, y, z)
+					for _ = x0, x1 do
+						data[index] = id
+						param2[index] = p2
+						index = index + 1
+					end
+				end
+			end
+			touched = true
+		end
+	end
+
+	if not touched then
+		return
+	end
+
+	vm:set_data(data)
+	vm:set_param2_data(param2)
+	vm:calc_lighting()
+	vm:write_to_map()
+	vm:update_liquids()
+
+	-- Metadata cannot ride along in a voxel manipulator, so infotext labels are
+	-- applied once the chunk is on the map.
+	for _, entry in ipairs(labels) do
+		local pos = entry.pos
+		if pos.x >= minp.x and pos.x <= maxp.x
+				and pos.y >= minp.y and pos.y <= maxp.y
+				and pos.z >= minp.z and pos.z <= maxp.z then
+			core.get_meta(pos):set_string("infotext", entry.text)
+		end
+	end
+end)
+
+--------------------------------------------------------------------------
+-- World setup
+--------------------------------------------------------------------------
+
+core.settings:set("static_spawnpoint",
+	("%d,%d,%d"):format(SPAWN.x, SPAWN.y, SPAWN.z))
+if core.set_mapgen_setting then
+	core.set_mapgen_setting("mg_name", "singlenode", true)
+end
+
+lw_theater.register_screen(
+	{x = SCREEN_X0, y = SCREEN_TOP, z = SCREEN_Z}, {x = 1, y = 0, z = 0})
+
+core.after(0, function()
+	-- Midday, with the clock frozen (time_speed = 0 in the game's
+	-- minetest.conf) so the galleries look the same on every visit. The
+	-- theater remote is the only thing that moves it.
+	core.set_timeofday(0.45)
+end)
+
+--------------------------------------------------------------------------
+-- The courtyard cart
+--------------------------------------------------------------------------
+
+local CART_PATH = {
+	{x = 4, z = 8}, {x = 9, z = 8}, {x = 9, z = 28}, {x = 4, z = 28},
+}
+local CART_SPEED = 2.0
+
+core.register_entity("lw_world:cart", {
+	initial_properties = {
+		physical = false,
+		collide_with_objects = false,
+		pointable = false,
+		visual = "cube",
+		visual_size = {x = 0.8, y = 0.6, z = 0.8},
+		textures = {
+			"lw_planks.png", "lw_planks.png", "lw_beam_side.png",
+			"lw_beam_side.png", "lw_beam_side.png", "lw_beam_side.png",
+		},
+		-- Respawned on join, so it must not accumulate in the map file.
+		static_save = false,
+		infotext = "Courtyard cart",
+	},
+	leg = 1,
+	on_activate = function(self)
+		self.leg = 1
+	end,
+	on_step = function(self, dtime)
+		local pos = self.object:get_pos()
+		if not pos then
+			return
+		end
+		local target = CART_PATH[self.leg % #CART_PATH + 1]
+		local dx = target.x - pos.x
+		local dz = target.z - pos.z
+		local distance = math.sqrt(dx * dx + dz * dz)
+		if distance < 0.2 then
+			self.leg = self.leg % #CART_PATH + 1
+			return
+		end
+		local step = math.min(CART_SPEED * dtime, distance)
+		self.object:set_pos({
+			x = pos.x + dx / distance * step,
+			y = FLOOR + 0.3,
+			z = pos.z + dz / distance * step,
+		})
+		self.object:set_yaw(math.atan2(-dx, dz))
+	end,
+})
+
+local function ensure_cart()
+	local centre = {x = 6, y = FLOOR, z = 18}
+	for _, object in ipairs(core.get_objects_inside_radius(centre, 24)) do
+		local entity = object:get_luaentity()
+		if entity and entity.name == "lw_world:cart" then
+			return
+		end
+	end
+	core.add_entity({x = CART_PATH[1].x, y = FLOOR + 0.3, z = CART_PATH[1].z},
+		"lw_world:cart")
+end
+
+core.register_on_joinplayer(function()
+	-- Give the courtyard a moment to load before looking for the cart.
+	core.after(3, ensure_cart)
+end)
+name = lw_world
+title = Showcase world
+description = Builds the plaza, material library, pixel-art gallery, kinetic courtyard and theater
+depends = lw_nodes, lw_theater
+title = Rollercoaster Park
 description = Build track segments and ride carts on an ornate coaster. Right-click a cart to board.
 default_mapgen = singlenode
 disallowed_mapgens = v5,v6,v7,carpathian,valleys,flat,fractal
