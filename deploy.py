@@ -62,6 +62,7 @@ REQUIRED_FILES = (
 	"launcher.js",
 	"launcher.css",
 	"launcher-config.js",
+	"theater.js",
 	"manifest.webmanifest",
 	"service-worker.js",
 	"luanti-web.svg",

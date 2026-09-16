@@ -29,6 +29,7 @@
 #include "player.h"
 #include "daynightratio.h"
 #include "constants.h"
+#include "porting_emscripten.h"
 #include <cstdio>
 
 // only available in zstd 1.3.5+
@@ -734,6 +735,54 @@ int ModApiUtil::l_strip_escapes(lua_State *L)
 	return 1;
 }
 
+#ifdef __EMSCRIPTEN__
+
+// set_web_video({clip = "reel.webm", title = "...", loop = true, muted = true})
+//
+// Hands a clip to the browser page's own <video> element. This exists only in
+// the WebAssembly client: a mod feature-detects it with
+// `if core.set_web_video then` and falls back to whatever it can render with
+// engine-native nodes. `clip` names a file the launcher serves from its media/
+// directory — same-origin by construction, and never a URL.
+int ModApiUtil::l_set_web_video(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	luaL_checktype(L, 1, LUA_TTABLE);
+
+	lua_getfield(L, 1, "clip");
+	std::string clip = luaL_checkstring(L, -1);
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "title");
+	std::string title = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "loop");
+	const bool loop = lua_isnil(L, -1) ? true : readParam<bool>(L, -1);
+	lua_pop(L, 1);
+
+	// Browsers refuse to autoplay audible media without a user gesture, so
+	// muted defaults to true and the page offers its own unmute control.
+	lua_getfield(L, 1, "muted");
+	const bool muted = lua_isnil(L, -1) ? true : readParam<bool>(L, -1);
+	lua_pop(L, 1);
+
+	lua_pushboolean(L, porting::emscripten_show_video_overlay(clip, title,
+			loop, muted));
+	return 1;
+}
+
+// clear_web_video()
+int ModApiUtil::l_clear_web_video(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	porting::emscripten_hide_video_overlay();
+	lua_pushboolean(L, true);
+	return 1;
+}
+
+#endif // __EMSCRIPTEN__
+
 void ModApiUtil::Initialize(lua_State *L, int top)
 {
 	API_FCT(log);
@@ -788,6 +837,12 @@ void ModApiUtil::Initialize(lua_State *L, int top)
 	API_FCT(urlencode);
 	API_FCT(is_valid_player_name);
 	API_FCT(strip_escapes);
+
+#ifdef __EMSCRIPTEN__
+	// Browser-only. Left undefined elsewhere so a mod can feature-detect it.
+	API_FCT(set_web_video);
+	API_FCT(clear_web_video);
+#endif
 
 	LuaSettings::create(L, g_settings, g_settings_path);
 	lua_setfield(L, top, "settings");

@@ -88,6 +88,7 @@ src/
 irr/                    – IrrlichtMt rendering engine (embedded CMake subproject)
 builtin/                – Lua code loaded by the engine at runtime
 lib/                    – Bundled third-party libraries (Lua 5.1, sha256, etc.)
+games/luanti_web/       – Default game for the web demo (showcase pack + theater)
 games/devtest/          – Development test game
 client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 ```
@@ -101,6 +102,8 @@ client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 | `src/porting.cpp` | Sets `path_share="/"`, `path_user="/home/web_user/.luanti"` under WASM |
 | `src/network/socket.cpp` | Full no-op `UDPSocket` under `#ifdef __EMSCRIPTEN__` |
 | `src/threading/thread.cpp` | No-op `setName()` / `bindToProcessor()` for Emscripten |
+| `client/web/theater.js` | HTML5 `<video>` overlay for the showcase theater (Tier B) |
+| `util/content/generate_luanti_web_textures.py` | Regenerates every `games/luanti_web` texture |
 
 ### WASM Phase Plan (from `wasm_porting.md`)
 - **Phase 1** ✓ — CMake + compile, socket stubs, threading, porting, FS init

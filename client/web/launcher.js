@@ -278,7 +278,7 @@
 	ui.address.value = valueFromQuery("address", "");
 	ui.port.value = valueFromQuery("port", "30000");
 	ui.name.value = valueFromQuery("name", safeStorageGet("luanti.playerName"));
-	ui.game.value = valueFromQuery("game", "flower_island");
+	ui.game.value = valueFromQuery("game", "luanti_web");
 	ui.language.value = valueFromQuery("language", safeStorageGet("luanti.language"));
 	if (["60", "100", "160"].indexOf(query.get("view")) !== -1)
 		ui.quality.value = query.get("view");
@@ -305,7 +305,7 @@
 			address: address,
 			port: port,
 			name: name,
-			game: ui.game.value || "flower_island",
+			game: ui.game.value || "luanti_web",
 			view: ui.quality.value,
 			language: ui.language.value
 		};

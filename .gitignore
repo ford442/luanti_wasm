@@ -63,6 +63,7 @@ AppDir
 !/games/devtest/
 !/games/flower_island/
 !/games/log_ride/
+!/games/luanti_web/
 !/games/rollercoaster/
 !/games/spire_tunnel/
 /games/devtest/mods/soundstuff/sounds/gitignored_sounds/*
