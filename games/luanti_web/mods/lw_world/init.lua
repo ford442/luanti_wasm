@@ -678,8 +678,16 @@ end)
 -- World setup
 --------------------------------------------------------------------------
 
-core.settings:set("static_spawnpoint",
-	("%d,%d,%d"):format(SPAWN.x, SPAWN.y, SPAWN.z))
+-- The spawn point and the frozen clock live in the game's minetest.conf, not in
+-- core.settings:set(): that writes the user's main settings layer, which the
+-- client saves on exit and which would then move the spawn of every other game.
+local spawn_setting = core.setting_get_pos("static_spawnpoint")
+if not spawn_setting or not vector.equals(spawn_setting, SPAWN) then
+	core.log("warning", ("[lw_world] static_spawnpoint is %s, but the plaza " ..
+		"spawn is %s; check games/luanti_web/minetest.conf and the user's " ..
+		"minetest.conf"):format(tostring(core.settings:get("static_spawnpoint")),
+		core.pos_to_string(SPAWN)))
+end
 if core.set_mapgen_setting then
 	core.set_mapgen_setting("mg_name", "singlenode", true)
 end
@@ -693,6 +701,36 @@ core.after(0, function()
 	-- theater remote is the only thing that moves it.
 	core.set_timeofday(0.45)
 end)
+
+-- Snapshot the built area as a schematic, for the schematic pipeline and for
+-- keeping in-game edits. The op list above stays the source of truth: an export
+-- is an artifact to diff or hand-place, not something this mod loads.
+core.register_chatcommand("lw_export", {
+	params = "",
+	description = "Save the showcase area to <world>/schems/lw_showcase.mts",
+	privs = {server = true},
+	func = function(name)
+		local dir = core.get_worldpath() .. DIR_DELIM .. "schems"
+		core.mkdir(dir)
+		local path = dir .. DIR_DELIM .. "lw_showcase.mts"
+		-- create_schematic only sees blocks that exist, and a visitor has rarely
+		-- walked every corner, so generate the whole area before reading it.
+		core.emerge_area(BOUNDS.min, BOUNDS.max, function(_, _, remaining)
+			if remaining > 0 then
+				return
+			end
+			local message
+			if core.create_schematic(BOUNDS.min, BOUNDS.max, nil, path) then
+				message = ("Exported %s..%s to %s"):format(
+					core.pos_to_string(BOUNDS.min), core.pos_to_string(BOUNDS.max), path)
+			else
+				message = "Could not write " .. path
+			end
+			core.chat_send_player(name, message)
+		end)
+		return true, "Exporting the showcase area…"
+	end,
+})
 
 --------------------------------------------------------------------------
 -- The courtyard cart

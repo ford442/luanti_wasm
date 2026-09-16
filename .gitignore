@@ -84,6 +84,8 @@ AppDir
 
 ## Configuration/log files
 minetest.conf
+# Game-layer defaults are content, not local configuration.
+!/games/luanti_web/minetest.conf
 debug.txt
 debug.txt.1
 

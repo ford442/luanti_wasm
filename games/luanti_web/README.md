@@ -106,6 +106,31 @@ so an edit to that file changes the landing world on the next *fresh* world.
 An existing world keeps whatever was already generated — delete it, or visit
 new chunks, to see changes.
 
+World-wide defaults live in `minetest.conf` next to `game.conf`: the spawn point
+(`0,10,-14`, on the plaza) and `time_speed = 0`, which freezes the clock at
+midday. The engine loads that file as the game settings layer, so it never leaks
+into the user's own configuration or into other games. Mods must not use
+`core.settings:set()` for per-game defaults: the client writes that layer back
+to the user's `minetest.conf` on exit.
+
+Every visitor gets `fly`, `fast` and `noclip` on join, but the tour never needs
+them: the plaza, the courtyard bridges, both side doors and the theater ramp
+are all reachable on foot.
+
+In the browser the launcher selects this game by default, and the world is
+created at `/home/web_user/.luanti/worlds/luanti_web` on IDBFS, so it survives
+a hard reload. `util/wasm/test_first_playable.py` enters this world for steps
+5-7 of the First Playable Smoke Test.
+
+### Exporting
+
+`/lw_export` (needs the `server` privilege, which singleplayer has) generates
+the whole showcase area and writes it to `<world>/schems/lw_showcase.mts`. Use
+it to snapshot edits made in game, then fold them back into the op list here —
+the export is an artifact for diffing and for the schematic pipeline, not
+something `lw_world` loads. Run it from a native build if you want the file on
+disk; in the browser it lands on IDBFS.
+
 Adding a node to `lw_nodes` with the `lw_palette` group is enough to get it a
 labelled pedestal in the material library; the room is built from the group, not
 from a hardcoded list. It logs a warning if the palette outgrows the 48
