@@ -18,13 +18,14 @@ still one entry down the dropdown — engine work should keep using it.
 
 ### #21 — slim `luanti_web` game
 
-Not a copy of devtest's 34 QA mods. Four mods, written for the demo:
+Not a copy of devtest's 34 QA mods. Five mods, written for the demo:
 
 | Mod | What it owns |
 |-----|--------------|
 | `lw_nodes` | the 45-node palette and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
+| `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
 | `lw_world` | the authored world, stamped onto a singlenode mapgen |
 
 `games/luanti_web/minetest.conf` sets the game-level defaults: `creative_mode`,
@@ -129,7 +130,7 @@ browser refuses. `show()` returning false is a normal outcome, not an error.
 ## Verification
 
 * `util/content/generate_luanti_web_textures.py` is deterministic: rerunning it
-  on an unchanged tree produces an empty diff. 90 files, ~67 KiB total.
+  on an unchanged tree produces an empty diff. 95 files, ~68 KiB total.
 * The world builder was run headless against a stubbed `core` and the resulting
   voxels rendered as a plan and as cross-sections, which is how the seating rake
   (running the wrong way), the aisle (a stack of carpets) and the gallery
@@ -153,8 +154,8 @@ not to — is in `wasm_porting.md` under "Content Budget".
 
 ## Not covered
 
-From the epic, still open: #26 (only the screen remote exists of the tool
-set), #29 (Tier C), #30 (the policy is written into `wasm_porting.md`, but the
-PR checklist item is not), #31 (themed maps). #23 (schematic pipeline) and
-#25 (kinetic courtyard: animated tiles, entities, node timers, living-building
-loop, and filmstrip authoring docs) shipped after the original pack.
+From the epic, still open: #29 (Tier C), #30 (the policy is written into
+`wasm_porting.md`, but the PR checklist item is not), #31 (themed maps). #23
+(schematic pipeline), #25 (kinetic courtyard) and #26 (authoring tools: Param2,
+paint, clone stick, light wand, screen remote hook, schematic stamp) shipped
+after the original pack.

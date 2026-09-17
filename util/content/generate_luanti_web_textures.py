@@ -747,6 +747,84 @@ STATIC_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 	"lw_hidden_light.png": tex_hidden_light,
 }
 
+
+# --------------------------------------------------------------------------
+# Tool inventory icons (16x16)
+# --------------------------------------------------------------------------
+
+def tex_param2() -> Image:
+	image = new_image(S, S)
+	cube = rgb("7a8aa0")
+	fill_rect(image, 3, 4, 12, 13, cube)
+	fill_rect(image, 3, 4, 3, 13, shade(cube, 1.25))
+	fill_rect(image, 12, 4, 12, 13, shade(cube, 0.72))
+	stroke_rect(image, 3, 4, 12, 13, shade(cube, 0.55))
+	# Two chevrons: the Param2 nudge is a rotation, not a paint.
+	arrow = rgb("f2f6ee")
+	fill_rect(image, 6, 7, 7, 10, arrow)
+	fill_rect(image, 8, 8, 9, 9, arrow)
+	fill_rect(image, 9, 6, 10, 7, rgb("d8a92c"))
+	fill_rect(image, 9, 10, 10, 11, rgb("d8a92c"))
+	return image
+
+
+def tex_paint() -> Image:
+	image = new_image(S, S)
+	handle = rgb("7b5230")
+	fill_rect(image, 2, 11, 7, 13, handle)
+	fill_rect(image, 3, 10, 6, 10, handle)
+	ferrule = rgb("c8a97a")
+	fill_rect(image, 6, 8, 8, 10, ferrule)
+	bristles = rgb("2f5cba")
+	fill_rect(image, 8, 4, 13, 9, bristles)
+	fill_rect(image, 9, 3, 12, 3, shade(bristles, 1.25))
+	fill_rect(image, 10, 6, 12, 8, rgb("e9e9e4"))
+	return image
+
+
+def tex_clone() -> Image:
+	image = new_image(S, S)
+	back = rgb("4c4c48")
+	fill_rect(image, 2, 2, 9, 9, back)
+	stroke_rect(image, 2, 2, 9, 9, shade(back, 0.65))
+	front = rgb("9fd7a6")
+	fill_rect(image, 6, 6, 13, 13, front)
+	stroke_rect(image, 6, 6, 13, 13, shade(front, 0.65))
+	return image
+
+
+def tex_light_wand() -> Image:
+	image = new_image(S, S)
+	shaft = rgb("8a6a3a")
+	fill_rect(image, 7, 5, 8, 14, shaft)
+	fill_rect(image, 6, 13, 9, 14, shade(shaft, 0.75))
+	glow = rgb("ffd76a")
+	fill_rect(image, 6, 2, 9, 5, glow)
+	fill_rect(image, 5, 3, 10, 4, glow)
+	fill_rect(image, 7, 1, 8, 6, rgb("fff6de"))
+	return image
+
+
+def tex_stamp() -> Image:
+	image = new_image(S, S)
+	handle = rgb("7b5230")
+	fill_rect(image, 6, 1, 9, 6, handle)
+	fill_rect(image, 5, 5, 10, 7, handle)
+	pad = rgb("2b2f36")
+	fill_rect(image, 3, 8, 12, 13, pad)
+	fill_rect(image, 3, 8, 12, 8, shade(pad, 1.30))
+	fill_rect(image, 5, 10, 10, 11, rgb("d8a92c"))
+	return image
+
+
+TOOL_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_param2.png": tex_param2,
+	"lw_paint.png": tex_paint,
+	"lw_clone.png": tex_clone,
+	"lw_light_wand.png": tex_light_wand,
+	"lw_stamp.png": tex_stamp,
+}
+
 THEATER_STATIC_TEXTURES: dict[str, Callable[[], Image]] = {
 	"lw_seat_side.png": tex_seat_side,
 	"lw_seat_top.png": tex_seat_top,
@@ -1061,6 +1139,10 @@ def generate(root: pathlib.Path) -> list[pathlib.Path]:
 		filmstrip([ticker_frame(i) for i in range(TICKER_FRAMES)]))
 	emit(nodes / "lw_fire.png",
 		filmstrip([fire_frame(i) for i in range(FIRE_FRAMES)]))
+
+	tools = game / "mods" / "lw_tools" / "textures"
+	for name, factory in TOOL_TEXTURES.items():
+		emit(tools / name, factory())
 
 	for name, factory in THEATER_STATIC_TEXTURES.items():
 		emit(theater / name, factory())
