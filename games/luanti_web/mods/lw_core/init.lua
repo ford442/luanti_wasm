@@ -53,7 +53,7 @@ local pages = {}
 
 -- Sort so the inventory reads like the material library: terrain, structure,
 -- architecture, lighting, exhibition, then the dyed cubes, then the tools.
-local GROUP_ORDER = {"lw_nodes:", "lw_theater:", "lw_tools:"}
+local GROUP_ORDER = {"lw_nodes:", "lw_theater:", "lw_maps:", "lw_tools:"}
 
 local function catalogue()
 	if palette_items then

@@ -114,11 +114,15 @@ NEVER = object()
 
 
 def schematic_from_cells(sx: int, sy: int, sz: int, cells: dict) -> Schematic:
-	"""Build a schematic from ``{(x, y, z): node_name_or_NEVER}``.
+	"""Build a schematic from ``{(x, y, z): value}``.
+
+	A value is a node name, a ``(name, param2)`` pair, or ``NEVER``.
 
 	Missing cells are air. ``NEVER`` writes probability 0 so a later stamp
 	leaves whatever is already on the map — the living-building controller
-	uses that so swapping frames cannot erase its own timer node.
+	uses that so swapping frames cannot erase its own timer node. ``param2``
+	is what keeps a rotated node rotated: a theater seat saved at facedir 2
+	still faces the stage when the map pack stamps it.
 	"""
 	names = []
 	index_of = {}
@@ -143,6 +147,8 @@ def schematic_from_cells(sx: int, sy: int, sz: int, cells: dict) -> Schematic:
 		if value is NEVER:
 			param1[i] = PROB_NEVER
 		else:
+			if isinstance(value, tuple):
+				value, param2[i] = value
 			content[i] = intern(value)
 			param1[i] = PROB_ALWAYS
 	return Schematic((sx, sy, sz), [PROB_ALWAYS] * sy, names,

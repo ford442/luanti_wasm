@@ -48,10 +48,16 @@ local FLOOR = GROUND + 1    -- first walkable layer
 local WATER = GROUND - 1    -- moat surface
 
 local ISLAND = {x0 = -36, z0 = -22, x1 = 36, z1 = 66}
+-- The showcase island and its moat. This is what /lw_export snapshots and
+-- what build_island() floods: the themed-map islands sit outside it and carry
+-- their own water, so widening this box would put a moat through the atlas.
 local BOUNDS = {
 	min = {x = ISLAND.x0 - 8, y = 0, z = ISLAND.z0 - 8},
 	max = {x = ISLAND.x1 + 8, y = 34, z = ISLAND.z1 + 8},
 }
+-- Everything the generator has to look at, widened below by maps.lua once the
+-- themed islands have said how far out they reach.
+local ATLAS = {min = vector.new(BOUNDS.min), max = vector.new(BOUNDS.max)}
 
 local SPAWN = {x = 0, y = FLOOR + 1, z = -14}
 
@@ -663,6 +669,27 @@ local function build_paths()
 	end
 end
 
+--------------------------------------------------------------------------
+-- The themed-map atlas
+--------------------------------------------------------------------------
+
+-- Three authored islands around the hub, described by lw_maps and placed by
+-- maps.lua with the same vocabulary the showcase is built from. It runs last
+-- so its causeways overwrite the moat railing they cross.
+local function build_atlas()
+	local atlas = dofile(MODPATH .. DIR_DELIM .. "maps.lua")
+	local reach = atlas.build({
+		fill = fill, put = put, walls = walls, schem = schem, label = label,
+		GROUND = GROUND, FLOOR = FLOOR, WATER = WATER,
+		ISLAND = ISLAND, PLAZA = PLAZA,
+	})
+	ATLAS.min.x = math.min(ATLAS.min.x, reach.min.x)
+	ATLAS.min.z = math.min(ATLAS.min.z, reach.min.z)
+	ATLAS.max.x = math.max(ATLAS.max.x, reach.max.x)
+	ATLAS.max.y = math.max(ATLAS.max.y, reach.max.y)
+	ATLAS.max.z = math.max(ATLAS.max.z, reach.max.z)
+end
+
 build_island()
 build_plaza()
 build_library()
@@ -670,6 +697,7 @@ build_gallery()
 build_courtyard()
 build_theater()
 build_paths()
+build_atlas()
 
 --------------------------------------------------------------------------
 -- Stamping the ops into generated chunks
@@ -687,9 +715,9 @@ local function content_id(name)
 end
 
 local function overlaps(minp, maxp)
-	return not (maxp.x < BOUNDS.min.x or minp.x > BOUNDS.max.x
-		or maxp.y < BOUNDS.min.y or minp.y > BOUNDS.max.y
-		or maxp.z < BOUNDS.min.z or minp.z > BOUNDS.max.z)
+	return not (maxp.x < ATLAS.min.x or minp.x > ATLAS.max.x
+		or maxp.y < ATLAS.min.y or minp.y > ATLAS.max.y
+		or maxp.z < ATLAS.min.z or minp.z > ATLAS.max.z)
 end
 
 local function has_on_construct(name)

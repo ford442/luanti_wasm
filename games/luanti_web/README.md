@@ -16,12 +16,18 @@ QA sandbox and this game is not a replacement for it.
 ## The tour
 
 ```
-             [ theater ]                 z = 34..62
-                  |
- [ library ]--[ courtyard ]--[ gallery ]   z = 4..32
-                  |
-             [ plaza ]                    z = -18..4   (spawn at 0, 10, -14)
+                       [ theater ]                 z = 34..62
+                            |
+           [ library ]--[ courtyard ]--[ gallery ]   z = 4..32
+                            |
+ Halloween --------------[ plaza ]-------------- fruit garden
+   (west)                    |                      (east)
+                       snow mountain
+                         (south)
 ```
+
+The plaza is the hub. The showcase tour runs north from it; three causeways
+leave it west, south and east for the [themed maps](docs/maps.md).
 
 1. **Spawn plaza** — fountain, colonnade, and a gate whose banner spells
    `LUANTI WEB` out of wool. Walk north through the arch.
@@ -34,6 +40,10 @@ QA sandbox and this game is not a replacement for it.
    and floating title card, and a six-frame living pavilion inside the cart
    loop. All engine-native: no shaders, no video.
 5. **Theater** (north) — marquee, curtains, raked seating, and a 6x4 screen.
+6. **Themed maps** (west, south, east) — a dusk Halloween lane, a snowy
+   mountain you can climb and tunnel through, and a garden of giant fruit.
+   Walk a causeway or use `/maps`. Full footprints, spawns and intended time
+   of day are in [`docs/maps.md`](docs/maps.md).
 
 ## Mods
 
@@ -42,6 +52,7 @@ QA sandbox and this game is not a replacement for it.
 | `lw_nodes` | the 45-node core palette (the theater adds 6 more) and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
+| `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere, `/maps` |
 | `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
 | `lw_world` | the authored world and its schematics, stamped onto a singlenode mapgen; `/lw_schem` authoring tools |
 
@@ -50,6 +61,7 @@ QA sandbox and this game is not a replacement for it.
 * `i` opens the **palette inventory**: every node, paged, infinite. Taking from
   it never empties it.
 * `/stuff` re-gives the starter kit, `/palette` reopens the palette.
+* `/maps` lists the three themed maps; `/maps halloween` travels to one.
 * **Param2 Tool** — punch/place nudge a node's param2 (+1 / -1, sneak for ±8). Same gestures as devtest's Param2 tool.
 * **Paint Tool** — sneak+use samples a node; use stamps that type onto pointed nodes; right click cycles the wool palette.
 * **Clone Stick** — left click pos1, right click pos2, sneak+left copy, sneak+right paste. Volume is capped at 32³.
@@ -111,10 +123,12 @@ ffmpeg -y -i clip.mp4 \
 	-frames:v 1 strip.png
 ```
 
-The living pavilion's six schematic frames are generated separately:
+The living pavilion's six schematic frames and the three themed maps are
+generated separately:
 
 ```sh
 python3 util/content/generate_luanti_web_living.py
+python3 util/content/generate_luanti_web_maps.py
 ```
 
 ## Editing the world
@@ -128,6 +142,11 @@ mapgen from two sources, both in git, the first time each chunk is generated:
   raked floor, screen and all), the plaza fountain, the colonnade column, the
   gallery frame, and the six living-pavilion frames. `init.lua` says where
   each one goes with `schem()`.
+* `lw_world/maps.lua` — the atlas: the three themed islands, their moats, the
+  causeways out of the plaza and the gates at the hub end. It reads the
+  registry in `lw_maps` for each map's footprint and spawn, and places
+  `schems/map_*.mts` (generated, not hand-authored) the same way. See
+  [`docs/maps.md`](docs/maps.md).
 
 An edit to either changes the landing world on the next *fresh* world. An
 existing world keeps whatever was already generated — delete it, visit new

@@ -86,3 +86,4 @@ jobs:
         python3 util/content/test_luanti_web_kinetic.py
         python3 util/content/test_luanti_web_tools.py
         python3 util/content/test_luanti_web_theater.py
+        python3 util/content/test_luanti_web_maps.py

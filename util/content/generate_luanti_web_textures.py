@@ -774,6 +774,203 @@ STATIC_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 
 
 # --------------------------------------------------------------------------
+# Themed map-pack node tiles (16x16)
+# --------------------------------------------------------------------------
+
+# lw_maps holds the props the three authored maps need and the core palette
+# cannot fake: a ribbed pumpkin, a lit face, cobweb, dead bark, hay, snow, a
+# torch, a canopy weave and a vine. Everything else those maps are built from
+# is a lw_nodes tile, often just tinted with ``[multiply`` the way the wool
+# weave is, so the pack costs ten tiles rather than thirty.
+
+def tex_pumpkin_side() -> Image:
+	base = rgb("d2701c")
+	image = new_image(S, S, base)
+	noise = Noise(101)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.90 + 0.18 * noise.at(x, y))
+	# Vertical ribs: the read that says "pumpkin" instead of "orange cube".
+	for x in (1, 5, 9, 13):
+		fill_rect(image, x, 0, x, S - 1, shade(base, 0.72))
+		fill_rect(image, x + 1, 0, x + 1, S - 1, shade(base, 1.14))
+	return image
+
+
+def tex_pumpkin_top() -> Image:
+	base = rgb("c4661a")
+	image = new_image(S, S, base)
+	noise = Noise(103)
+	for y in range(S):
+		for x in range(S):
+			ring = math.hypot(x - 7.5, y - 7.5)
+			image[y][x] = shade(base,
+				0.86 + 0.10 * math.sin(ring * 1.5) + 0.14 * noise.at(x, y))
+	stem = rgb("5e7a33")
+	fill_rect(image, 6, 6, 9, 9, stem)
+	fill_rect(image, 7, 4, 8, 5, shade(stem, 1.25))
+	stroke_rect(image, 6, 6, 9, 9, shade(stem, 0.78))
+	return image
+
+
+# One carved face, drawn once and shared by every jack-o'-lantern on the map.
+JACK_FACE = (
+	"................",
+	"................",
+	"...##......##...",
+	"..####....####..",
+	".######..######.",
+	"..####....####..",
+	"................",
+	".......##.......",
+	"......####......",
+	"................",
+	"..############..",
+	"..#.##.##.##.#..",
+	"..############..",
+	"...##########...",
+	"................",
+	"................",
+)
+
+
+def tex_jack_face() -> Image:
+	image = tex_pumpkin_side()
+	glow = rgb("ffd257")
+	edge = rgb("8a4a12")
+	for y, row in enumerate(JACK_FACE):
+		for x, bit in enumerate(row):
+			if bit != "#":
+				continue
+			put(image, x, y, glow)
+			# A dark lip around the cut so the light reads as coming through.
+			for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+				if (0 <= y + oy < S and 0 <= x + ox < S
+						and JACK_FACE[y + oy][x + ox] != "#"):
+					put(image, x + ox, y + oy, edge)
+	return image
+
+
+def tex_cobweb() -> Image:
+	image = new_image(S, S)
+	thread = rgb("e4e0d8", 225)
+	faint = rgb("cfcac2", 140)
+	# Radials run corner to corner and edge midpoint to edge midpoint, so two
+	# neighbouring cobwebs join up instead of ending in mid air.
+	for i in range(S):
+		put(image, i, i, thread)
+		put(image, S - 1 - i, i, thread)
+		put(image, i, 7, faint)
+		put(image, 7, i, faint)
+	for radius in (3, 6, 10):
+		for step in range(radius + 1):
+			for sx, sy in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+				put(image, 7 + sx * step, 7 + sy * (radius - step), thread)
+	return image
+
+
+def tex_dead_wood_side() -> Image:
+	base = rgb("5a4f42")
+	image = new_image(S, S, base)
+	noise = Noise(107)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.82 + 0.30 * noise.at(x // 2, y))
+	for x in (2, 6, 11, 14):
+		fill_rect(image, x, 0, x, S - 1, shade(base, 0.64))
+	for x, y0, y1 in ((4, 2, 7), (9, 6, 12), (13, 1, 5)):
+		fill_rect(image, x, y0, x, y1, shade(base, 1.24))
+	return image
+
+
+def tex_hay() -> Image:
+	base = rgb("d0ab5c")
+	image = new_image(S, S, base)
+	noise = Noise(109)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.84 + 0.28 * noise.at(x * 3, y))
+	for y in (3, 7, 11, 15):
+		fill_rect(image, 0, y, S - 1, y, shade(base, 0.70))
+	# Two binding cords, so the bale reads as a bale and not as sand.
+	for x in (4, 11):
+		fill_rect(image, x, 0, x, S - 1, shade(base, 0.56))
+	return image
+
+
+def tex_snow() -> Image:
+	base = rgb("eef3f8")
+	image = new_image(S, S, base)
+	noise = Noise(113)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.94 + 0.09 * noise.at(x, y))
+	# Faint drifts: pure white is invisible against pure white in flat shading.
+	for cx, cy in ((4, 5), (12, 9), (7, 13)):
+		fill_disc(image, cx, cy, 1.3, shade(base, 0.91))
+	return image
+
+
+def tex_torch() -> Image:
+	image = new_image(S, S)
+	handle = rgb("6d4a2c")
+	fill_rect(image, 7, 6, 8, S - 1, handle)
+	fill_rect(image, 7, 6, 7, S - 1, shade(handle, 1.20))
+	fill_rect(image, 6, 4, 9, 6, rgb("e06a1b"))
+	fill_rect(image, 6, 2, 9, 4, rgb("ffb52e"))
+	fill_rect(image, 7, 1, 8, 3, rgb("ffe8a8"))
+	return image
+
+
+def tex_leaves() -> Image:
+	"""Greyscale canopy weave, tinted per node with ``[multiply``.
+
+	One tile serves both the pine needles on the snow map and the oversized
+	garden canopy, the same trick the sixteen wool cubes use.
+	"""
+	image = new_image(S, S)
+	noise = Noise(127)
+	for y in range(S):
+		for x in range(S):
+			value = noise.at(x, y)
+			# Gaps, so a canopy reads as leaves rather than as a green slab.
+			if value < 0.20:
+				continue
+			level = clamp(148 + value * 107)
+			image[y][x] = (level, level, level, 255)
+	return image
+
+
+def tex_vine() -> Image:
+	image = new_image(S, S)
+	stem = rgb("3f7a30")
+	leaf = rgb("58a53c")
+	for y in range(S):
+		x = 7 + int(round(2.6 * math.sin(y * 0.6)))
+		put(image, x, y, stem)
+		put(image, x + 1, y, shade(stem, 1.20))
+		if y % 3 == 0:
+			fill_rect(image, x - 2, y, x - 1, y, leaf)
+		if y % 3 == 1:
+			fill_rect(image, x + 2, y, x + 3, y, shade(leaf, 0.84))
+	return image
+
+
+MAP_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_pumpkin_side.png": tex_pumpkin_side,
+	"lw_pumpkin_top.png": tex_pumpkin_top,
+	"lw_jack_face.png": tex_jack_face,
+	"lw_cobweb.png": tex_cobweb,
+	"lw_dead_wood.png": tex_dead_wood_side,
+	"lw_hay.png": tex_hay,
+	"lw_snow.png": tex_snow,
+	"lw_torch.png": tex_torch,
+	"lw_leaves.png": tex_leaves,
+	"lw_vine.png": tex_vine,
+}
+
+
+# --------------------------------------------------------------------------
 # Tool inventory icons (16x16)
 # --------------------------------------------------------------------------
 
@@ -1202,6 +1399,10 @@ def generate(root: pathlib.Path) -> list[pathlib.Path]:
 		filmstrip([ticker_frame(i) for i in range(TICKER_FRAMES)]))
 	emit(nodes / "lw_fire.png",
 		filmstrip([fire_frame(i) for i in range(FIRE_FRAMES)]))
+
+	maps = game / "mods" / "lw_maps" / "textures"
+	for name, factory in MAP_NODE_TEXTURES.items():
+		emit(maps / name, factory())
 
 	tools = game / "mods" / "lw_tools" / "textures"
 	for name, factory in TOOL_TEXTURES.items():
