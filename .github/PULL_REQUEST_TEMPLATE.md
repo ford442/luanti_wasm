@@ -19,3 +19,7 @@ This PR is a Work in Progress / Ready for Review.
 ## How to test
 
 <!-- Example code or instructions -->
+
+## WASM web pack
+
+- [ ] Does this change grow the web pack (`luanti.data`, `--preload-file` list, or bundled game/mod content)? If so, by how much, and does it stay within the content budget in [`wasm_porting.md`](../wasm_porting.md#content-budget)?

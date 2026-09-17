@@ -95,6 +95,10 @@ Then open `http://localhost:8000/build-wasm/bin/luanti.html`.
    - 256 MB initial heap is tight for big worlds + Lua + assets. Suggest chunking/unloading strategies when relevant.
    - Binary size matters for web delivery. `-Oz`, `-sASSERTIONS=0` for release, modularize when appropriate.
    - Profile in browser DevTools (Memory, Performance tabs) + Emscripten's `--profiling-funcs`.
+   - Before adding anything to the `--preload-file` list in `src/CMakeLists.txt`
+     (a new game, mod, or texture set), read the **Content Budget** section in
+     [wasm_porting.md](wasm_porting.md#content-budget) — it has the `luanti.data`
+     size limit and the allow/deny list for what ships in the demo pack.
 
 5. **Testing mindset**:
    - Manual browser testing (Chrome/Edge/Firefox with WebGPU/WebGL2 preferred).
