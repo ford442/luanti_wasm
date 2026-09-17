@@ -8,6 +8,7 @@
 
 #include "porting.h"
 #include "log.h"
+#include "util/numeric.h"
 
 #include <string>
 
@@ -65,9 +66,47 @@ bool is_safe_clip_name(const std::string &clip)
 	return clip.find("..") == std::string::npos;
 }
 
+// Theater Tier C spike state. The browser main thread decodes frames and
+// writes them straight into these buffers (shared Wasm memory, see
+// emscripten_start_video_texture()); the application worker is the only
+// reader, via emscripten_poll_video_texture_frame(). Double-buffered so a
+// frame currently being decoded never overwrites the one still being read.
+constexpr std::size_t VIDEO_FRAME_BUFFER_BYTES =
+	static_cast<std::size_t>(porting::VIDEO_TEXTURE_SPIKE_MAX_WIDTH) *
+	porting::VIDEO_TEXTURE_SPIKE_MAX_HEIGHT * 4;
+
+alignas(4) std::uint8_t video_frame_buffer[2][VIDEO_FRAME_BUFFER_BYTES];
+std::atomic<std::uint64_t> video_frame_generation{0};
+std::uint64_t video_frame_consumed = 0; // application worker only
+std::atomic<int> video_frame_ready_index{-1};
+std::atomic<int> video_frame_width{0};
+std::atomic<int> video_frame_height{0};
+// Written only by emscripten_start_video_texture()/emscripten_stop_video_texture(),
+// both of which run on the application worker; read on that same thread.
+std::string video_texture_name;
+
 } // namespace
 
 extern "C" {
+
+// Called by client/web/videotexture.js after it has written a decoded frame
+// into video_frame_buffer[buffer_index]. Runs on the browser main thread's
+// own module instance, touching only shared memory -- same pattern as the
+// persistence completion callbacks below.
+EMSCRIPTEN_KEEPALIVE void luanti_video_texture_frame(int buffer_index, int width, int height)
+{
+	if (buffer_index != 0 && buffer_index != 1)
+		return;
+	if (width <= 0 || height <= 0 ||
+			width > porting::VIDEO_TEXTURE_SPIKE_MAX_WIDTH ||
+			height > porting::VIDEO_TEXTURE_SPIKE_MAX_HEIGHT)
+		return;
+
+	video_frame_width.store(width, std::memory_order_relaxed);
+	video_frame_height.store(height, std::memory_order_relaxed);
+	video_frame_ready_index.store(buffer_index, std::memory_order_release);
+	video_frame_generation.fetch_add(1, std::memory_order_release);
+}
 
 EMSCRIPTEN_KEEPALIVE void luanti_persistence_sync_completed(double generation)
 {
@@ -253,6 +292,84 @@ void emscripten_hide_video_overlay()
 		if (theater && typeof theater["hide"] === "function")
 			theater["hide"]();
 	});
+}
+
+bool emscripten_start_video_texture(const std::string &clip,
+		const std::string &texture_name, int width, int height, int fps)
+{
+	if (!is_safe_clip_name(clip)) {
+		errorstream << "Refusing to start web video texture with unusable "
+			"clip name: " << clip << std::endl;
+		return false;
+	}
+	if (texture_name.empty() || texture_name.size() > 128) {
+		errorstream << "Refusing to start web video texture with unusable "
+			"texture name" << std::endl;
+		return false;
+	}
+
+	width = rangelim(width, 1, VIDEO_TEXTURE_SPIKE_MAX_WIDTH);
+	height = rangelim(height, 1, VIDEO_TEXTURE_SPIKE_MAX_HEIGHT);
+	fps = rangelim(fps, 1, VIDEO_TEXTURE_SPIKE_MAX_FPS);
+
+	video_texture_name = texture_name;
+	video_frame_ready_index.store(-1, std::memory_order_relaxed);
+	video_frame_generation.store(0, std::memory_order_relaxed);
+	video_frame_consumed = 0;
+
+	// Anything the launcher does not implement (no decoder shell, browser
+	// refuses the codec) is a normal "stay on Tier A/B" outcome, not an error.
+	return MAIN_THREAD_EM_ASM_INT({
+		var texturer = Module["luantiVideoTexture"];
+		if (!texturer || typeof texturer["start"] !== "function")
+			return 0;
+		return texturer["start"]({
+			"clip": UTF8ToString($0),
+			"width": $1,
+			"height": $2,
+			"fps": $3,
+			"bufferPtr0": $4,
+			"bufferPtr1": $5,
+			"bufferSize": $6
+		}) ? 1 : 0;
+	}, clip.c_str(), width, height, fps,
+			(int)(std::uintptr_t)video_frame_buffer[0],
+			(int)(std::uintptr_t)video_frame_buffer[1],
+			(int)VIDEO_FRAME_BUFFER_BYTES) != 0;
+}
+
+void emscripten_stop_video_texture()
+{
+	video_texture_name.clear();
+	video_frame_ready_index.store(-1, std::memory_order_relaxed);
+
+	MAIN_THREAD_EM_ASM({
+		var texturer = Module["luantiVideoTexture"];
+		if (texturer && typeof texturer["stop"] === "function")
+			texturer["stop"]();
+	});
+}
+
+bool emscripten_poll_video_texture_frame(std::string *out_texture_name,
+		const std::uint8_t **out_pixels, int *out_width, int *out_height)
+{
+	if (video_texture_name.empty())
+		return false;
+
+	const auto generation = video_frame_generation.load(std::memory_order_acquire);
+	if (generation == 0 || generation == video_frame_consumed)
+		return false;
+
+	const int index = video_frame_ready_index.load(std::memory_order_acquire);
+	if (index != 0 && index != 1)
+		return false;
+
+	video_frame_consumed = generation;
+	*out_texture_name = video_texture_name;
+	*out_pixels = video_frame_buffer[index];
+	*out_width = video_frame_width.load(std::memory_order_relaxed);
+	*out_height = video_frame_height.load(std::memory_order_relaxed);
+	return true;
 }
 
 } // namespace porting

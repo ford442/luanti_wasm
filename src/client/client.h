@@ -481,6 +481,12 @@ private:
 
 	bool canSendChatMessage() const;
 
+#ifdef __EMSCRIPTEN__
+	// Theater Tier C spike (GH issue #29): pull a decoded browser video frame,
+	// if a mod started one, and upload it onto its named engine texture.
+	void serviceVideoTextureSpike();
+#endif
+
 	float m_packetcounter_timer = 0.0f;
 	float m_connection_reinit_timer = 0.1f;
 	float m_avg_rtt_timer = 0.0f;

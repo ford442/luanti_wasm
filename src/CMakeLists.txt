@@ -836,7 +836,11 @@ if(BUILD_CLIENT)
 			-sEXIT_RUNTIME=0
 			-sASSERTIONS=1
 			-sDISABLE_EXCEPTION_CATCHING=0
-			-sEXPORTED_RUNTIME_METHODS=callMain
+			# HEAPU8 is for client/web/videotexture.js (Theater Tier C spike):
+			# with ALLOW_MEMORY_GROWTH, listing it here is what keeps
+			# Module.HEAPU8 pointing at the live buffer after a growth instead
+			# of a detached one.
+			-sEXPORTED_RUNTIME_METHODS=callMain,HEAPU8
 			-lidbfs.js
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
@@ -868,6 +872,7 @@ if(BUILD_CLIENT)
 			${CMAKE_SOURCE_DIR}/client/web/launcher.css
 			${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
 			${CMAKE_SOURCE_DIR}/client/web/theater.js
+			${CMAKE_SOURCE_DIR}/client/web/videotexture.js
 			${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
 			${CMAKE_SOURCE_DIR}/client/web/service-worker.js
 			${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
@@ -879,6 +884,7 @@ if(BUILD_CLIENT)
 				${CMAKE_SOURCE_DIR}/client/web/launcher.css
 				${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
 				${CMAKE_SOURCE_DIR}/client/web/theater.js
+				${CMAKE_SOURCE_DIR}/client/web/videotexture.js
 				${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
 				${CMAKE_SOURCE_DIR}/client/web/service-worker.js
 				${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg

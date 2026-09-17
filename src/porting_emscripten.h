@@ -40,6 +40,30 @@ bool emscripten_show_video_overlay(const std::string &clip,
 		const std::string &title, bool loop, bool muted);
 void emscripten_hide_video_overlay();
 
+// Theater Tier C spike (GH issue #29): the browser decodes a clip and hands
+// back RGBA frames, which get uploaded onto a named engine texture instead of
+// an HTML overlay. Deliberately capped to a single small quad while this is a
+// feasibility spike, not a production path.
+constexpr int VIDEO_TEXTURE_SPIKE_MAX_WIDTH = 320;
+constexpr int VIDEO_TEXTURE_SPIKE_MAX_HEIGHT = 180;
+constexpr int VIDEO_TEXTURE_SPIKE_MAX_FPS = 24;
+
+// Starts decoding `clip` in the browser and republishing frames onto the
+// engine texture named `texture_name` (any tile/node using that texture name
+// picks it up, same as any other named texture). `width`/`height`/`fps` are
+// clamped to the spike limits above. Returns false if the clip name is
+// unusable or no browser-side decoder is present.
+bool emscripten_start_video_texture(const std::string &clip,
+		const std::string &texture_name, int width, int height, int fps);
+void emscripten_stop_video_texture();
+
+// Called once per client frame on the application worker -- the only thread
+// allowed to touch ITextureSource. Returns true and fills the out params when
+// a new decoded frame is waiting; `*out_pixels` points at BGRA8 data (see
+// SColor.h's note on ECF_A8R8G8B8 memory order) valid until the next call.
+bool emscripten_poll_video_texture_frame(std::string *out_texture_name,
+		const std::uint8_t **out_pixels, int *out_width, int *out_height);
+
 // Save paths on any engine thread only record committed work. The application
 // worker calls emscripten_service_persistence() while pumping frames and the
 // service forwards eligible generations to the browser main thread.
@@ -84,6 +108,26 @@ inline bool emscripten_show_video_overlay(const std::string &,
 
 inline void emscripten_hide_video_overlay()
 {
+}
+
+constexpr int VIDEO_TEXTURE_SPIKE_MAX_WIDTH = 320;
+constexpr int VIDEO_TEXTURE_SPIKE_MAX_HEIGHT = 180;
+constexpr int VIDEO_TEXTURE_SPIKE_MAX_FPS = 24;
+
+inline bool emscripten_start_video_texture(const std::string &,
+		const std::string &, int, int, int)
+{
+	return false;
+}
+
+inline void emscripten_stop_video_texture()
+{
+}
+
+inline bool emscripten_poll_video_texture_frame(std::string *,
+		const std::uint8_t **, int *, int *)
+{
+	return false;
 }
 
 inline void emscripten_mark_persistence_dirty(
