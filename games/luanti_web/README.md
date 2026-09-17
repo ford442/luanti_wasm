@@ -51,6 +51,7 @@ leave it west, south and east for the [themed maps](docs/maps.md).
 |-----|--------------|
 | `lw_nodes` | the 45-node core palette (the theater adds 6 more) and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
+| `lw_dance` | the player character mesh, dance mode, the six-move dance pad, the stage hint |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
 | `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere, `/maps` |
 | `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
@@ -62,6 +63,12 @@ leave it west, south and east for the [themed maps](docs/maps.md).
   it never empties it.
 * `/stuff` re-gives the starter kit, `/palette` reopens the palette.
 * `/maps` lists the three themed maps; `/maps halloween` travels to one.
+* **Hold sneak+zoom** (`Shift`+`Z`) or `/dance` toggles **dance mode**. While it
+  is on, the number keys are the moves — `1` groove, `2` spin, `3` wave,
+  `4` stomp, `5` robot, `6` bow, `7` random, `8` stop — and your hotbar slot and
+  wielded item come back when you leave. `/dance help` lists the binds,
+  `/dance pad` opens a tap pad, and `F7` is how you watch yourself.
+  Full details in [`docs/dance.md`](docs/dance.md).
 * **Param2 Tool** — punch/place nudge a node's param2 (+1 / -1, sneak for ±8). Same gestures as devtest's Param2 tool.
 * **Paint Tool** — sneak+use samples a node; use stamps that type onto pointed nodes; right click cycles the wool palette.
 * **Clone Stick** — left click pos1, right click pos2, sneak+left copy, sneak+right paste. Volume is capped at 32³.
@@ -76,6 +83,10 @@ leave it west, south and east for the [themed maps](docs/maps.md).
 
 Fly, fast and noclip are on for everyone. There is no damage, no hunger, no
 combat and no crafting.
+
+Visitors have a body: `lw_dance` gives the player the classic character mesh,
+which is what `set_animation` and the dance poses act on (and what the theater
+seats were already written for).
 
 ## The theater, in tiers
 
