@@ -30,8 +30,9 @@ QA sandbox and this game is not a replacement for it.
 3. **Pixel-art gallery** (east) — three framed wool artworks, uplit, with a
    partition wall so each piece has its own wall.
 4. **Kinetic courtyard** (centre) — an animated LED ticker wall, an animated
-   water channel, a node-timer light chase, and a cart entity on a plank loop.
-   All engine-native: no shaders, no video.
+   water channel, a campfire, a node-timer light chase and hourglass, a cart
+   and floating title card, and a six-frame living pavilion inside the cart
+   loop. All engine-native: no shaders, no video.
 5. **Theater** (north) — marquee, curtains, raked seating, and a 6x4 screen.
 
 ## Mods
@@ -90,12 +91,20 @@ unchanged tree produces an empty diff. Sizes, cell counts and frame counts are
 constants at the top of that script and are mirrored by
 `lw_theater/init.lua`; change them together.
 
-To author a new filmstrip from real footage, produce a vertical strip of square
-frames, which is what `vertical_frames` expects:
+Frame-strip authoring from real footage (ffmpeg → vertical PNG), including the
+exact `tile=1x16` recipe the theater cells expect, is in
+[`docs/filmstrips.md`](docs/filmstrips.md). The short form:
 
 ```sh
-ffmpeg -i clip.mp4 -vf "fps=12,scale=32:32" -frames:v 16 frame%02d.png
-magick montage frame*.png -tile 1x16 -geometry +0+0 strip.png
+ffmpeg -y -i clip.mp4 \
+	-vf "fps=12,scale=32:32:flags=neighbor,tile=1x16" \
+	-frames:v 1 strip.png
+```
+
+The living pavilion's six schematic frames are generated separately:
+
+```sh
+python3 util/content/generate_luanti_web_living.py
 ```
 
 ## Editing the world
@@ -106,8 +115,9 @@ mapgen from two sources, both in git, the first time each chunk is generated:
 * `lw_world/init.lua` — a build order of box operations, plus everything
   derived from data: the lettering, the pixel art, the library pedestals.
 * `lw_world/schems/*.mts` — buildings authored in game: the theater (seats,
-  raked floor, screen and all), the plaza fountain, the colonnade column, and
-  the gallery frame. `init.lua` says where each one goes with `schem()`.
+  raked floor, screen and all), the plaza fountain, the colonnade column, the
+  gallery frame, and the six living-pavilion frames. `init.lua` says where
+  each one goes with `schem()`.
 
 An edit to either changes the landing world on the next *fresh* world. An
 existing world keeps whatever was already generated — delete it, visit new

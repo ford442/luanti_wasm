@@ -435,43 +435,96 @@ end
 -- 4. Kinetic courtyard
 --------------------------------------------------------------------------
 
--- Chasing lights are driven by one node timer on an invisible controller. An
--- ABM would fire per node per interval whether or not anyone is watching; a
--- single timer that re-arms itself only runs while the block is loaded, which
--- matters when the server shares a core with the browser's compositor.
+-- Kinetic controllers share one airlike drawtype. An ABM would fire per node
+-- per interval whether or not anyone is watching; a single timer that re-arms
+-- itself only runs while the block is loaded, which matters when the server
+-- shares a core with the browser's compositor (wasm_porting.md Phase 3).
+local function register_controller(name, description, interval, on_timer)
+	core.register_node(name, {
+		description = description,
+		drawtype = "airlike",
+		paramtype = "light",
+		sunlight_propagates = true,
+		walkable = false,
+		pointable = false,
+		diggable = false,
+		buildable_to = false,
+		groups = {not_in_creative_inventory = 1},
+		on_construct = function(pos)
+			core.get_node_timer(pos):start(interval)
+		end,
+		on_timer = on_timer,
+	})
+end
+
 local CHASE_LENGTH = 16
 local CHASE_COLORS = {"cyan", "blue", "violet", "magenta"}
 local CHASE_ORIGIN = {x = -8, y = FLOOR + 5, z = 9}
 
-core.register_node("lw_world:chaser", {
-	description = "Chase Light Controller",
-	drawtype = "airlike",
-	paramtype = "light",
-	sunlight_propagates = true,
-	walkable = false,
-	pointable = false,
-	diggable = false,
-	buildable_to = false,
-	groups = {not_in_creative_inventory = 1},
-	on_construct = function(pos)
-		core.get_node_timer(pos):start(0.4)
-	end,
-	on_timer = function(pos)
+register_controller("lw_world:chaser", "Chase Light Controller", 0.4, function(pos)
+	local meta = core.get_meta(pos)
+	local step = (meta:get_int("step") + 1) % CHASE_LENGTH
+	meta:set_int("step", step)
+	for i = 1, CHASE_LENGTH - 1 do
+		local lit = (i - step) % CHASE_LENGTH < 3
+		local color = lit and "white" or CHASE_COLORS[(i % #CHASE_COLORS) + 1]
+		local target = "lw_nodes:wool_" .. color
+		local at = {x = pos.x + i, y = pos.y, z = pos.z}
+		if core.get_node(at).name ~= target then
+			core.swap_node(at, {name = target})
+		end
+	end
+	return true
+end)
+
+-- Rising-and-falling water column. Four interior nodes, one swap each tick.
+local HOURGLASS_HEIGHT = 4
+local HOURGLASS_ORIGIN = {x = -5, y = FLOOR, z = 26}
+
+register_controller("lw_world:hourglass", "Hourglass Controller", 1.2, function(pos)
+	local meta = core.get_meta(pos)
+	local step = (meta:get_int("step") + 1) % (HOURGLASS_HEIGHT * 2)
+	meta:set_int("step", step)
+	local filled = step < HOURGLASS_HEIGHT and step or (HOURGLASS_HEIGHT * 2 - step)
+	local x, z = pos.x + 1, pos.z + 1
+	for y = 0, HOURGLASS_HEIGHT - 1 do
+		local at = {x = x, y = pos.y + y, z = z}
+		local target = y < filled and "lw_nodes:water" or "air"
+		if core.get_node(at).name ~= target then
+			core.swap_node(at, {name = target})
+		end
+	end
+	return true
+end)
+
+-- Stop-motion pavilion. Six committed schematics, ping-ponged so the loop
+-- does not snap from the brightest frame back to the empty shell. Interval
+-- is conservative on purpose: place_schematic is not used (it caches the
+-- first file forever) and even apply_diff is skipped when the block is
+-- unloaded or a previous tick somehow overlapped.
+local LIVING_FRAME_COUNT = 6
+local LIVING_INTERVAL = 2.8
+local LIVING_ORIGIN = {x = 5, y = FLOOR, z = 16}
+local LIVING_FRAMES = {}
+for index = 0, LIVING_FRAME_COUNT - 1 do
+	LIVING_FRAMES[index + 1] = schems.load("living_" .. index)
+end
+-- 0,1,2,3,4,5,4,3,2,1 — six files, ten ticks, no jump at the seam.
+local LIVING_SEQUENCE = {1, 2, 3, 4, 5, 6, 5, 4, 3, 2}
+
+register_controller("lw_world:living", "Living Building Controller", LIVING_INTERVAL,
+	function(pos)
 		local meta = core.get_meta(pos)
-		local step = (meta:get_int("step") + 1) % CHASE_LENGTH
-		meta:set_int("step", step)
-		for i = 1, CHASE_LENGTH - 1 do
-			local lit = (i - step) % CHASE_LENGTH < 3
-			local color = lit and "white" or CHASE_COLORS[(i % #CHASE_COLORS) + 1]
-			local target = "lw_nodes:wool_" .. color
-			local at = {x = pos.x + i, y = pos.y, z = pos.z}
-			if core.get_node(at).name ~= target then
-				core.swap_node(at, {name = target})
-			end
+		local tick = meta:get_int("tick")
+		local next_tick = (tick % #LIVING_SEQUENCE) + 1
+		local piece = LIVING_FRAMES[LIVING_SEQUENCE[next_tick]]
+		-- apply_diff returns nil when the mapblock is unloaded. Leave the
+		-- tick alone so we retry the same frame instead of skipping ahead.
+		if schems.apply_diff(piece, pos) ~= nil then
+			meta:set_int("tick", next_tick)
 		end
 		return true
-	end,
-})
+	end)
 
 local COURTYARD = {x0 = -12, x1 = 12, z0 = 4, z1 = 32}
 
@@ -495,6 +548,24 @@ local function build_courtyard()
 		"lw_nodes:wool_cyan")
 	put(CHASE_ORIGIN.x, CHASE_ORIGIN.y, CHASE_ORIGIN.z, "lw_world:chaser")
 
+	-- Fire pit in front of the ticker: animated-tile flames, no spreading.
+	fill(-8, GROUND, 11, -6, GROUND, 13, "lw_nodes:polished_stone")
+	put(-7, FLOOR, 12, "lw_nodes:fire")
+
+	-- Hourglass: a glass column whose water rises and falls on a node timer.
+	local hx, hz = HOURGLASS_ORIGIN.x, HOURGLASS_ORIGIN.z
+	fill(hx, GROUND, hz, hx + 2, GROUND, hz + 2, "lw_nodes:gold_trim")
+	fill(hx, FLOOR, hz, hx + 2, FLOOR + HOURGLASS_HEIGHT - 1, hz + 2, "lw_nodes:glass")
+	fill(hx + 1, FLOOR, hz + 1, hx + 1, FLOOR + HOURGLASS_HEIGHT - 1, hz + 1, "air")
+	put(hx, FLOOR, hz, "lw_world:hourglass")
+
+	-- Living pavilion inside the cart loop. Frame 0 is stamped like any other
+	-- schematic; the controller at its origin swaps later frames in place.
+	local living = schem(LIVING_ORIGIN.x, LIVING_ORIGIN.y, LIVING_ORIGIN.z, "living_0")
+	assert(living.size.x == 4 and living.size.y == 5 and living.size.z == 4,
+		"lw_world: living_0.mts must stay 4x5x4 (see generate_luanti_web_living.py)")
+	put(LIVING_ORIGIN.x, LIVING_ORIGIN.y, LIVING_ORIGIN.z, "lw_world:living")
+
 	-- Plank loop on the east side for the cart to run.
 	fill(4, GROUND, 8, 9, GROUND, 8, "lw_nodes:planks")
 	fill(4, GROUND, 28, 9, GROUND, 28, "lw_nodes:planks")
@@ -511,8 +582,9 @@ local function build_courtyard()
 	put(6, FLOOR, 12, "lw_nodes:pedestal")
 	put(6, FLOOR + 1, 12, "lw_nodes:poster")
 	label(6, FLOOR + 1, 12,
-		"Kinetic courtyard: animated tiles (ticker wall, water), a node-timer " ..
-		"light chase, and a cart entity. Engine-native — no shaders, no video.")
+		"Kinetic courtyard: animated tiles (ticker, fire, water), a node-timer " ..
+		"light chase and hourglass, a cart and title card, and a six-frame " ..
+		"living pavilion. Engine-native — no shaders, no video.")
 end
 
 --------------------------------------------------------------------------
@@ -868,19 +940,46 @@ core.register_entity("lw_world:cart", {
 	end,
 })
 
-local function ensure_cart()
-	local centre = {x = 6, y = FLOOR, z = 18}
-	for _, object in ipairs(core.get_objects_inside_radius(centre, 24)) do
+-- A sprite that always faces the camera, bobbing over the courtyard so the
+-- kinetic space reads as moving even before the visitor notices the cart.
+core.register_entity("lw_world:title_card", {
+	initial_properties = {
+		physical = false,
+		collide_with_objects = false,
+		pointable = false,
+		visual = "sprite",
+		visual_size = {x = 2.2, y = 1.2},
+		textures = {"lw_poster.png"},
+		spritediv = {x = 1, y = 1},
+		static_save = false,
+		infotext = "Luanti Web",
+	},
+	age = 0,
+	on_step = function(self, dtime)
+		self.age = self.age + dtime
+		self.object:set_pos({
+			x = 0,
+			y = FLOOR + 6.2 + 0.35 * math.sin(self.age * 1.1),
+			z = 18,
+		})
+	end,
+})
+
+local function ensure_entity(name, pos, radius)
+	for _, object in ipairs(core.get_objects_inside_radius(pos, radius)) do
 		local entity = object:get_luaentity()
-		if entity and entity.name == "lw_world:cart" then
+		if entity and entity.name == name then
 			return
 		end
 	end
-	core.add_entity({x = CART_PATH[1].x, y = FLOOR + 0.3, z = CART_PATH[1].z},
-		"lw_world:cart")
+	core.add_entity(pos, name)
 end
 
 core.register_on_joinplayer(function()
-	-- Give the courtyard a moment to load before looking for the cart.
-	core.after(3, ensure_cart)
+	-- Give the courtyard a moment to load before looking for movers.
+	core.after(3, function()
+		ensure_entity("lw_world:cart",
+			{x = CART_PATH[1].x, y = FLOOR + 0.3, z = CART_PATH[1].z}, 24)
+		ensure_entity("lw_world:title_card", {x = 0, y = FLOOR + 6.2, z = 18}, 8)
+	end)
 end)

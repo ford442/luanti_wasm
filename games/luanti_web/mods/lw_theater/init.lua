@@ -21,7 +21,8 @@ lw_theater = {}
 local storage = core.get_mod_storage()
 
 -- Must match SCREEN_COLS / SCREEN_ROWS / REEL_FRAMES / CELL in
--- util/content/generate_luanti_web_textures.py.
+-- util/content/generate_luanti_web_textures.py. Filmstrip authoring
+-- (ffmpeg → vertical PNG) is documented in games/luanti_web/docs/filmstrips.md.
 local COLS = 6
 local ROWS = 4
 local FRAMES = 16
