@@ -142,6 +142,12 @@ private:
 
 	// clear_web_video() -- browser client only
 	static int l_clear_web_video(lua_State *L);
+
+	// set_web_video_texture(def) -- browser client only, theater Tier C spike
+	static int l_set_web_video_texture(lua_State *L);
+
+	// clear_web_video_texture() -- browser client only
+	static int l_clear_web_video_texture(lua_State *L);
 #endif
 
 public:

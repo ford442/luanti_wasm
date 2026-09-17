@@ -643,6 +643,10 @@ void Client::step(float dtime)
 		}
 	}
 
+#ifdef __EMSCRIPTEN__
+	serviceVideoTextureSpike();
+#endif
+
 	/*
 		Replace updated meshes
 	*/
@@ -2025,6 +2029,34 @@ ITextureSource* Client::getTextureSource()
 {
 	return m_tsrc;
 }
+
+#ifdef __EMSCRIPTEN__
+void Client::serviceVideoTextureSpike()
+{
+	std::string texture_name;
+	const std::uint8_t *pixels = nullptr;
+	int width = 0;
+	int height = 0;
+	if (!porting::emscripten_poll_video_texture_frame(
+			&texture_name, &pixels, &width, &height))
+		return;
+
+	video::IVideoDriver *driver = RenderingEngine::get_video_driver();
+	// createImageFromData() with ownForeignMemory=false copies the pixels, so
+	// the frame buffer can be reused by the next decoded frame right away.
+	video::IImage *img = driver->createImageFromData(video::ECF_A8R8G8B8,
+			core::dimension2d<u32>(width, height),
+			const_cast<std::uint8_t *>(pixels), false);
+	if (!img)
+		return;
+
+	// insertSourceImage() takes ownership of img. If a texture already exists
+	// under this name it is rebuilt in place -- lock/memcpy/unlock/
+	// regenerateMipMapLevels, i.e. the glTexSubImage2D-style upload the Tier C
+	// spike asked for, with no IrrlichtMt changes needed.
+	m_tsrc->insertSourceImage(texture_name, img);
+}
+#endif
 IWritableShaderSource* Client::getShaderSource()
 {
 	return m_shsrc;

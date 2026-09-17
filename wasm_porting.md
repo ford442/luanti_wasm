@@ -577,6 +577,11 @@ Do not bundle:
 
 When a change grows the web pack, say by how much in the pull request.
 
+Theater has three tiers: Tier A (engine-native animated tiles) and Tier B (an
+HTML `<video>` overlay) are shipped and playable. Tier C (decoding frames onto
+a node's texture instead of an overlay) is a feasibility spike, not demo
+content — see `docs/wasm-issues/08-theater-tier-c-video-texture-spike.md`.
+
 ### Read-Write User Data
 Use `IDBFS` mounted at runtime.
 
