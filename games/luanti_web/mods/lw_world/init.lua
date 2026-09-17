@@ -641,6 +641,20 @@ local function build_theater()
 	put(6, FLOOR + 1, 38, "lw_theater:button")
 	label(6, FLOOR + 1, 38, "Punch: next reel")
 
+	-- The stage: the strip of carpet between the front row and the screen,
+	-- and the marks a routine stands its cast on. Marks are nodes rather than
+	-- coordinates in a Lua file so the choreography travels with the build —
+	-- move a mark in game, save the schematic, and the dance moves with it.
+	fill(-6, GROUND, 56, 6, GROUND, 59, "lw_dance:stage")
+	put(-2, FLOOR, 57, "lw_dance:mark_1")
+	put(0, FLOOR, 57, "lw_dance:mark_lead")
+	put(2, FLOOR, 57, "lw_dance:mark_2")
+	put(6, FLOOR, 58, "lw_dance:director")
+	label(6, FLOOR, 58,
+		"Stage director: punch it to start the chorus line, punch it again to " ..
+		"stop. /routine list shows every routine, /routine join puts you in " ..
+		"step with the one that is running.")
+
 	label(-6, FLOOR + 1, 38,
 		"Theater: the wall is already playing. Punch the red button or left " ..
 		"click the Screen Remote for the next reel, right click for the " ..
@@ -895,6 +909,17 @@ end
 
 lw_theater.register_screen(
 	{x = SCREEN_X0, y = SCREEN_TOP, z = SCREEN_Z}, {x = 1, y = 0, z = 0})
+
+-- Where the chorus line happens, and which node turns it on. `pos` is the
+-- middle of the stage (the node the dancers stand in); the director node is
+-- off to the side, because nobody wants a lectern in the middle of a chorus
+-- line. The audience is south of the stage, looking north at the screen.
+lw_dance.register_stage({
+	routine = "chorus_line_v1",
+	pos = {x = 0, y = FLOOR, z = 57},
+	node = {x = 6, y = FLOOR, z = 58},
+	facing = {x = 0, y = 0, z = -1},
+})
 
 core.after(0, function()
 	-- Midday, with the clock frozen (time_speed = 0 in the game's

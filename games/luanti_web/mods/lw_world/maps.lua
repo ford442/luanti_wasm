@@ -178,6 +178,70 @@ function maps.build(api)
 					map.size.x, map.size.y, map.size.z))
 	end
 
+	-- 5. Dance stages. Marks and a director node per themed map, stamped after
+	-- the schematic so they sit on the build rather than inside it, plus the
+	-- stage registration that tells lw_dance which routine belongs where.
+	-- Local coordinates are the map schematic's own, checked against what
+	-- util/content/generate_luanti_web_maps.py puts there.
+	--
+	-- The snow mountain has no stage: the routines are all people and there is
+	-- no penguin rig in the tree. A line of recoloured humans on an overlook
+	-- would be a worse demo than an empty overlook, so it waits for a mesh.
+	local STAGES = {
+		{
+			routine = "porch_haunt",
+			map = "halloween",
+			-- The porch deck, with the audience east of it on the two rows of
+			-- seats. The lead stands a node forward of the other two.
+			pos = {5, 6, 8},
+			node = {3, 6, 9},
+			facing = {x = 1, y = 0, z = 0},
+			marks = {
+				{5, 6, 8, "mark_lead"},
+				{4, 6, 6, "mark_1"},
+				{4, 6, 10, "mark_2"},
+			},
+			sign = "Porch director: punch to raise the haunt, punch again to " ..
+				"send it back. /routine join dances along with it.",
+		},
+		{
+			routine = "fruit_stomp",
+			map = "fruit_garden",
+			-- The floor of the melon bowl, with the audience on the path to
+			-- the north. Only the mascot gets a mark: the berry is on a raft.
+			pos = {28, 2, 11},
+			node = {26, 4, 20},
+			facing = {x = 0, y = 0, z = 1},
+			marks = {{28, 2, 11, "mark_lead"}},
+			sign = "Garden director: punch to start the fruit stomp. The melon " ..
+				"has no skeleton and dances anyway; the berry rides the juice.",
+		},
+	}
+
+	for _, stage in ipairs(STAGES) do
+		local map = lw_maps.by_id[stage.map]
+		local function world(local_pos)
+			return {
+				x = map.min.x + local_pos[1],
+				y = map.min.y + local_pos[2],
+				z = map.min.z + local_pos[3],
+			}
+		end
+		for _, mark in ipairs(stage.marks) do
+			local at = world(mark)
+			put(at.x, at.y, at.z, "lw_dance:" .. mark[4])
+		end
+		local node = world(stage.node)
+		put(node.x, node.y, node.z, "lw_dance:director")
+		label(node.x, node.y, node.z, stage.sign)
+		lw_dance.register_stage({
+			routine = stage.routine,
+			pos = world(stage.pos),
+			node = node,
+			facing = stage.facing,
+		})
+	end
+
 	return {
 		min = {x = bounds.x0, y = 0, z = bounds.z0},
 		max = {x = bounds.x1, y = bounds.y1 + 2, z = bounds.z1},

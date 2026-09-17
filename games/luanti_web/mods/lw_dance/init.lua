@@ -28,11 +28,6 @@ local MODPATH = core.get_modpath("lw_dance")
 -- Tunables
 --------------------------------------------------------------------------
 
--- Procedural poses are sent as sparse keys and interpolated on the client
--- over exactly one step, so a smooth dance costs 10 object messages a second
--- instead of one per server step.
-local POSE_STEP = 0.1
-
 -- How long sneak+zoom must be held together to toggle dance mode. Long
 -- enough that holding zoom while sneaking up on something does not dance.
 -- Once it fires it latches until both keys come up, so leaning on the two
@@ -175,6 +170,18 @@ function lw_dance.random_move()
 end
 
 --------------------------------------------------------------------------
+-- The shared driver
+--------------------------------------------------------------------------
+
+-- Everything below this line drives a *player*. How a move actually reaches an
+-- object — frame ranges, named tracks, bone keys, the per-bone dedupe — lives
+-- in driver.lua, because the director drives its dancers through exactly the
+-- same functions.
+dofile(MODPATH .. DIR_DELIM .. "driver.lua")
+
+local POSE_STEP = lw_dance.POSE_STEP
+
+--------------------------------------------------------------------------
 -- State
 --------------------------------------------------------------------------
 
@@ -207,88 +214,15 @@ end
 -- Animation and pose driver
 --------------------------------------------------------------------------
 
-local function frame_range(model, anim)
-	if type(anim) == "table" then
-		return anim
-	end
-	return model.animations and model.animations[anim] or nil
-end
-
--- Base animation: the legs. `walking` swaps in the walk cycle so a visitor
--- who dances while moving does not skate across the plaza.
+-- The player's own model, and then straight into the shared driver. The
+-- wrappers exist so the rest of this file reads as it did before the director
+-- arrived: everything they add is "the model is whatever this visitor wears".
 local function apply_base_animation(player, def, walking)
-	local model = lw_dance.model_of(player)
-	if not model then
-		return
-	end
-
-	if model.tracks and def and def.track then
-		-- Multi-track glTF path (v1.1): the legs keep their own track, the
-		-- move plays on top of it at a higher priority.
-		local legs = walking and model.tracks.walk or model.tracks.idle
-		if legs then
-			player:play_animation(legs, {speed = 1, loop = true, blend = 0.2})
-		end
-		player:play_animation(def.track, {
-			speed = def.speed or 1,
-			loop = def.loop,
-			blend = def.blend or 0.2,
-			priority = def.priority or 1,
-		})
-		return
-	end
-
-	local key = walking and "walk" or (def and def.anim or "stand")
-	local range = frame_range(model, key) or frame_range(model, "stand")
-	if not range then
-		return
-	end
-	local speed = def and def.speed or nil
-	if walking then
-		speed = nil
-	end
-	player:set_animation(range, speed or model.animation_speed or 30,
-			def and def.blend or 0.1, def and def.loop ~= false)
+	lw_dance.apply_base_animation(player, lw_dance.model_of(player), def, walking)
 end
 
-local function vec_from_degrees(t)
-	if not t then
-		return nil
-	end
-	return vector.new(math.rad(t.x or 0), math.rad(t.y or 0), math.rad(t.z or 0))
-end
-
-local function vec_from_units(t)
-	if not t then
-		return nil
-	end
-	return vector.new(t.x or 0, t.y or 0, t.z or 0)
-end
-
--- One pose keyframe. `interpolation` is the step length, so the client walks
--- from this key to the next one and the motion is continuous even though the
--- server only speaks ten times a second.
---
--- `cache` holds what was last sent per bone so an unchanged bone costs
--- nothing: a held pose (the Robot) or a move that only uses the arms then
--- sends a handful of messages a second instead of sixty.
 local function apply_pose(player, pose, interpolation, cache)
-	for _, bone in ipairs(lw_dance.bones) do
-		local entry = pose and pose[bone]
-		local rot = vec_from_degrees(entry and entry.rot) or vector.zero()
-		local pos = vec_from_units(entry and entry.pos) or vector.zero()
-		local key = ("%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f")
-				:format(rot.x, rot.y, rot.z, pos.x, pos.y, pos.z, interpolation)
-		if not cache or cache[bone] ~= key then
-			if cache then
-				cache[bone] = key
-			end
-			player:set_bone_override(bone, {
-				rotation = {vec = rot, interpolation = interpolation, absolute = false},
-				position = {vec = pos, interpolation = interpolation, absolute = false},
-			})
-		end
-	end
+	lw_dance.apply_pose(player, pose, interpolation, cache)
 end
 
 local function clear_pose(player)
@@ -299,9 +233,7 @@ local function clear_pose(player)
 	core.after(0.3, function()
 		local who = core.get_player_by_name(name)
 		if who and not dancers[name] then
-			for _, bone in ipairs(lw_dance.bones) do
-				who:set_bone_override(bone, nil)
-			end
+			lw_dance.clear_bones(who)
 		end
 	end)
 end
@@ -403,6 +335,9 @@ function lw_dance.exit(player)
 		return false, "Not in dance mode."
 	end
 	dancers[name] = nil
+	if lw_dance.leave_routine then
+		lw_dance.leave_routine(player, true)
+	end
 
 	clear_pose(player)
 	apply_base_animation(player, nil, false)
@@ -436,6 +371,12 @@ function lw_dance.run_slot(player, slot)
 	local action = lw_dance.slots[slot]
 	if not action then
 		return
+	end
+	-- A visitor dancing along with a routine (director.lua) has just pressed a
+	-- move key, which means they want the floor back. The director never fights
+	-- a player for their own body.
+	if lw_dance.leave_routine then
+		lw_dance.leave_routine(player, true)
 	end
 	if action == "@random" then
 		local pick = lw_dance.random_move()
@@ -539,9 +480,7 @@ core.register_on_joinplayer(function(player)
 	lw_dance.set_model(player)
 	-- Whatever the visitor's last session left on the skeleton, the fresh
 	-- one starts neutral and standing.
-	for _, bone in ipairs(lw_dance.bones) do
-		player:set_bone_override(bone, nil)
-	end
+	lw_dance.clear_bones(player)
 	apply_base_animation(player, nil, false)
 end)
 
@@ -560,3 +499,5 @@ end)
 
 dofile(MODPATH .. DIR_DELIM .. "moves.lua")
 dofile(MODPATH .. DIR_DELIM .. "ui.lua")
+dofile(MODPATH .. DIR_DELIM .. "routine.lua")
+dofile(MODPATH .. DIR_DELIM .. "director.lua")
