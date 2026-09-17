@@ -1,0 +1,12 @@
+"Minetest Sam" — shipped here as the showcase player character:
+
+Original model by MirceaKitsune (CC BY-SA 3.0).
+Various alterations and fixes by kilbith, sofar, xunto, Rogier-5, TeTpaAka, Desour,
+stujones11, An0n3m0us (CC BY-SA 3.0):
+  lw_dance_character.b3d
+
+Jordach (CC BY-SA 3.0):
+  ../textures/lw_dance_character.png
+
+Both files are byte-identical copies of games/devtest/mods/testentities/
+models/testentities_sam.{b3d,png}; see that directory's LICENSE.txt.
