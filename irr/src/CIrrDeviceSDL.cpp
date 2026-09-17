@@ -703,7 +703,7 @@ static void logBrowserWebGLFailure()
 	MAIN_THREAD_EM_ASM({
 		var c = Module['canvas'] || document.getElementById('canvas');
 		var parent = c && c.parentElement;
-		var info = {
+		var info = ({
 			found: !!c,
 			connected: !!(c && c.isConnected),
 			hidden: !!(c && c.hidden),
@@ -715,7 +715,7 @@ static void logBrowserWebGLFailure()
 			clientHeight: c ? c.clientHeight : 0,
 			innerWidth: window.innerWidth | 0,
 			innerHeight: window.innerHeight | 0
-		};
+		});
 		console.error('Luanti: WebGL context creation failed', info);
 	});
 }
