@@ -288,6 +288,14 @@ core.register_node("lw_theater:marquee", {
 -- The remote
 --------------------------------------------------------------------------
 
+-- The Screen Remote is the only item that talks to the theater. Paint, clone
+-- and the schematic stamp must not call set_reel / show_web_video themselves:
+-- they go through lw_theater.on_remote so a later playback backend can land
+-- without hunting for every item callback. If this hook is missing (a world
+-- running without the theater mod), the item itself prints a chat hint.
+
+lw_theater.REMOTE_ACTIONS = { "next", "pause", "play" }
+
 local function cycle(player)
 	local reel = lw_theater.next_reel()
 	local ok, err = lw_theater.set_reel(reel)
@@ -305,9 +313,35 @@ local function cycle(player)
 	end
 end
 
+local function pause(player)
+	local name = player:get_player_name()
+	local ok, err = lw_theater.set_reel("off")
+	if not ok then
+		core.chat_send_player(name, err)
+		return
+	end
+	lw_theater.hide_web_video()
+	lw_theater.overlay_on = false
+	set_house_lights(true)
+	core.chat_send_player(name, "Screen off. House lights up.")
+end
+
 local function toggle_overlay(player)
 	local name = player:get_player_name()
 	if not lw_theater.web_video_available() then
+		-- Tier A still works: "play" turns the animated wall on when it is
+		-- dark, otherwise points at the next-reel gesture.
+		if lw_theater.current_reel() == "off" then
+			local ok, err = lw_theater.set_reel(lw_theater.reels[1])
+			if not ok then
+				core.chat_send_player(name, err)
+				return
+			end
+			set_house_lights(false)
+			core.chat_send_player(name, REEL_TITLES[lw_theater.reels[1]]
+				or lw_theater.reels[1])
+			return
+		end
 		core.chat_send_player(name,
 			"Video overlay is a browser-only feature. The animated screen " ..
 			"(left click with the remote) works everywhere.")
@@ -327,27 +361,61 @@ local function toggle_overlay(player)
 	end
 end
 
+-- action: "next" | "pause" | "play". Returns true when the action ran.
+function lw_theater.on_remote(player, action)
+	if not (player and player:is_player()) then
+		return false
+	end
+	if action == "next" then
+		cycle(player)
+		return true
+	elseif action == "pause" then
+		pause(player)
+		return true
+	elseif action == "play" then
+		toggle_overlay(player)
+		return true
+	end
+	core.chat_send_player(player:get_player_name(),
+		"Unknown remote action: " .. tostring(action))
+	return false
+end
+
+local function fire_remote(player, action)
+	local handler = lw_theater.on_remote
+	if type(handler) ~= "function" then
+		if player and player:is_player() then
+			core.chat_send_player(player:get_player_name(),
+				"The Screen Remote does nothing until the theater is loaded.")
+		end
+		return
+	end
+	handler(player, action)
+end
+
 core.register_craftitem("lw_theater:remote", {
 	description = "Screen Remote\n" ..
 		"Left click: next reel\n" ..
-		"Right click: browser video overlay (web client only)",
+		"Sneak+left: pause (screen off)\n" ..
+		"Right click: play (browser overlay, or the animated wall)",
 	inventory_image = "lw_remote.png",
 	stack_max = 1,
 	on_use = function(itemstack, user)
 		if user and user:is_player() then
-			cycle(user)
+			local ctrl = user:get_player_control()
+			fire_remote(user, (ctrl and ctrl.sneak) and "pause" or "next")
 		end
 		return itemstack
 	end,
 	on_place = function(itemstack, placer)
 		if placer and placer:is_player() then
-			toggle_overlay(placer)
+			fire_remote(placer, "play")
 		end
 		return itemstack
 	end,
 	on_secondary_use = function(itemstack, user)
 		if user and user:is_player() then
-			toggle_overlay(user)
+			fire_remote(user, "play")
 		end
 		return itemstack
 	end,

@@ -42,6 +42,7 @@ QA sandbox and this game is not a replacement for it.
 | `lw_nodes` | the 45-node core palette (the theater adds 4 more) and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
+| `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
 | `lw_world` | the authored world and its schematics, stamped onto a singlenode mapgen; `/lw_schem` authoring tools |
 
 ## Controls worth knowing
@@ -49,8 +50,12 @@ QA sandbox and this game is not a replacement for it.
 * `i` opens the **palette inventory**: every node, paged, infinite. Taking from
   it never empties it.
 * `/stuff` re-gives the starter kit, `/palette` reopens the palette.
-* **Screen Remote** — left click cycles the theater reel, right click raises the
-  browser video overlay (web client only).
+* **Param2 Tool** — punch/place nudge a node's param2 (+1 / -1, sneak for ±8). Same gestures as devtest's Param2 tool.
+* **Paint Tool** — sneak+use samples a node; use stamps that type onto pointed nodes; right click cycles the wool palette.
+* **Clone Stick** — left click pos1, right click pos2, sneak+left copy, sneak+right paste. Volume is capped at 32³.
+* **Light Wand** — use places a hidden light; sneak+use or right click removes one.
+* **Screen Remote** — the only item that talks to the theater. Left click next reel, sneak+left pause, right click play (browser video overlay, or the animated wall).
+* **Schematic Stamp** — one-click seat row, column, or picture frame. Sneak+use cycles the stamp.
 * Right click a theater seat to sit in it facing the screen.
 * `/reel off|bars|show` switches the screen from chat, and brings the house
   lights back up when it is off.

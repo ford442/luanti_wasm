@@ -52,8 +52,8 @@ local palette_items = nil
 local pages = {}
 
 -- Sort so the inventory reads like the material library: terrain, structure,
--- architecture, lighting, exhibition, then the dyed cubes.
-local GROUP_ORDER = {"lw_nodes:", "lw_theater:"}
+-- architecture, lighting, exhibition, then the dyed cubes, then the tools.
+local GROUP_ORDER = {"lw_nodes:", "lw_theater:", "lw_tools:"}
 
 local function catalogue()
 	if palette_items then
@@ -151,7 +151,9 @@ end
 -- Starter kit
 --------------------------------------------------------------------------
 
-lw_core.starter_kit = {
+-- Blocks a new visitor can start building with. Restocked by /stuff, not on
+-- every join — otherwise using a stack would refill it next login.
+lw_core.starter_blocks = {
 	"lw_nodes:wool_white 99",
 	"lw_nodes:wool_red 99",
 	"lw_nodes:wool_blue 99",
@@ -159,18 +161,46 @@ lw_core.starter_kit = {
 	"lw_nodes:planks 99",
 	"lw_nodes:glass 99",
 	"lw_nodes:lamp 32",
-	"lw_nodes:hidden_light 32",
-	"lw_theater:remote",
 }
 
-function lw_core.give_kit(player)
+-- Authoring tools. Restocked on join if missing, so a returning visitor to a
+-- saved world still gets paint/clone after this kit lands. stack_max is 1.
+lw_core.starter_tools = {
+	"lw_tools:param2",
+	"lw_tools:paint",
+	"lw_tools:clone",
+	"lw_tools:light_wand",
+	"lw_theater:remote",
+	"lw_tools:stamp",
+}
+
+lw_core.starter_kit = {}
+for _, list in ipairs({lw_core.starter_tools, lw_core.starter_blocks}) do
+	for _, item in ipairs(list) do
+		lw_core.starter_kit[#lw_core.starter_kit + 1] = item
+	end
+end
+
+local function give_items(player, items)
 	local inv = player:get_inventory()
-	for _, item in ipairs(lw_core.starter_kit) do
+	for _, item in ipairs(items) do
 		local stack = ItemStack(item)
-		if core.registered_items[stack:get_name()] and not inv:contains_item("main", stack) then
+		local name = stack:get_name()
+		if core.registered_items[name] and not inv:contains_item("main", name) then
 			inv:add_item("main", stack)
 		end
 	end
+end
+
+function lw_core.give_kit(player)
+	give_items(player, lw_core.starter_kit)
+end
+
+-- Name used by the issue / by analogy with devtest's give_initial_stuff.
+lw_core.give_initial_stuff = lw_core.give_kit
+
+function lw_core.give_tools(player)
+	give_items(player, lw_core.starter_tools)
 end
 
 core.register_chatcommand("stuff", {
@@ -223,10 +253,15 @@ core.register_on_joinplayer(function(player)
 		privs[priv] = true
 	end
 	core.set_player_privs(name, privs)
+
+	-- Returning visitors of a saved world never fire on_newplayer. Restock
+	-- the tools (not the wool stacks) so the authoring kit is not trapped
+	-- behind `/stuff`.
+	lw_core.give_tools(player)
 end)
 
 core.register_on_newplayer(function(player)
-	lw_core.give_kit(player)
+	lw_core.give_initial_stuff(player)
 end)
 
 core.register_on_player_receive_fields(function(player, formname, fields)

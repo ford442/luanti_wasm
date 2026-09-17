@@ -31,5 +31,6 @@ globals = {
 	"lw_core",
 	"lw_nodes",
 	"lw_theater",
+	"lw_tools",
 	"lw_world",
 }
