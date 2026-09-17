@@ -29,6 +29,7 @@ globals = {
 	"core",
 	-- One global table per mod, the usual Luanti convention.
 	"lw_core",
+	"lw_maps",
 	"lw_nodes",
 	"lw_theater",
 	"lw_tools",
