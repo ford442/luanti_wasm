@@ -10,7 +10,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EMSDK_VERSION="6.0.3"
 EMSDK_COMMIT="1b8b2456bf3f54fd6e47d55a82dde7752978a40f"
 EMSDK_DIR="${EMSDK_DIR:-$HOME/emsdk}"
-EM_CACHE="${EM_CACHE:-$HOME/.emscripten_cache}"
+# Use the emsdk's own (writable) ports/system-library cache. A custom EM_CACHE
+# is only needed when the SDK is installed read-only; overriding it here would
+# leave the Emscripten ports (png/jpeg/freetype/...) out of the sysroot the
+# build actually compiles against.
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
@@ -37,6 +40,12 @@ log "Installing Lua tooling (luacheck, busted)"
 luarocks install --local luacheck
 luarocks install --local busted
 
+# Playwright drives the WASM browser smoke tests (util/wasm/test_*.py). It uses
+# the system Google Chrome, so no extra browser download is required. Ubuntu's
+# Python is externally managed (PEP 668), hence --break-system-packages.
+log "Installing Playwright for the WASM browser smoke tests"
+python3 -m pip install --user --break-system-packages "playwright==1.59.0"
+
 # ---------------------------------------------------------------------------
 # 3. Pinned Emscripten SDK for the WebAssembly build.
 # ---------------------------------------------------------------------------
@@ -49,8 +58,6 @@ git -C "$EMSDK_DIR" checkout --detach "$EMSDK_COMMIT"
 "$EMSDK_DIR/emsdk" install "$EMSDK_VERSION"
 "$EMSDK_DIR/emsdk" activate "$EMSDK_VERSION"
 
-mkdir -p "$EM_CACHE"
-
 # ---------------------------------------------------------------------------
 # 4. Make emsdk + tooling available in every interactive shell (idempotent).
 # ---------------------------------------------------------------------------
@@ -60,7 +67,6 @@ if ! grep -qF "$MARKER" "$HOME/.bashrc" 2>/dev/null; then
 	{
 		echo ""
 		echo "$MARKER"
-		echo "export EM_CACHE=\"$EM_CACHE\""
 		echo "[ -f \"$EMSDK_DIR/emsdk_env.sh\" ] && source \"$EMSDK_DIR/emsdk_env.sh\" >/dev/null 2>&1 || true"
 		echo "command -v luarocks >/dev/null 2>&1 && eval \"\$(luarocks path --bin 2>/dev/null)\" || true"
 		echo "# <<< luanti_wasm env <<<"
@@ -72,7 +78,6 @@ fi
 #    zstd) and the CMake toolchain so the first WASM build is offline-capable.
 # ---------------------------------------------------------------------------
 log "Priming Emscripten ports via a WASM configure"
-export EM_CACHE
 # shellcheck disable=SC1091
 source "$EMSDK_DIR/emsdk_env.sh"
 emcc --version
