@@ -39,7 +39,7 @@ QA sandbox and this game is not a replacement for it.
 
 | Mod | What it owns |
 |-----|--------------|
-| `lw_nodes` | the 45-node core palette (the theater adds 4 more) and the mapgen aliases |
+| `lw_nodes` | the 45-node core palette (the theater adds 6 more) and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
 | `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
@@ -56,8 +56,10 @@ QA sandbox and this game is not a replacement for it.
 * **Light Wand** — use places a hidden light; sneak+use or right click removes one.
 * **Screen Remote** — the only item that talks to the theater. Left click next reel, sneak+left pause, right click play (browser video overlay, or the animated wall).
 * **Schematic Stamp** — one-click seat row, column, or picture frame. Sneak+use cycles the stamp.
-* Right click a theater seat to sit in it facing the screen.
-* `/reel off|bars|show` switches the screen from chat, and brings the house
+* Punch the red reel button on the east theater pedestal to cycle reels without opening the inventory.
+* Right click a theater seat to sit in it facing the screen (or `/sit` anywhere). Jump to stand up.
+* Punch a chandelier to dim or raise the house lights.
+* `/reel off|title|show|bars` switches the screen from chat, and brings the house
   lights back up when it is off.
 
 Fly, fast and noclip are on for everyone. There is no damage, no hunger, no
@@ -68,8 +70,11 @@ combat and no crafting.
 **Tier A — animated tiles (everywhere, including native builds).** The screen is
 a wall of 24 nodes. Each node owns one cell of the picture and animates through
 that cell's own filmstrip, so the wall shows a single large moving image rather
-than 24 copies of a thumbnail. Two reels ship: a broadcast test pattern and a
-short sunrise loop. This needs no JavaScript and no video decoder.
+than 24 copies of a thumbnail. Three reels ship: a looping film-leader title
+card, a sunrise clip, and a broadcast test pattern. Fresh worlds start on the
+title card so walking in shows motion with no JavaScript. House lights follow
+the remote, the wall button, and the chandeliers. A short `.ogg` sting plays
+when a reel starts if sound is compiled in, and degrades to silence otherwise.
 
 **Tier B — HTML5 video overlay (browser only).** Luanti cannot bind an MP4 to a
 node tile, but the WASM client's page owns a real `<video>` element. The remote
@@ -102,7 +107,7 @@ exact `tile=1x16` recipe the theater cells expect, is in
 
 ```sh
 ffmpeg -y -i clip.mp4 \
-	-vf "fps=12,scale=32:32:flags=neighbor,tile=1x16" \
+	-vf "fps=12,scale=32:32:flags=neighbor,tile=1x24" \
 	-frames:v 1 strip.png
 ```
 

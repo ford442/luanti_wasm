@@ -85,3 +85,4 @@ jobs:
       run: |
         python3 util/content/test_luanti_web_kinetic.py
         python3 util/content/test_luanti_web_tools.py
+        python3 util/content/test_luanti_web_theater.py

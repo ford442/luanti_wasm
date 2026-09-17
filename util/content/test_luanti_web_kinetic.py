@@ -98,7 +98,7 @@ def test_filmstrip_layout() -> None:
 		"fire strip is not 16 x (16*frames)")
 	# Theater contract used by docs/filmstrips.md and lw_theater.
 	assert_true(SCREEN_COLS == 6 and SCREEN_ROWS == 4, "screen grid drifted")
-	assert_true(CELL == 32 and REEL_FRAMES == 16, "reel cell/frame contract drifted")
+	assert_true(CELL == 32 and REEL_FRAMES == 24, "reel cell/frame contract drifted")
 	assert_true(TICKER_FRAMES == 16, "ticker frame count drifted")
 
 

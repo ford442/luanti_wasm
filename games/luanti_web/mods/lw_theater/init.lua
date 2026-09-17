@@ -25,19 +25,32 @@ local storage = core.get_mod_storage()
 -- (ffmpeg → vertical PNG) is documented in games/luanti_web/docs/filmstrips.md.
 local COLS = 6
 local ROWS = 4
-local FRAMES = 16
+local FRAMES = 24
 local CELL = 32
 local FPS = 12
 
 lw_theater.screen_cols = COLS
 lw_theater.screen_rows = ROWS
+lw_theater.reel_frames = FRAMES
 
--- Reel order the remote cycles through. "off" is a dark screen, not a reel.
-lw_theater.reels = {"bars", "show"}
+-- Reel order the remote and the wall button cycle through. "off" is a dark
+-- screen, not a reel. Title card first so a fresh world can start on motion
+-- that reads as "the show is about to begin".
+lw_theater.reels = {"title", "show", "bars"}
 
 local REEL_TITLES = {
-	bars = "Reel 1 — Test Pattern",
+	title = "Reel 1 — Now showing",
 	show = "Reel 2 — Luanti in your browser",
+	bars = "Reel 3 — Test pattern",
+}
+
+-- Optional projector sting. Sound (#8) is not required: a missing OpenAL
+-- backend, a missing .ogg, or a browser autoplay block all degrade to a
+-- silent animated wall.
+local REEL_SOUNDS = {
+	title = "lw_reel",
+	show = "lw_reel",
+	bars = "lw_reel",
 }
 
 --------------------------------------------------------------------------
@@ -114,9 +127,74 @@ local function cell_pos(layout, row, col)
 	}
 end
 
+function lw_theater.has_saved_reel()
+	return storage:get_string("reel") ~= ""
+end
+
 function lw_theater.current_reel()
 	local reel = storage:get_string("reel")
 	return reel ~= "" and reel or "off"
+end
+
+--------------------------------------------------------------------------
+-- House lights
+--------------------------------------------------------------------------
+
+-- The game pins time_speed to 0, so the clock only moves when the remote or
+-- a chandelier moves it. Dimming for a reel and raising the lights afterwards
+-- is therefore deterministic rather than a race with the day cycle.
+local DAY = 0.45
+local NIGHT = 0.83
+local lights_up = true
+
+lw_theater.DAY = DAY
+lw_theater.NIGHT = NIGHT
+
+function lw_theater.house_lights_are_up()
+	return lights_up
+end
+
+function lw_theater.set_house_lights(up)
+	lights_up = not not up
+	core.set_timeofday(lights_up and DAY or NIGHT)
+	return lights_up
+end
+
+function lw_theater.toggle_house_lights()
+	return lw_theater.set_house_lights(not lights_up)
+end
+
+--------------------------------------------------------------------------
+-- Optional reel audio
+--------------------------------------------------------------------------
+
+local reel_sound_handle = nil
+
+local function stop_reel_audio()
+	if reel_sound_handle and type(core.sound_stop) == "function" then
+		pcall(core.sound_stop, reel_sound_handle)
+	end
+	reel_sound_handle = nil
+end
+
+local function play_reel_audio(reel)
+	stop_reel_audio()
+	if reel == "off" then
+		return
+	end
+	-- Feature-detect rather than assume OpenAL: WASM sound (#8) may not be
+	-- ready, and a native build can be compiled with ENABLE_SOUND=FALSE.
+	if type(core.sound_play) ~= "function" then
+		return
+	end
+	local spec = REEL_SOUNDS[reel]
+	if not spec then
+		return
+	end
+	local ok, handle = pcall(core.sound_play, spec, {gain = 0.45}, true)
+	if ok then
+		reel_sound_handle = handle
+	end
 end
 
 -- Swap every cell in place. 24 swap_node calls is cheap enough to run on the
@@ -150,6 +228,7 @@ function lw_theater.set_reel(reel)
 		end
 	end
 	storage:set_string("reel", reel)
+	play_reel_audio(reel)
 	return true
 end
 
@@ -164,20 +243,6 @@ function lw_theater.next_reel()
 		end
 	end
 	return lw_theater.reels[1]
-end
-
---------------------------------------------------------------------------
--- House lights
---------------------------------------------------------------------------
-
--- The game pins time_speed to 0, so the clock only moves when the remote moves
--- it. Dimming for a reel and raising the lights afterwards is therefore
--- deterministic rather than a race with the day cycle.
-local DAY = 0.45
-local NIGHT = 0.83
-
-local function set_house_lights(up)
-	core.set_timeofday(up and DAY or NIGHT)
 end
 
 --------------------------------------------------------------------------
@@ -221,10 +286,60 @@ end
 -- Seats
 --------------------------------------------------------------------------
 
--- Not a real sit pose — attaching the player to an entity costs an entity per
--- seat and a pile of edge cases on reconnect. Placing the visitor on the seat
--- and pointing them at the screen gives the same "take your seat" beat, and
--- doubles as the calibrated camera Tier B wants.
+-- Sit pose is cheap: the default character.b3d already has a sit range
+-- (frames 81–160, same as minetest_game's player_api). No seat entity, so a
+-- reconnect cannot leak attachments. Jump or /sit stands you back up.
+local SIT_FRAMES = {x = 81, y = 160}
+local seated = {}
+
+local function is_player(obj)
+	return obj and obj:is_player()
+end
+
+function lw_theater.unsit_player(player)
+	if not is_player(player) then
+		return
+	end
+	local name = player:get_player_name()
+	if not seated[name] then
+		return
+	end
+	seated[name] = nil
+	if player.set_animation then
+		player:set_animation({x = 0, y = 79}, 15, 0, true)
+	end
+	if player.set_eye_offset then
+		player:set_eye_offset({x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0})
+	end
+	if player.set_physics_override then
+		player:set_physics_override({speed = 1, jump = 1})
+	end
+end
+
+function lw_theater.sit_player(player)
+	if not is_player(player) then
+		return false
+	end
+	local name = player:get_player_name()
+	seated[name] = true
+	if player.set_animation then
+		player:set_animation(SIT_FRAMES, 15, 0, true)
+	end
+	if player.set_eye_offset then
+		player:set_eye_offset({x = 0, y = -5, z = 2}, {x = 0, y = -5, z = 0})
+	end
+	if player.set_physics_override then
+		player:set_physics_override({speed = 0, jump = 0})
+	end
+	return true
+end
+
+function lw_theater.is_seated(player)
+	return is_player(player) and seated[player:get_player_name()] == true
+end
+
+-- Place the visitor on the seat, point them at the screen, and fold them
+-- into the sit pose. Doubles as the calibrated camera Tier B wants.
 function lw_theater.seat_player(player, pos)
 	local layout = screen_layout()
 	player:set_pos({x = pos.x, y = pos.y + 0.6, z = pos.z})
@@ -235,7 +350,30 @@ function lw_theater.seat_player(player, pos)
 		player:set_look_horizontal((math.atan2(-dx, dz) + math.pi * 2) % (math.pi * 2))
 		player:set_look_vertical(0)
 	end
+	lw_theater.sit_player(player)
 end
+
+core.register_globalstep(function()
+	for name in pairs(seated) do
+		local player = core.get_player_by_name(name)
+		if not player then
+			seated[name] = nil
+		else
+			local ctrl = player:get_player_control()
+			-- Jump is the "stand up" gesture. Walking keys also release so a
+			-- visitor is never stuck in a seat after they decide to leave.
+			if ctrl and (ctrl.jump or ctrl.up or ctrl.down or ctrl.left or ctrl.right) then
+				lw_theater.unsit_player(player)
+			end
+		end
+	end
+end)
+
+core.register_on_leaveplayer(function(player)
+	if player then
+		seated[player:get_player_name()] = nil
+	end
+end)
 
 core.register_node("lw_theater:seat", {
 	description = "Theater Seat",
@@ -254,7 +392,7 @@ core.register_node("lw_theater:seat", {
 	groups = {snappy = 2, oddly_breakable_by_hand = 2, lw_palette = 1},
 	is_ground_content = false,
 	on_rightclick = function(pos, _, clicker)
-		if clicker and clicker:is_player() then
+		if is_player(clicker) then
 			lw_theater.seat_player(clicker, pos)
 		end
 	end,
@@ -284,33 +422,70 @@ core.register_node("lw_theater:marquee", {
 	is_ground_content = false,
 })
 
+-- Punch to dim the house. Diggable is false so a creative visitor cannot
+-- accidentally take the fixture down while reaching for the dimmer.
+core.register_node("lw_theater:chandelier", {
+	description = "Theater Chandelier\nPunch to dim or raise the house lights",
+	drawtype = "nodebox",
+	tiles = {"lw_chandelier.png"},
+	paramtype = "light",
+	light_source = 12,
+	diggable = false,
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.0625, 0.25, -0.0625, 0.0625, 0.5, 0.0625},
+			{-0.375, -0.125, -0.375, 0.375, 0.25, 0.375},
+			{-0.4375, -0.25, -0.4375, 0.4375, -0.0625, 0.4375},
+		},
+	},
+	groups = {lw_palette = 1},
+	is_ground_content = false,
+	on_punch = function(_, _, puncher)
+		local up = lw_theater.toggle_house_lights()
+		if is_player(puncher) then
+			core.chat_send_player(puncher:get_player_name(),
+				up and "House lights up." or "House lights down.")
+		end
+	end,
+})
+
 --------------------------------------------------------------------------
--- The remote
+-- The remote and the wall button
 --------------------------------------------------------------------------
 
--- The Screen Remote is the only item that talks to the theater. Paint, clone
+-- The Screen Remote is the only *item* that talks to the theater. Paint, clone
 -- and the schematic stamp must not call set_reel / show_web_video themselves:
 -- they go through lw_theater.on_remote so a later playback backend can land
 -- without hunting for every item callback. If this hook is missing (a world
 -- running without the theater mod), the item itself prints a chat hint.
+--
+-- The wall button is the in-world counterpart: punch it for the next reel so
+-- a visitor who has not opened the inventory still sees motion change.
 
 lw_theater.REMOTE_ACTIONS = { "next", "pause", "play" }
 
-local function cycle(player)
-	local reel = lw_theater.next_reel()
-	local ok, err = lw_theater.set_reel(reel)
+local function announce_reel(player, reel)
 	local name = player:get_player_name()
-	if not ok then
-		core.chat_send_player(name, err)
-		return
-	end
-	set_house_lights(reel == "off")
 	if reel == "off" then
-		lw_theater.hide_web_video()
 		core.chat_send_player(name, "Screen off. House lights up.")
 	else
 		core.chat_send_player(name, REEL_TITLES[reel] or reel)
 	end
+end
+
+local function cycle(player)
+	local reel = lw_theater.next_reel()
+	local ok, err = lw_theater.set_reel(reel)
+	if not ok then
+		core.chat_send_player(player:get_player_name(), err)
+		return
+	end
+	lw_theater.set_house_lights(reel == "off")
+	if reel == "off" then
+		lw_theater.hide_web_video()
+	end
+	announce_reel(player, reel)
 end
 
 local function pause(player)
@@ -322,7 +497,7 @@ local function pause(player)
 	end
 	lw_theater.hide_web_video()
 	lw_theater.overlay_on = false
-	set_house_lights(true)
+	lw_theater.set_house_lights(true)
 	core.chat_send_player(name, "Screen off. House lights up.")
 end
 
@@ -337,7 +512,7 @@ local function toggle_overlay(player)
 				core.chat_send_player(name, err)
 				return
 			end
-			set_house_lights(false)
+			lw_theater.set_house_lights(false)
 			core.chat_send_player(name, REEL_TITLES[lw_theater.reels[1]]
 				or lw_theater.reels[1])
 			return
@@ -354,7 +529,7 @@ local function toggle_overlay(player)
 	else
 		if lw_theater.show_web_video(player) then
 			lw_theater.overlay_on = true
-			set_house_lights(false)
+			lw_theater.set_house_lights(false)
 		else
 			core.chat_send_player(name, "The browser could not start the clip.")
 		end
@@ -363,7 +538,7 @@ end
 
 -- action: "next" | "pause" | "play". Returns true when the action ran.
 function lw_theater.on_remote(player, action)
-	if not (player and player:is_player()) then
+	if not is_player(player) then
 		return false
 	end
 	if action == "next" then
@@ -384,7 +559,7 @@ end
 local function fire_remote(player, action)
 	local handler = lw_theater.on_remote
 	if type(handler) ~= "function" then
-		if player and player:is_player() then
+		if is_player(player) then
 			core.chat_send_player(player:get_player_name(),
 				"The Screen Remote does nothing until the theater is loaded.")
 		end
@@ -392,6 +567,33 @@ local function fire_remote(player, action)
 	end
 	handler(player, action)
 end
+
+core.register_node("lw_theater:button", {
+	description = "Reel Button\nPunch: next reel",
+	drawtype = "nodebox",
+	tiles = {"lw_reel_button.png"},
+	paramtype = "light",
+	light_source = 4,
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.3125, -0.5, -0.3125, 0.3125, -0.25, 0.3125},
+			{-0.1875, -0.25, -0.1875, 0.1875, 0.0, 0.1875},
+		},
+	},
+	groups = {cracky = 3, lw_palette = 1},
+	is_ground_content = false,
+	on_punch = function(_, _, puncher)
+		if is_player(puncher) then
+			fire_remote(puncher, "next")
+		end
+	end,
+	on_rightclick = function(_, _, clicker)
+		if is_player(clicker) then
+			fire_remote(clicker, "next")
+		end
+	end,
+})
 
 core.register_craftitem("lw_theater:remote", {
 	description = "Screen Remote\n" ..
@@ -401,20 +603,20 @@ core.register_craftitem("lw_theater:remote", {
 	inventory_image = "lw_remote.png",
 	stack_max = 1,
 	on_use = function(itemstack, user)
-		if user and user:is_player() then
+		if is_player(user) then
 			local ctrl = user:get_player_control()
 			fire_remote(user, (ctrl and ctrl.sneak) and "pause" or "next")
 		end
 		return itemstack
 	end,
 	on_place = function(itemstack, placer)
-		if placer and placer:is_player() then
+		if is_player(placer) then
 			fire_remote(placer, "play")
 		end
 		return itemstack
 	end,
 	on_secondary_use = function(itemstack, user)
-		if user and user:is_player() then
+		if is_player(user) then
 			fire_remote(user, "play")
 		end
 		return itemstack
@@ -441,7 +643,24 @@ core.register_chatcommand("reel", {
 		if not ok then
 			return false, err
 		end
-		set_house_lights(param == "off")
+		lw_theater.set_house_lights(param == "off")
 		return true, REEL_TITLES[param] or "Screen off."
+	end,
+})
+
+core.register_chatcommand("sit", {
+	params = "",
+	description = "Sit down where you stand, or stand up",
+	func = function(name)
+		local player = core.get_player_by_name(name)
+		if not player then
+			return false, "You have to be in the world."
+		end
+		if lw_theater.is_seated(player) then
+			lw_theater.unsit_player(player)
+			return true, "Standing."
+		end
+		lw_theater.sit_player(player)
+		return true, "Sitting. Jump to stand up."
 	end,
 })
