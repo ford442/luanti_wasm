@@ -620,10 +620,26 @@ local function build_theater()
 		end
 	end
 
+	-- Punchable chandeliers overwrite the six ceiling lamps in theater.mts so
+	-- the dimmer lives in the room, not only on the remote. World positions
+	-- are the schematic origin (-16, GROUND-1, 33) plus local (5/15/25, 13, 7/15).
+	for _, x in ipairs({-11, -1, 9}) do
+		for _, z in ipairs({40, 48}) do
+			put(x, 20, z, "lw_theater:chandelier")
+		end
+	end
+
+	-- In-world reel button across the aisle from the instructions poster, so a
+	-- visitor who has not opened the inventory can still cycle the wall.
+	put(6, FLOOR, 38, "lw_nodes:pedestal")
+	put(6, FLOOR + 1, 38, "lw_theater:button")
+	label(6, FLOOR + 1, 38, "Punch: next reel")
+
 	label(-6, FLOOR + 1, 38,
-		"Theater: left click the Screen Remote for the next reel, right click " ..
-		"for the browser video overlay. Right click a seat to sit down. " ..
-		"/reel off brings the house lights back up.")
+		"Theater: the wall is already playing. Punch the red button or left " ..
+		"click the Screen Remote for the next reel, right click for the " ..
+		"browser video overlay. Right click a seat (or /sit) to sit down. " ..
+		"Punch a chandelier to dim the house. /reel off brings the lights up.")
 end
 
 --------------------------------------------------------------------------
@@ -855,8 +871,32 @@ lw_theater.register_screen(
 core.after(0, function()
 	-- Midday, with the clock frozen (time_speed = 0 in the game's
 	-- minetest.conf) so the galleries look the same on every visit. The
-	-- theater remote is the only thing that moves it.
+	-- theater remote and the chandeliers are the only things that move it.
 	core.set_timeofday(0.45)
+	-- Fresh worlds start on the title-card reel so walking in shows motion
+	-- with no JS overlay and without touching the remote. An explicit "off"
+	-- (someone paused) stays dark across reloads.
+	if lw_theater.has_saved_reel() then
+		return
+	end
+	local minp = {
+		x = SCREEN_X0,
+		y = SCREEN_TOP - lw_theater.screen_rows + 1,
+		z = SCREEN_Z,
+	}
+	local maxp = {
+		x = SCREEN_X0 + lw_theater.screen_cols - 1,
+		y = SCREEN_TOP,
+		z = SCREEN_Z,
+	}
+	core.emerge_area(minp, maxp, function(_, _, remaining)
+		if remaining > 0 then
+			return
+		end
+		if not lw_theater.has_saved_reel() then
+			lw_theater.set_reel(lw_theater.reels[1])
+		end
+	end)
 end)
 
 -- Snapshot the whole built area as one schematic, to diff a world against a

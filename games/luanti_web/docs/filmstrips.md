@@ -33,23 +33,25 @@ tiles = {{
 		type = "vertical_frames",
 		aspect_w = 32,   -- one cell
 		aspect_h = 32,
-		length = 16 / 12, -- frames / fps
+		length = 24 / 12, -- frames / fps
 	},
 }}
 ```
 
 Keep strips small. The showcase budget is 16×16 tiles (8–16 frames) for
-world nodes and 32×32 cells (16 frames) for the cinema wall. A 512×512 source
-decoded onto one node will hitch the WASM worker for no visual gain.
+world nodes and 32×32 cells (24 frames) for the cinema wall. A 512×512 source
+decoded onto one node will hitch the WASM worker for no visual gain. Whole-frame
+footage at 256×144 should be scaled to 192×128 (6×32 by 4×32) and sliced; do
+not bind one 256-wide strip to every cell.
 
 ## ffmpeg: clip → vertical strip
 
 `ffmpeg`'s `tile` filter *is* the montage. One command:
 
 ```sh
-# 16 frames at 12 fps, 32×32 cells — the theater reel contract.
+# 24 frames at 12 fps, 32×32 cells — the theater reel contract.
 ffmpeg -y -i clip.mp4 \
-	-vf "fps=12,scale=32:32:flags=neighbor,tile=1x16" \
+	-vf "fps=12,scale=32:32:flags=neighbor,tile=1x24" \
 	-frames:v 1 strip.png
 ```
 
@@ -61,7 +63,7 @@ Other sizes used in this game:
 
 | Surface | Command fragment | `aspect_*` / `length` |
 |---------|------------------|------------------------|
-| Theater cell | `fps=12,scale=32:32,tile=1x16` | 32 / 16÷12 |
+| Theater cell | `fps=12,scale=32:32,tile=1x24` | 32 / 24÷12 |
 | Water | `fps=8,scale=16:16,tile=1x8` | 16 / 8÷8 = 1.0… the shipped strip uses length 2.0 |
 | Fire | `fps=8,scale=16:16,tile=1x8` | 16 / 1.0 |
 | LED ticker | `fps=10,scale=16:16,tile=1x16` | 16 / 1.6 |
@@ -71,20 +73,20 @@ To take the first N frames of a longer clip, add `-frames:v 1` after `tile`
 `-t`:
 
 ```sh
-ffmpeg -y -t 1.34 -i clip.mp4 \
-	-vf "fps=12,scale=32:32:flags=neighbor,tile=1x16" \
+ffmpeg -y -t 2.0 -i clip.mp4 \
+	-vf "fps=12,scale=32:32:flags=neighbor,tile=1x24" \
 	-frames:v 1 strip.png
 ```
 
-1.34 s × 12 fps ≈ 16 frames.
+2.0 s × 12 fps = 24 frames.
 
 ## ffmpeg + ImageMagick (when `tile` is unavailable)
 
 ```sh
 mkdir -p /tmp/frames
-ffmpeg -y -i clip.mp4 -vf "fps=12,scale=32:32:flags=neighbor" -frames:v 16 \
+ffmpeg -y -i clip.mp4 -vf "fps=12,scale=32:32:flags=neighbor" -frames:v 24 \
 	/tmp/frames/frame%02d.png
-magick montage /tmp/frames/frame*.png -tile 1x16 -geometry +0+0 strip.png
+magick montage /tmp/frames/frame*.png -tile 1x24 -geometry +0+0 strip.png
 ```
 
 `convert` (ImageMagick 6) is the same binary as `magick montage` on older
@@ -99,11 +101,14 @@ through that cell's own strip, so the wall shows one moving image instead of
 The shipped reels are produced by
 `util/content/generate_luanti_web_textures.py` (`reel_cell_strips()`). Prefer
 that path for anything that should stay deterministic in git. Use ffmpeg when
-the source is real footage: build one 192×128 frame (6×32 by 4×32), stack 16
-of those into a 192×2048 strip, then crop each 32×2048 column-slice and each
+the source is real footage: build one 192×128 frame (6×32 by 4×32), stack 24
+of those into a 192×3072 strip, then crop each 32×3072 column-slice and each
 32-pixel row of that column into a per-cell filmstrip. The Python helper already
 does the bookkeeping; duplicating it as a nested ffmpeg crop is how cells
-drift out of sync with `SCREEN_COLS` / `SCREEN_ROWS`.
+drift out of sync with `SCREEN_COLS` / `SCREEN_ROWS`. The shipped reels are
+procedural (a film-leader countdown, a sunrise loop, a test pattern) rather
+than a baked MP4, which keeps the generator deterministic and the WASM texture
+budget small.
 
 Constants that must stay in sync:
 
@@ -112,7 +117,7 @@ Constants that must stay in sync:
 | `SCREEN_COLS` | 6 | `generate_luanti_web_textures.py`, `lw_theater/init.lua` |
 | `SCREEN_ROWS` | 4 | same |
 | `CELL` | 32 | same |
-| `REEL_FRAMES` | 16 | same |
+| `REEL_FRAMES` | 24 | same |
 | fps | 12 | `length = FRAMES / FPS` in `lw_theater` |
 
 ## What not to do

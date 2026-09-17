@@ -23,7 +23,7 @@ bottom in one image of ``size x (size * N)``. Authoring the same layout from
 real footage is documented in ``games/luanti_web/docs/filmstrips.md``; the
 one-liner is::
 
-    ffmpeg -y -i clip.mp4 -vf "fps=12,scale=32:32:flags=neighbor,tile=1x16" -frames:v 1 strip.png
+    ffmpeg -y -i clip.mp4 -vf "fps=12,scale=32:32:flags=neighbor,tile=1x24" -frames:v 1 strip.png
 """
 
 from __future__ import annotations
@@ -716,6 +716,31 @@ def tex_marquee_frame() -> Image:
 	return image
 
 
+def tex_chandelier() -> Image:
+	image = new_image(S, S)
+	chain = rgb("c8a97a")
+	fill_rect(image, 7, 0, 8, 4, chain)
+	bowl = rgb("d8a92c")
+	fill_rect(image, 2, 5, 13, 10, bowl)
+	fill_rect(image, 2, 5, 2, 10, shade(bowl, 1.25))
+	fill_rect(image, 13, 5, 13, 10, shade(bowl, 0.72))
+	fill_rect(image, 1, 10, 14, 12, shade(bowl, 0.82))
+	glow = rgb("fff2c4")
+	fill_rect(image, 4, 7, 5, 8, glow)
+	fill_rect(image, 7, 6, 8, 8, rgb("fff6de"))
+	fill_rect(image, 10, 7, 11, 8, glow)
+	return image
+
+
+def tex_reel_button() -> Image:
+	image = new_image(S, S, rgb("2b2f36"))
+	fill_disc(image, 7.5, 7.5, 5.4, rgb("8d2436"))
+	fill_disc(image, 7.5, 7.5, 3.2, rgb("e24a4a"))
+	fill_disc(image, 6.2, 6.2, 1.2, rgb("f2b0b0"))
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("d8a92c"))
+	return image
+
+
 STATIC_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 	"lw_stone.png": tex_stone,
 	"lw_stone_brick.png": tex_stone_brick,
@@ -832,6 +857,8 @@ THEATER_STATIC_TEXTURES: dict[str, Callable[[], Image]] = {
 	"lw_remote.png": tex_remote,
 	"lw_screen_off.png": tex_screen_off,
 	"lw_marquee_frame.png": tex_marquee_frame,
+	"lw_chandelier.png": tex_chandelier,
+	"lw_reel_button.png": tex_reel_button,
 }
 
 
@@ -930,13 +957,48 @@ def marquee_frame(index: int) -> Image:
 SCREEN_COLS = 6
 SCREEN_ROWS = 4
 CELL = 32
-REEL_FRAMES = 16
+REEL_FRAMES = 24
 REEL_W = SCREEN_COLS * CELL
 REEL_H = SCREEN_ROWS * CELL
 
 
+def reel_title_frame(index: int) -> Image:
+	"""Reel 1: looping film-leader countdown — the title card.
+
+	24 frames at 12 fps is a two-second 3-2-1 loop, obvious motion from the
+	aisle without needing a photographic clip. Real footage is scaled to this
+	same 192x128 frame and sliced by reel_cell_strips(); see filmstrips.md.
+	"""
+	image = new_image(REEL_W, REEL_H, rgb("14080c"))
+	Noise(149).grain(image, 0.10)
+	# Sprocket holes scrolling down the edges so the card reads as film stock.
+	shift = index % 8
+	for y in range(-2 + shift, REEL_H, 8):
+		for x in (3, 4, REEL_W - 5, REEL_W - 4):
+			fill_rect(image, x, max(0, y), x, min(REEL_H - 1, y + 3), rgb("0a0506"))
+	pulse = 0.75 + 0.25 * math.sin(index / REEL_FRAMES * math.tau)
+	gold = shade(rgb("d8a92c"), pulse)
+	stroke_rect(image, 8, 6, REEL_W - 9, REEL_H - 7, gold)
+	stroke_rect(image, 9, 7, REEL_W - 10, REEL_H - 8, gold)
+	digit = str(3 - (index // 8))
+	cx, cy = REEL_W // 2, REEL_H // 2 + 4
+	progress = (index % 8) / 8
+	radius = 26.0 - progress * 8.0
+	fill_disc(image, cx, cy, radius, rgb("e8e0d0"))
+	fill_disc(image, cx, cy, radius - 3.0, rgb("1a0c10"))
+	dw = text_width(digit, scale=4)
+	draw_text(image, cx - dw // 2, cy - 10, digit, rgb("f2f6ee"), scale=4)
+	title = "LUANTI WEB"
+	draw_text(image, (REEL_W - text_width(title, scale=2)) // 2, 12, title,
+		rgb("f2f6ee"), scale=2)
+	card = "NOW SHOWING"
+	draw_text(image, (REEL_W - text_width(card, scale=2)) // 2, REEL_H - 22, card,
+		rgb("d8a92c"), scale=2)
+	return image
+
+
 def reel_bars_frame(index: int) -> Image:
-	"""Reel 1: broadcast test pattern with a sweeping bar and a ticking counter."""
+	"""Reel 3: broadcast test pattern with a sweeping bar and a ticking counter."""
 	image = new_image(REEL_W, REEL_H, rgb("101010"))
 	bars = ["c0c0c0", "c0c000", "00c0c0", "00c000", "c000c0", "c00000", "0000c0"]
 	band = REEL_H * 2 // 3
@@ -997,8 +1059,9 @@ def reel_show_frame(index: int) -> Image:
 
 
 REELS: dict[str, Callable[[int], Image]] = {
-	"bars": reel_bars_frame,
+	"title": reel_title_frame,
 	"show": reel_show_frame,
+	"bars": reel_bars_frame,
 }
 
 
