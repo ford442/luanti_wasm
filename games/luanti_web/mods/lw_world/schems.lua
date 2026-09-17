@@ -96,6 +96,42 @@ function schems.node_at(piece, x, y, z)
 	return n and n ~= 0 and piece.names[n] or nil
 end
 
+-- Swap only the nodes that differ from a loaded piece. Used by the living
+-- building so a frame change is a handful of swap_node calls rather than a
+-- VoxelManip of the whole footprint. Returns the number of swaps, or nil if
+-- any cell is still `ignore` (mapblock not loaded) — in that case nothing is
+-- written, so a half-applied frame cannot stall the WASM worker.
+function schems.apply_diff(piece, origin)
+	local sx, sy, sz = piece.size.x, piece.size.y, piece.size.z
+	local changes = {}
+	for z = 0, sz - 1 do
+		for y = 0, sy - 1 do
+			for x = 0, sx - 1 do
+				local n = piece.nodes[z * sy * sx + y * sx + x + 1]
+				if n ~= 0 then
+					local pos = {x = origin.x + x, y = origin.y + y, z = origin.z + z}
+					local current = core.get_node(pos)
+					if current.name == "ignore" then
+						return nil
+					end
+					local target = piece.names[n]
+					local param2 = piece.param2[z * sy * sx + y * sx + x + 1]
+					if current.name ~= target or current.param2 ~= param2 then
+						changes[#changes + 1] = {
+							pos = pos,
+							node = {name = target, param2 = param2},
+						}
+					end
+				end
+			end
+		end
+	end
+	for _, change in ipairs(changes) do
+		core.swap_node(change.pos, change.node)
+	end
+	return #changes
+end
+
 --------------------------------------------------------------------------
 -- Authoring
 --------------------------------------------------------------------------

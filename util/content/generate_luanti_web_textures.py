@@ -19,11 +19,11 @@ runs in CI containers and in the Emscripten build image.
 
 Animated tiles are written as vertical filmstrips, the layout Luanti's
 ``vertical_frames`` animation expects: ``N`` square frames stacked top to
-bottom in one image of ``size x (size * N)``. The same convention is what an
-ffmpeg-based import would produce, e.g.
+bottom in one image of ``size x (size * N)``. Authoring the same layout from
+real footage is documented in ``games/luanti_web/docs/filmstrips.md``; the
+one-liner is::
 
-    ffmpeg -i clip.mp4 -vf "fps=12,scale=32:32" -frames:v 16 f%02d.png
-    magick montage f*.png -tile 1x16 -geometry +0+0 strip.png
+    ffmpeg -y -i clip.mp4 -vf "fps=12,scale=32:32:flags=neighbor,tile=1x16" -frames:v 1 strip.png
 """
 
 from __future__ import annotations
@@ -802,6 +802,36 @@ def ticker_frame(index: int) -> Image:
 	return image
 
 
+FIRE_FRAMES = 8
+
+
+def fire_frame(index: int) -> Image:
+	"""Campfire filmstrip: 8 frames of 16x16, tall enough to read as motion."""
+	image = new_image(S, S, (0, 0, 0, 0))
+	phase = index / FIRE_FRAMES * math.tau
+	for y in range(S):
+		for x in range(S):
+			nx = (x - (S - 1) / 2) / (S / 2)
+			ny = 1.0 - y / (S - 1)
+			# A teardrop that sways: wide at the embers, pinched at the tip.
+			sway = 0.18 * math.sin(phase + ny * 2.2)
+			width = 0.55 * (1.0 - ny * 0.72) + 0.08 * math.sin(phase * 2 + x)
+			heat = math.exp(-((nx - sway) ** 2) / max(0.04, width * width)) * (0.35 + ny)
+			if heat < 0.12:
+				continue
+			inner = mix(rgb("ffef9a"), rgb("fff7d6"), min(1.0, heat))
+			outer = mix(rgb("d44512"), rgb("f0a030"), ny)
+			color = mix(outer, inner, max(0.0, min(1.0, (heat - 0.12) / 0.9)))
+			alpha = clamp(80 + heat * 180)
+			put(image, x, y, (color[0], color[1], color[2], alpha))
+	# Embers along the bottom so the pit still reads when the flame is between
+	# frames.
+	for x in range(3, S - 3):
+		glow = 0.5 + 0.5 * math.sin(x * 1.3 + phase * 3)
+		put(image, x, S - 1, mix(rgb("5a1a08"), rgb("ffb040", 230), glow))
+	return image
+
+
 MARQUEE_FRAMES = 8
 
 
@@ -1029,6 +1059,8 @@ def generate(root: pathlib.Path) -> list[pathlib.Path]:
 		filmstrip([water_frame(i) for i in range(WATER_FRAMES)]))
 	emit(nodes / "lw_ticker.png",
 		filmstrip([ticker_frame(i) for i in range(TICKER_FRAMES)]))
+	emit(nodes / "lw_fire.png",
+		filmstrip([fire_frame(i) for i in range(FIRE_FRAMES)]))
 
 	for name, factory in THEATER_STATIC_TEXTURES.items():
 		emit(theater / name, factory())

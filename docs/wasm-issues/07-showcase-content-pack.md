@@ -48,7 +48,7 @@ empties it.
 * **Lighting** — ceiling lamp, floor uplight, and an airlike hidden light for
   lighting a gallery without a visible fixture.
 * **Exhibition** — pedestal, empty frame, poster, rope stanchion, animated LED
-  ticker panel.
+  ticker panel, campfire.
 * **16 dyed cubes** — one greyscale weave tinted with `[multiply`, so the whole
   set costs a single 16x16 texture rather than sixteen.
 
@@ -129,7 +129,7 @@ browser refuses. `show()` returning false is a normal outcome, not an error.
 ## Verification
 
 * `util/content/generate_luanti_web_textures.py` is deterministic: rerunning it
-  on an unchanged tree produces an empty diff. 89 files, ~72 KiB total.
+  on an unchanged tree produces an empty diff. 90 files, ~67 KiB total.
 * The world builder was run headless against a stubbed `core` and the resulting
   voxels rendered as a plan and as cross-sections, which is how the seating rake
   (running the wrong way), the aisle (a stack of carpets) and the gallery
@@ -153,8 +153,8 @@ not to — is in `wasm_porting.md` under "Content Budget".
 
 ## Not covered
 
-From the epic, still open: #23 (schematic pipeline), #25 (the kinetic courtyard
-covers its acceptance criteria, but the authoring documentation and the
-multi-schematic loop do not), #26 (only the screen remote exists of the tool
+From the epic, still open: #26 (only the screen remote exists of the tool
 set), #29 (Tier C), #30 (the policy is written into `wasm_porting.md`, but the
-PR checklist item is not), #31 (themed maps).
+PR checklist item is not), #31 (themed maps). #23 (schematic pipeline) and
+#25 (kinetic courtyard: animated tiles, entities, node timers, living-building
+loop, and filmstrip authoring docs) shipped after the original pack.

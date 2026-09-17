@@ -385,6 +385,25 @@ register("ticker", {
 	groups = {cracky = 3},
 })
 
+-- Campfire: a vertical 8-frame strip, the same layout water and the theater
+-- reels use. plantlike keeps it GLES2-cheap (one textured quad, no mesh).
+register("fire", {
+	description = "Fire",
+	drawtype = "plantlike",
+	tiles = {{
+		name = "lw_fire.png",
+		animation = {type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 1.0},
+	}},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	sunlight_propagates = true,
+	walkable = false,
+	buildable_to = false,
+	light_source = 12,
+	damage_per_second = 0,
+	groups = {dig_immediate = 3, flammable = 0},
+})
+
 --------------------------------------------------------------------------
 -- Dyed cubes
 --------------------------------------------------------------------------

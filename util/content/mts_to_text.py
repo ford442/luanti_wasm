@@ -85,6 +85,70 @@ def read_mts(blob: bytes) -> Schematic:
 	return Schematic((sx, sy, sz), slice_probs, names, content, param1, param2)
 
 
+def node_index(sx: int, sy: int, x: int, y: int, z: int) -> int:
+	return z * sy * sx + y * sx + x
+
+
+def write_mts(schem: Schematic) -> bytes:
+	"""Serialize a schematic as MTS version 4."""
+	sx, sy, sz = schem.size
+	total = sx * sy * sz
+	if len(schem.content) != total or len(schem.param1) != total or len(schem.param2) != total:
+		raise ValueError("content/param arrays do not match schematic size")
+	if len(schem.slice_probs) != sy:
+		raise ValueError("slice probability count does not match height")
+	header = bytearray(SIGNATURE)
+	header += struct.pack(">HHHH", 4, sx, sy, sz)
+	header += bytes(p & 0xFF for p in schem.slice_probs)
+	header += struct.pack(">H", len(schem.names))
+	for name in schem.names:
+		encoded = name.encode("utf-8")
+		header += struct.pack(">H", len(encoded))
+		header += encoded
+	body = struct.pack(f">{total}H", *schem.content) + bytes(schem.param1) + bytes(schem.param2)
+	return bytes(header) + zlib.compress(body)
+
+
+# Sentinel for a node the schematic must never place (probability 0).
+NEVER = object()
+
+
+def schematic_from_cells(sx: int, sy: int, sz: int, cells: dict) -> Schematic:
+	"""Build a schematic from ``{(x, y, z): node_name_or_NEVER}``.
+
+	Missing cells are air. ``NEVER`` writes probability 0 so a later stamp
+	leaves whatever is already on the map — the living-building controller
+	uses that so swapping frames cannot erase its own timer node.
+	"""
+	names = []
+	index_of = {}
+
+	def intern(name: str) -> int:
+		n = index_of.get(name)
+		if n is None:
+			n = len(names)
+			names.append(name)
+			index_of[name] = n
+		return n
+
+	air = intern("air")
+	total = sx * sy * sz
+	content = [air] * total
+	param1 = bytearray([PROB_ALWAYS] * total)
+	param2 = bytearray(total)
+	for (x, y, z), value in cells.items():
+		if not (0 <= x < sx and 0 <= y < sy and 0 <= z < sz):
+			raise ValueError(f"cell {(x, y, z)} is outside {sx}x{sy}x{sz}")
+		i = node_index(sx, sy, x, y, z)
+		if value is NEVER:
+			param1[i] = PROB_NEVER
+		else:
+			content[i] = intern(value)
+			param1[i] = PROB_ALWAYS
+	return Schematic((sx, sy, sz), [PROB_ALWAYS] * sy, names,
+		tuple(content), bytes(param1), bytes(param2))
+
+
 def to_text(schem: Schematic) -> str:
 	sx, sy, sz = schem.size
 	used = sorted({c for c in schem.content if c < len(schem.names)},
