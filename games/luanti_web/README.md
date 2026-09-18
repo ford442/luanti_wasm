@@ -51,7 +51,7 @@ leave it west, south and east for the [themed maps](docs/maps.md).
 |-----|--------------|
 | `lw_nodes` | the 45-node core palette (the theater adds 6 more) and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
-| `lw_dance` | the player character mesh, dance mode, the six-move dance pad, the stage hint |
+| `lw_dance` | the player character mesh, dance mode, the six-move dance pad, the stage hint, and the routine director that dances NPCs to the same catalog |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
 | `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere, `/maps` |
 | `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
@@ -69,6 +69,11 @@ leave it west, south and east for the [themed maps](docs/maps.md).
   wielded item come back when you leave. `/dance help` lists the binds,
   `/dance pad` opens a tap pad, and `F7` is how you watch yourself.
   Full details in [`docs/dance.md`](docs/dance.md).
+* **Punch a Stage Director** — the violet post by the theater stage, at the back
+  of the Halloween porch, and on the path by the melon bowl — to start a
+  scripted routine, and punch it again to stop. `/routine list` shows them all,
+  `/routine join` dances you along with one without taking a key off you.
+  Full details in [`docs/routines.md`](docs/routines.md).
 * **Param2 Tool** — punch/place nudge a node's param2 (+1 / -1, sneak for ±8). Same gestures as devtest's Param2 tool.
 * **Paint Tool** — sneak+use samples a node; use stamps that type onto pointed nodes; right click cycles the wool palette.
 * **Clone Stick** — left click pos1, right click pos2, sneak+left copy, sneak+right paste. Volume is capped at 32³.
@@ -86,7 +91,9 @@ combat and no crafting.
 
 Visitors have a body: `lw_dance` gives the player the classic character mesh,
 which is what `set_animation` and the dance poses act on (and what the theater
-seats were already written for).
+seats were already written for). The same mesh, driver and move catalog run the
+scripted dancers, so a visitor can fall in step with a routine instead of
+watching one.
 
 ## The theater, in tiers
 

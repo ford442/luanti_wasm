@@ -84,8 +84,22 @@ There is no browser-only path here.
 
 Standing on any node in the **`lw_dance_stage`** group suggests dance mode in
 chat, at most once every 90 seconds. `lw_dance:stage` — a violet dance floor
-in the palette — is in that group. The hook is the group, not a node name, so
-a theater stage node can join it with one line and light up here.
+in the palette — is in that group, and so is every `lw_dance:mark_*` node. The
+hook is the group, not a node name, so a theater stage node can join it with
+one line and light up here.
+
+Standing on a *mark* while its routine is running says so instead, and points
+at `/routine join` rather than at `/dance`: the answer there is to fall in
+step with the stage, not to start something of your own.
+
+## Scripted dancers
+
+The same six moves drive the NPCs. `lw_dance.play_move(obj, name, opts)` takes
+any object — a player or an entity — so a chorus line on the theater stage, a
+scarecrow on the Halloween porch and a visitor pressing `3` are all running the
+same `wave` out of the same table. A **routine** is a file of timed steps and a
+**director** plays it; `/routine join` hands you the cast's steps without ever
+taking a key away from you. See [routines.md](routines.md).
 
 ## How the moves are built
 

@@ -335,11 +335,30 @@ core.register_globalstep(function(dtime)
 		local name = player:get_player_name()
 		if not lw_dance.is_dancing(player) and (now - (hinted[name] or -math.huge)) > HINT_INTERVAL then
 			local pos = player:get_pos()
+			-- The floor under the visitor, and the node their feet are in: a
+			-- dance mark is a flat plate they stand *in*, not on.
 			local under = core.get_node({x = pos.x, y = pos.y - 0.5, z = pos.z})
-			if core.get_item_group(under.name, "lw_dance_stage") > 0 then
+			local feet = core.get_node(pos)
+			if core.get_item_group(under.name, "lw_dance_stage") > 0
+					or core.get_item_group(feet.name, "lw_dance_stage") > 0 then
 				hinted[name] = now
-				core.chat_send_player(name,
-						"You are on a stage. /dance (or hold sneak+zoom) to dance on it.")
+				-- Standing on a mark while the routine is running is the one
+				-- case worth a different line: the answer there is to join in,
+				-- not to start something of your own.
+				local running = nil
+				for id, director in pairs(lw_dance.running or {}) do
+					if director.active then
+						running = id
+					end
+				end
+				if running and lw_dance.mark_slot and lw_dance.mark_slot[feet.name] then
+					core.chat_send_player(name, ("You are on a dance mark and %s " ..
+							"is running. /routine join falls in step with it, " ..
+							"/dance dances on your own."):format(running))
+				else
+					core.chat_send_player(name,
+							"You are on a stage. /dance (or hold sneak+zoom) to dance on it.")
+				end
 			end
 		end
 	end
