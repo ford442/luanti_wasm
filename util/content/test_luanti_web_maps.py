@@ -2,7 +2,7 @@
 # Luanti
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Copyright (C) 2026 The Luanti Contributors
-"""Checks for the three authored themed maps (no engine required).
+"""Checks for the authored themed maps (no engine required).
 
 The interesting property of a hand-authored map is not that it exists, it is
 that a visitor can *walk* it: the acceptance criteria on the map-pack issue
@@ -17,6 +17,7 @@ rules and asserts that every landmark is standable and connected.
 from __future__ import annotations
 
 import collections
+import math
 import pathlib
 import re
 import subprocess
@@ -29,6 +30,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from mts_to_text import node_index, read_mts, write_mts
 import generate_luanti_web_maps as maps
+from generate_luanti_web_textures import MAP_NODE_TEXTURES
 
 GAME = ROOT / "games/luanti_web"
 SCHEM_DIR = GAME / "mods/lw_world/schems"
@@ -136,13 +138,69 @@ def fruit_landmarks() -> dict:
 	}
 
 
+def lighthouse_landmarks() -> dict:
+	cx, cz = maps.TOWER
+	return {
+		"boardwalk at the causeway": maps.LIGHTHOUSE_SPAWN,
+		"keeper's cottage": (25, maps.FLOOR, 27),
+		"tower door": (cx + maps.TOWER_HALF, maps.TOWER_BASE + 1, cz),
+		"lamp room": (cx + 1, maps.LAMP_FLOOR + 1, cz),
+		"gallery": (cx + maps.TOWER_HALF + 1, maps.LAMP_FLOOR + 1, cz),
+		"sea cave": (10, maps.FLOOR, maps.SEA_CAVE["z1"] - 1),
+		"end of the jetty": (maps.JETTY_X[0], maps.FLOOR + 1, 3),
+	}
+
+
+def bazaar_landmarks() -> dict:
+	cx, _, cz = maps.DOME
+	return {
+		"corner gate": maps.BAZAAR_SPAWN,
+		"under the dome": (cx - 2, maps.FLOOR, cz),
+		"rooftop walk": (10, maps.BAZAAR_WALL_TOP + 1, maps.BAZAAR_SIZE[2] - 2),
+		"crystal grotto": (maps.GROTTO["x0"] + 4, maps.GROTTO_FLOOR + 1, maps.GROTTO["z0"] + 3),
+		"far end of the east lane": (maps.BAZAAR_SIZE[0] - 2, maps.FLOOR, maps.LANE_C[0] + 1),
+	}
+
+
+def caldera_trail_mouth() -> tuple[int, int, int]:
+	"""Where the vent stair meets the trail: recomputed the way the generator
+	finds it, from the spiral the cone actually has."""
+	path = maps.spiral_shelf(maps.Build(*maps.CALDERA_SIZE), maps.CRATER,
+		maps.CRATER_TOP, maps.CRATER_RIM, maps.CRATER_SLOPE, maps.ASH, -math.pi / 4)
+	head = (18, maps.VENT_STAIR_TOP,
+		maps.VENT_STAIR_Z0 + maps.VENT_STAIR_TOP - maps.FLOOR)
+	return min((p for p in path if p[1] == maps.VENT_STAIR_TOP),
+		key=lambda p: abs(p[0] - head[0]) + abs(p[2] - head[2]))
+
+
+def caldera_landmarks() -> dict:
+	cx, cz = int(maps.CRATER[0]), int(maps.CRATER[1])
+	return {
+		"trailhead": maps.CALDERA_SPAWN,
+		"crater rim, east": (cx + 6, maps.CRATER_TOP, cz + 1),
+		"crater rim, west": (cx - 5, maps.CRATER_TOP, cz + 1),
+		"crater rim, north": (cx + 1, maps.CRATER_TOP, cz + 6),
+		"crater rim, south": (cx + 1, maps.CRATER_TOP, cz - 5),
+		"lava tube mouth": (maps.TUBE_X[1] - 1, maps.FLOOR, maps.TUBE_Z[0] + 1),
+		"magma chamber": (18, maps.FLOOR, 18),
+		"vent stair": (18, maps.FLOOR + 4, maps.VENT_STAIR_Z0 + 3),
+		"vent stair mouth on the trail": caldera_trail_mouth(),
+		"hot spring": (2, maps.FLOOR, 31),
+	}
+
+
 def test_reachability() -> None:
 	built = maps.schematics()
 	cases = {
 		"map_halloween": (maps.HALLOWEEN_SPAWN, halloween_landmarks()),
 		"map_snow_mountain": (maps.SNOW_SPAWN, snow_landmarks(built["map_snow_mountain"])),
 		"map_fruit_garden": (maps.FRUIT_SPAWN, fruit_landmarks()),
+		"map_lighthouse": (maps.LIGHTHOUSE_SPAWN, lighthouse_landmarks()),
+		"map_bazaar": (maps.BAZAAR_SPAWN, bazaar_landmarks()),
+		"map_caldera": (maps.CALDERA_SPAWN, caldera_landmarks()),
 	}
+	assert_true(set(cases) == set(maps.MAPS),
+		"every map in the generator needs a spawn and landmarks here")
 	for name, (spawn, landmarks) in cases.items():
 		world = World(built[name])
 		seen = world.reachable(spawn)
@@ -187,6 +245,42 @@ def test_watermelon_is_walk_in() -> None:
 	for part in ("dark_green", "green", "red", "black"):
 		assert_true(shell["lw_nodes:wool_" + part] > 0,
 			f"the watermelon has no {part} nodes")
+
+
+def test_caldera_lake_is_reachable() -> None:
+	"""The crater is a bowl you walk down into, not a pit you look at: from the
+	rim, the terraces have to lead to the lava without a drop."""
+	world = World(maps.schematics()["map_caldera"])
+	seen = world.reachable(maps.CALDERA_SPAWN)
+	wading = [cell for cell in seen if world.at(*cell) == maps.LAVA]
+	assert_true(bool(wading), "the lava lake cannot be reached from the trail")
+	for cell in wading:
+		assert_true(cell[1] == maps.LAVA_LEVEL,
+			f"lava at {cell} is not at the lake level {maps.LAVA_LEVEL}")
+
+
+def test_lighthouse_beacon_has_its_windows() -> None:
+	"""The beacon controller swaps four window cells; they have to exist,
+	three out and one down from it, as either state it swaps between."""
+	world = World(maps.schematics()["map_lighthouse"])
+	cx, cz = maps.TOWER
+	y = maps.LAMP_FLOOR + 3
+	assert_true(world.at(cx, y, cz) == maps.BEACON, "no beacon above the lamp")
+	for dx, dz in ((3, 0), (-3, 0), (0, 3), (0, -3)):
+		node = world.at(cx + dx, y - 1, cz + dz)
+		assert_true(node in (maps.BEAM_LIGHT, maps.GLASS),
+			f"beacon window at {(cx + dx, y - 1, cz + dz)} is {node!r}")
+
+
+def test_caldera_vent_has_headroom() -> None:
+	"""Six cells above the vent are the puff column; nothing may be built in
+	them or the controller would leave it alone and the vent would look dead."""
+	world = World(maps.schematics()["map_caldera"])
+	vx, vy, vz = maps.VENT_AT
+	assert_true(world.at(vx, vy, vz) == maps.VENT, "no vent controller on the rim")
+	for height in range(1, 7):
+		assert_true(world.at(vx, vy + height, vz) == "air",
+			f"the vent's puff column is blocked at height {height}")
 
 
 def test_committed_files_match_the_generator() -> None:
@@ -240,21 +334,27 @@ def test_budget() -> None:
 	"""The pack is content, and content is charged against luanti.data."""
 	total = sum(path.stat().st_size for path in SCHEM_DIR.glob("map_*.mts"))
 	assert_true(total < 64 * 1024,
-		f"the three map schematics are {total / 1024:.1f} KiB; budget is 64 KiB")
-	textures = sorted((LW_MAPS / "textures").glob("*.png"))
-	assert_true(len(textures) == 10,
-		f"lw_maps ships {len(textures)} textures, expected 10")
-	art = sum(path.stat().st_size for path in textures)
+		f"the map schematics are {total / 1024:.1f} KiB; budget is 64 KiB")
+	textures = sorted(path.name for path in (LW_MAPS / "textures").glob("*.png"))
+	assert_true(textures == sorted(MAP_NODE_TEXTURES),
+		f"lw_maps ships {textures}, but the texture generator makes "
+		f"{sorted(MAP_NODE_TEXTURES)}")
+	art = sum((LW_MAPS / "textures" / name).stat().st_size for name in textures)
 	assert_true(art < 16 * 1024,
 		f"lw_maps textures are {art / 1024:.1f} KiB; budget is 16 KiB")
 	nodes = sum(size[0] * size[1] * size[2] for size in maps.SIZES.values())
-	# Each authored node costs two Lua table slots when lw_world loads the
-	# schematic, and that lives in the WASM heap for the whole session.
-	assert_true(nodes < 120_000,
-		f"the three maps are {nodes} nodes; the documented budget is 120k")
+	# Each authored node costs two bytes when lw_world loads the schematic
+	# (schems.lua packs both arrays as strings), and that lives in the WASM
+	# heap for the whole session. See docs/maps.md for the number.
+	assert_true(nodes < NODE_BUDGET,
+		f"the maps are {nodes} nodes; the documented budget is {NODE_BUDGET}")
+	for name, (sx, sy, sz) in maps.SIZES.items():
+		assert_true(36 <= sx <= 40 and 16 <= sy <= 28 and 36 <= sz <= 40,
+			f"{name} is {sx}x{sy}x{sz}; maps are 36-40 x 16-28 x 36-40")
 
 
 BASE_Y = 5
+NODE_BUDGET = 200_000
 
 
 def test_registry_agrees_with_the_schematics() -> None:

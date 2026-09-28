@@ -2,8 +2,8 @@
 -- SPDX-License-Identifier: LGPL-2.1-or-later
 -- Copyright (C) 2026 The Luanti Contributors
 
--- The themed map pack: the props the three authored maps need, the registry
--- that says where each map is and how it should feel, and the `/maps` helper.
+-- The themed map pack: the props the authored maps need, the registry that
+-- says where each map is and how it should feel, and the `/maps` helper.
 --
 -- This mod owns *what a map is*. `lw_world/maps.lua` owns *where it goes* —
 -- it reads the registry below and stamps each schematic onto its island in
@@ -13,7 +13,8 @@
 --
 -- Node budget: every prop here is one the lw_nodes palette genuinely cannot
 -- fake. The fruit garden adds no nodes at all — every giant fruit on it is
--- dyed wool — and the ones that do land are listed in docs/maps.md.
+-- dyed wool — and the ones that do land are listed in docs/maps.md. Most of
+-- the second three maps' props are existing tiles under `[multiply`.
 --
 -- These are deliberately *not* in the lw_palette group: that group builds the
 -- material library's pedestals, which are full. They still show up in the
@@ -221,6 +222,168 @@ register_juice("juice_red", "Watermelon Juice", "#d0323a")
 register_juice("juice_green", "Lime Juice", "#5aa83c")
 
 --------------------------------------------------------------------------
+-- Lighthouse, bazaar and caldera props
+--------------------------------------------------------------------------
+
+-- Wet rock for the headland: the core stone, cooled blue-grey.
+register("sea_rock", {
+	description = "Sea Rock",
+	tiles = {"lw_stone.png^[multiply:#6a7684"},
+	groups = {cracky = 2},
+})
+
+-- The lamp-room window the beacon is currently shining through. A solid,
+-- walkable glass so it can stand in the wall; the beacon controller swaps it
+-- round the four faces.
+register("beam", {
+	description = "Lighthouse Beam",
+	drawtype = "glasslike",
+	tiles = {"lw_glass.png^[multiply:#ffe08a"},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	sunlight_propagates = true,
+	light_source = 14,
+	groups = {cracky = 3},
+})
+
+register("mudbrick", {
+	description = "Mudbrick",
+	tiles = {"lw_stone_brick.png^[multiply:#d0ad7c"},
+	groups = {cracky = 2},
+})
+
+-- One faceted greyscale tile, tinted per colour, like the wool cubes. Solid,
+-- so a crystal is something a stall can sell and a floor can grow.
+local CRYSTALS = {
+	{name = "violet", desc = "Violet", hex = "#b48cff"},
+	{name = "cyan", desc = "Cyan", hex = "#7fe6ff"},
+	{name = "rose", desc = "Rose", hex = "#ff9ad5"},
+	{name = "amber", desc = "Amber", hex = "#ffcf70"},
+}
+for _, tint in ipairs(CRYSTALS) do
+	register("crystal_" .. tint.name, {
+		description = tint.desc .. " Crystal",
+		drawtype = "glasslike",
+		tiles = {"lw_crystal.png^[multiply:" .. tint.hex},
+		use_texture_alpha = "blend",
+		paramtype = "light",
+		sunlight_propagates = true,
+		light_source = 10,
+		groups = {cracky = 3},
+	})
+end
+
+register("basalt", {
+	description = "Basalt",
+	tiles = {"lw_stone.png^[multiply:#4a464c"},
+	groups = {cracky = 2},
+})
+
+register("ash", {
+	description = "Volcanic Ash",
+	tiles = {"lw_sand.png^[multiply:#8f8a86"},
+	groups = {crumbly = 3},
+	is_ground_content = true,
+})
+
+-- Lava the way the garden does juice: translucent, lit and not walkable, so
+-- a lake reads as a lake with no liquid simulation and no damage. There is
+-- no combat on the showcase and this is not the place to start.
+register("lava", {
+	description = "Lava",
+	drawtype = "glasslike",
+	tiles = {"lw_glass.png^[multiply:#ff6a1a"},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	sunlight_propagates = true,
+	walkable = false,
+	buildable_to = false,
+	light_source = 14,
+	post_effect_color = {a = 96, r = 255, g = 96, b = 16},
+	groups = {cracky = 3},
+})
+
+-- A puff. Translucent cube rather than a particle spawner: particles are
+-- exactly the kind of per-frame work the application worker cannot spare.
+register("smoke", {
+	description = "Smoke",
+	drawtype = "glasslike",
+	tiles = {"lw_smoke.png"},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	sunlight_propagates = true,
+	walkable = false,
+	pointable = false,
+	buildable_to = true,
+	groups = {dig_immediate = 3, not_in_creative_inventory = 1},
+})
+
+--------------------------------------------------------------------------
+-- The beacon and the vent
+--------------------------------------------------------------------------
+
+-- Both are airlike node-timer controllers in the flicker's mould: they only
+-- run while their block is loaded, and they only ever swap between the two
+-- states they own, so a visitor's edit next to them is left alone.
+local function register_controller(name, description, interval, on_timer)
+	core.register_node("lw_maps:" .. name, {
+		description = description,
+		drawtype = "airlike",
+		paramtype = "light",
+		sunlight_propagates = true,
+		walkable = false,
+		pointable = false,
+		diggable = false,
+		buildable_to = false,
+		groups = {not_in_creative_inventory = 1},
+		on_construct = function(pos)
+			core.get_node_timer(pos):start(interval)
+		end,
+		on_timer = on_timer,
+	})
+end
+
+local function swap_between(at, target, a, b)
+	local node = core.get_node(at)
+	if node.name ~= target and (node.name == a or node.name == b) then
+		core.swap_node(at, {name = target, param2 = node.param2})
+	end
+end
+
+-- The beacon sits above the lamp; the four windows it sweeps are one node
+-- down and three out, on the middle of each face of the lamp room.
+local BEACON_WINDOWS = {
+	{x = 3, y = -1, z = 0}, {x = 0, y = -1, z = -3},
+	{x = -3, y = -1, z = 0}, {x = 0, y = -1, z = 3},
+}
+
+register_controller("beacon", "Lighthouse Beacon Controller", 0.6, function(pos)
+	local meta = core.get_meta(pos)
+	local step = (meta:get_int("step") + 1) % #BEACON_WINDOWS
+	meta:set_int("step", step)
+	for index, offset in ipairs(BEACON_WINDOWS) do
+		local target = (index - 1 == step) and "lw_maps:beam" or "lw_nodes:glass"
+		swap_between(vector.add(pos, offset), target, "lw_maps:beam", "lw_nodes:glass")
+	end
+	return true
+end)
+
+-- The vent drives the six cells above it: a puff every third node, rising.
+local VENT_HEIGHT = 6
+
+register_controller("vent", "Smoke Vent Controller", 0.5, function(pos)
+	local meta = core.get_meta(pos)
+	local step = (meta:get_int("step") + 1) % 3
+	meta:set_int("step", step)
+	for height = 1, VENT_HEIGHT do
+		local target = ((height - step) % 3 == 0) and "lw_maps:smoke" or "air"
+		swap_between({x = pos.x, y = pos.y + height, z = pos.z}, target,
+			"lw_maps:smoke", "air")
+	end
+	return true
+end)
+
+--------------------------------------------------------------------------
 -- Flickering lanterns
 --------------------------------------------------------------------------
 
@@ -372,6 +535,89 @@ lw_maps.register({
 	size = {x = 40, y = 20, z = 40},
 	origin = {x = 53, y = BASE, z = -28},
 	spawn = {x = 55, y = BASE + 4, z = -7},
+})
+
+lw_maps.register({
+	id = "lighthouse",
+	title = "Lighthouse tide",
+	blurb = "A square lighthouse on a headland: spiral stair to a sweeping " ..
+		"beacon, a gallery round the lamp, a keeper's cottage, a jetty and a " ..
+		"sea cave under the rock.",
+	schem = "map_lighthouse",
+	size = {x = 36, y = 24, z = 36},
+	origin = {x = -84, y = BASE, z = -63},
+	spawn = {x = -51, y = BASE + 4, z = -30},
+	-- Late afternoon on the water: warm, low, with a sea haze the beam has
+	-- something to sweep through.
+	day_night_ratio = 0.42,
+	sky = {
+		type = "regular",
+		clouds = true,
+		sky_color = {
+			day_sky = "#5a6f8e", day_horizon = "#d9a26a",
+			dawn_sky = "#5a6f8e", dawn_horizon = "#d9a26a",
+			night_sky = "#1c2436", night_horizon = "#3c2e30",
+			indoors = "#3a3c48",
+			fog_sun_tint = "#f0b070", fog_moon_tint = "#9aa6c0",
+			fog_tint_type = "custom",
+		},
+		fog = {fog_distance = 90, fog_start = 0.4},
+	},
+})
+
+lw_maps.register({
+	id = "bazaar",
+	title = "Crystal night bazaar",
+	blurb = "A walled night market: striped stalls selling lit crystals, a " ..
+		"mudbrick dome over the crossing, a rooftop walk, and a crystal " ..
+		"grotto under the stalls.",
+	schem = "map_bazaar",
+	size = {x = 36, y = 20, z = 36},
+	origin = {x = 49, y = BASE, z = 20},
+	spawn = {x = 50, y = BASE + 4, z = 21},
+	-- Night. The crystals and lanterns are the light; the sky is there to
+	-- be dark behind them.
+	day_night_ratio = 0.1,
+	sky = {
+		type = "regular",
+		clouds = false,
+		sky_color = {
+			day_sky = "#0e1230", day_horizon = "#2a1e4a",
+			dawn_sky = "#0e1230", dawn_horizon = "#2a1e4a",
+			night_sky = "#080a1c", night_horizon = "#1a1230",
+			indoors = "#141024",
+			fog_sun_tint = "#5a3e8a", fog_moon_tint = "#8a7ac0",
+			fog_tint_type = "custom",
+		},
+		fog = {fog_distance = 80, fog_start = 0.45},
+	},
+})
+
+lw_maps.register({
+	id = "caldera",
+	title = "Volcanic smoke caldera",
+	blurb = "A cinder cone you climb and go under: a spiral trail to the " ..
+		"crater rim, a lava lake, a lava tube into a magma chamber, and a " ..
+		"timbered stair back out to the trail.",
+	schem = "map_caldera",
+	size = {x = 36, y = 24, z = 36},
+	origin = {x = -84, y = BASE, z = 20},
+	spawn = {x = -50, y = BASE + 4, z = 21},
+	-- Ash haze: bright enough to climb by, orange at the edges, and short.
+	day_night_ratio = 0.55,
+	sky = {
+		type = "regular",
+		clouds = true,
+		sky_color = {
+			day_sky = "#6e5a4c", day_horizon = "#b8784a",
+			dawn_sky = "#6e5a4c", dawn_horizon = "#b8784a",
+			night_sky = "#2a1c18", night_horizon = "#4a2a1c",
+			indoors = "#3a2c28",
+			fog_sun_tint = "#e08a4a", fog_moon_tint = "#6a4a3a",
+			fog_tint_type = "custom",
+		},
+		fog = {fog_distance = 64, fog_start = 0.3},
+	},
 })
 
 --------------------------------------------------------------------------

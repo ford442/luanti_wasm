@@ -2,7 +2,7 @@
 # Luanti
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Copyright (C) 2026 The Luanti Contributors
-"""Generate the three authored themed maps for games/luanti_web.
+"""Generate the authored themed maps for games/luanti_web.
 
     python3 util/content/generate_luanti_web_maps.py
 
@@ -24,9 +24,14 @@ the compositor.
 
 Layout, in the atlas the hub plaza sits in the middle of::
 
-              [ snow mountain ]        south of the plaza
-                     |
-    [ halloween ]--[ hub ]--[ fruit garden ]
+    [ caldera ]                          [ bazaar ]
+         |                                  |
+    [ halloween ]--------[ hub ]--------[ fruit garden ]
+                           |    |
+              [ lighthouse ]    [ snow mountain ]
+
+The first three are west, south and east of the plaza; the second three take
+the diagonals, and their causeways are two legs each (see lw_world/maps.lua).
 
 Local coordinates below run ``0..size-1`` on each axis. ``lw_world`` stamps
 local ``y = 0`` at world ``y = 5``, so local ``y = SURFACE`` is the world's
@@ -105,6 +110,22 @@ LEAVES = "lw_maps:leaves"
 VINE = "lw_maps:vine"
 JUICE_RED = "lw_maps:juice_red"
 JUICE_GREEN = "lw_maps:juice_green"
+BRICK_STAIR = "lw_nodes:stair_stone_brick"
+
+SEA_ROCK = "lw_maps:sea_rock"
+BEAM_LIGHT = "lw_maps:beam"
+BEACON = "lw_maps:beacon"
+MUDBRICK = "lw_maps:mudbrick"
+BASALT = "lw_maps:basalt"
+ASH = "lw_maps:ash"
+LAVA = "lw_maps:lava"
+SMOKE = "lw_maps:smoke"
+VENT = "lw_maps:vent"
+CRYSTAL_TINTS = ("violet", "cyan", "rose", "amber")
+
+
+def crystal(tint: str) -> str:
+	return "lw_maps:crystal_" + tint
 
 
 def wool(color: str) -> str:
@@ -117,13 +138,14 @@ def wool(color: str) -> str:
 # otherwise wall off a route and nothing would notice.
 NON_WALKABLE = frozenset({
 	AIR, WATER, COBWEB, TORCH, FIRE, VINE, HIDDEN_LIGHT,
-	JUICE_RED, JUICE_GREEN,
+	JUICE_RED, JUICE_GREEN, LAVA, SMOKE, BEACON, VENT,
 })
 
 # Nodes a player's head and chest can occupy but that are not full cubes, so
 # standing on them is fine and so is standing *in* them.
 HALF_HEIGHT = frozenset({
-	PLANK_SLAB, BRICK_SLAB, SNOW_SLAB, PLANK_STAIR, SNOW_STAIR, CARPET,
+	PLANK_SLAB, BRICK_SLAB, SNOW_SLAB, PLANK_STAIR, SNOW_STAIR, BRICK_STAIR,
+	CARPET,
 })
 
 
@@ -478,24 +500,102 @@ SHAFT_Z0 = 12
 SHAFT_TOP = FLOOR + 9
 
 
-def peak_height(x: float, z: float) -> int:
-	"""Top surface of the cone at (x, z), as a local y.
+def cone_height(x: float, z: float, centre, top: int, summit: float,
+		slope: float) -> int:
+	"""Top surface of a flat-topped cone at (x, z), as a local y.
 
 	Flat-topped on purpose: a true cone tapers to a single node and there is
-	nowhere to stand, so the last four nodes of radius are a plateau and the
-	overlook deck sits on it.
+	nowhere to stand, so the last ``summit`` nodes of radius are a plateau.
+	The snow mountain puts an overlook on it; the caldera puts a crater in it.
 	"""
-	radius = math.hypot(x - PEAK[0], z - PEAK[1])
-	if radius <= SUMMIT_RADIUS:
-		return PEAK_TOP
-	if radius > PEAK_BASE_RADIUS:
+	radius = math.hypot(x - centre[0], z - centre[1])
+	if radius <= summit:
+		return top
+	if radius > summit + (top - SURFACE) / slope:
 		return SURFACE
-	return max(SURFACE, PEAK_TOP - int((radius - SUMMIT_RADIUS) * SLOPE))
+	return max(SURFACE, top - int((radius - summit) * slope))
+
+
+def cone_radius(y: int, top: int, summit: float, slope: float) -> float:
+	"""Radius at which the cone's surface reaches local height y."""
+	return summit + max(0.0, (top - y) / slope)
+
+
+def spiral_shelf(build: Build, centre, top: int, summit: float, slope: float,
+		tread: str, start_angle: float) -> list[tuple[int, int, int]]:
+	"""A spiral shelf cut into a cone, one node up every four steps.
+
+	Returns the path so the caller can hang a rail off its outer edge and put
+	a tunnel mouth exactly where a climber walks past it.
+	"""
+	path: list[tuple[int, int, int]] = []
+	y = FLOOR
+	angle = start_angle
+	step = 0
+	while y <= top:
+		radius = cone_radius(y, top, summit, slope) - 1.0
+		x = int(round(centre[0] + radius * math.cos(angle)))
+		z = int(round(centre[1] + radius * math.sin(angle)))
+		if not path or path[-1] != (x, y, z):
+			path.append((x, y, z))
+		# Three nodes wide, cut back into the hillside and cleared overhead.
+		for dx in (-1, 0, 1):
+			for dz in (-1, 0, 1):
+				build.set(x + dx, y, z + dz, tread)
+				build.clear(x + dx, y + 1, z + dz, x + dx, y + 3, z + dz)
+		step += 1
+		if step % 4 == 0:
+			y += 1
+		angle += 1.0 / max(radius, 3.0)
+	return path
+
+
+def timbered_stair(build: Build, x_lo: int, x_hi: int, z0: int, y: int,
+		top: int, path, *, timber: str = BEAM) -> tuple[int, int, int]:
+	"""A stair from a tunnel up to a mouth on a spiral trail.
+
+	One tread per node north, timbered every third step, then a level L of
+	two legs out to whichever tread of ``path`` is nearest at ``top``. The
+	mouth is not a constant: hard-coding it would put the exit a few nodes off
+	the trail the first time the cone's slope changed, and nothing would say
+	so. Returns the head of the climb.
+	"""
+	rises = top - y
+	for index in range(rises + 1):
+		ty = y + index
+		tz = z0 + index
+		build.box(x_lo, ty, tz, x_hi, ty, tz, PLANK_STAIR, NORTH)
+		build.clear(x_lo, ty + 1, tz, x_hi, ty + 4, tz)
+		if index % 3 == 0:
+			build.box(x_lo - 1, ty + 1, tz, x_lo - 1, ty + 3, tz, timber)
+			build.box(x_hi + 1, ty + 1, tz, x_hi + 1, ty + 3, tz, timber)
+		if index % 4 == 0:
+			build.set(x_hi + 1, ty + 2, tz, TORCH)
+
+	head = (x_hi, top, z0 + rises)
+	mouth = min((p for p in path if p[1] == top),
+		key=lambda p: abs(p[0] - head[0]) + abs(p[2] - head[2]), default=None)
+	if mouth is None:
+		raise SystemExit("timbered stair: the trail never passes y=%d" % top)
+	mx, my, mz = mouth
+	lo_x, hi_x = sorted((head[0], mx))
+	carve(build, lo_x, my, head[2], hi_x, my + 2, head[2] + 1, floor=PLANKS)
+	lo_z, hi_z = sorted((head[2], mz))
+	carve(build, mx - 1, my, lo_z, mx + 1, my + 2, hi_z, floor=PLANKS)
+	# A timber portal where the gallery breaks out onto the trail.
+	for dz in (-2, 2):
+		build.box(mx - 1, my, mz + dz, mx + 1, my + 3, mz + dz, timber)
+	build.clear(mx - 1, my, mz - 1, mx + 1, my + 2, mz + 1)
+	build.set(mx - 1, my + 2, mz - 1, TORCH)
+	return head
+
+
+def peak_height(x: float, z: float) -> int:
+	return cone_height(x, z, PEAK, PEAK_TOP, SUMMIT_RADIUS, SLOPE)
 
 
 def peak_radius(y: int) -> float:
-	"""Radius at which the cone's surface reaches local height y."""
-	return SUMMIT_RADIUS + max(0.0, (PEAK_TOP - y) / SLOPE)
+	return cone_radius(y, PEAK_TOP, SUMMIT_RADIUS, SLOPE)
 
 
 def carve(build: Build, x0, y0, z0, x1, y1, z1, *, floor=None, ceiling=None) -> None:
@@ -524,31 +624,9 @@ def build_mountain_mass(build: Build) -> None:
 
 
 def build_switchback(build: Build) -> list[tuple[int, int, int]]:
-	"""A spiral shelf cut into the cone, one node up every four steps.
-
-	Returns the path so the caller can hang a rail off its outer edge and put
-	the mineshaft mouth exactly where a climber walks past it.
-	"""
-	path: list[tuple[int, int, int]] = []
-	y = FLOOR
-	angle = math.pi / 2                 # start on the north face, at the causeway
-	step = 0
-	while y <= PEAK_TOP:
-		radius = peak_radius(y) - 1.0
-		x = int(round(PEAK[0] + radius * math.cos(angle)))
-		z = int(round(PEAK[1] + radius * math.sin(angle)))
-		if not path or path[-1] != (x, y, z):
-			path.append((x, y, z))
-		# Three nodes wide, cut back into the hillside and cleared overhead.
-		for dx in (-1, 0, 1):
-			for dz in (-1, 0, 1):
-				build.set(x + dx, y, z + dz, PACKED_SNOW)
-				build.clear(x + dx, y + 1, z + dz, x + dx, y + 3, z + dz)
-		step += 1
-		if step % 4 == 0:
-			y += 1
-		angle += 1.0 / max(radius, 3.0)
-	return path
+	"""The spiral trail, starting on the north face at the causeway."""
+	return spiral_shelf(build, PEAK, PEAK_TOP, SUMMIT_RADIUS, SLOPE,
+		PACKED_SNOW, math.pi / 2)
 
 
 def build_summit(build: Build) -> None:
@@ -618,51 +696,14 @@ def build_ice_cave(build: Build) -> None:
 
 
 def build_mineshaft(build: Build, path) -> None:
-	"""Timbered stair from the through-tunnel up to a mouth on the trail.
-
-	The mouth is not a constant: it is whichever tread of the switchback the
-	shaft can reach at ``SHAFT_TOP``, found from the path the spiral actually
-	took. Hard-coding a position here would put the exit a few nodes off the
-	trail the first time the cone's slope changed, and nothing would say so.
-	"""
+	"""Timbered stair from the through-tunnel up to a mouth on the trail."""
 	x0, x1 = SHORTCUT_X
 	y = SHORTCUT_Y
 	z0 = SHAFT_Z0
 	# A landing off the east wall of the through-tunnel.
 	carve(build, x1 + 1, y, z0, x1 + 3, y + 2, z0 + 1, floor=PLANKS)
 	build.clear(x1, y, z0, x1, y + 2, z0 + 1)
-
-	# The climb: one tread per node north, timbered every third step.
-	x_lo, x_hi = x1 + 2, x1 + 3
-	rises = SHAFT_TOP - y
-	for index in range(rises + 1):
-		ty = y + index
-		tz = z0 + 1 + index
-		build.box(x_lo, ty, tz, x_hi, ty, tz, PLANK_STAIR, NORTH)
-		build.clear(x_lo, ty + 1, tz, x_hi, ty + 4, tz)
-		if index % 3 == 0:
-			build.box(x_lo - 1, ty + 1, tz, x_lo - 1, ty + 3, tz, BEAM)
-			build.box(x_hi + 1, ty + 1, tz, x_hi + 1, ty + 3, tz, BEAM)
-		if index % 4 == 0:
-			build.set(x_hi + 1, ty + 2, tz, TORCH)
-
-	# The gallery out to the trail. Both ends are at SHAFT_TOP, so it is an
-	# L of two level legs: east in x, then north or south in z.
-	head = (x_hi, SHAFT_TOP, z0 + 1 + rises)
-	mouth = min((p for p in path if p[1] == SHAFT_TOP),
-		key=lambda p: abs(p[0] - head[0]) + abs(p[2] - head[2]), default=None)
-	if mouth is None:
-		raise SystemExit("mineshaft: the switchback never passes y=%d" % SHAFT_TOP)
-	mx, my, mz = mouth
-	lo_x, hi_x = sorted((head[0], mx))
-	carve(build, lo_x, my, head[2], hi_x, my + 2, head[2] + 1, floor=PLANKS)
-	lo_z, hi_z = sorted((head[2], mz))
-	carve(build, mx - 1, my, lo_z, mx + 1, my + 2, hi_z, floor=PLANKS)
-	# A timber portal where the gallery breaks out onto the trail.
-	for dz in (-2, 2):
-		build.box(mx - 1, my, mz + dz, mx + 1, my + 3, mz + dz, BEAM)
-	build.clear(mx - 1, my, mz - 1, mx + 1, my + 2, mz + 1)
-	build.set(mx - 1, my + 2, mz - 1, TORCH)
+	timbered_stair(build, x1 + 2, x1 + 3, z0 + 1, y, SHAFT_TOP, path)
 
 
 def build_snow_apron(build: Build) -> None:
@@ -900,6 +941,529 @@ def build_fruit_garden() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 4. Lighthouse tide
+# --------------------------------------------------------------------------
+
+LIGHTHOUSE_SIZE = (36, 24, 36)
+# The causeway's second leg lands on the east face, near the north end.
+LIGHTHOUSE_SPAWN = (33, FLOOR, 33)
+
+HEADLAND = (10.0, 22.0)             # centre of the rock the tower stands on
+HEADLAND_RADIUS = 11.0
+HEADLAND_TOP = SURFACE + 5          # the plateau under the tower
+TOWER = (10, 22)                    # centre column of the square tower
+TOWER_HALF = 3                      # 7 x 7 outside, 5 x 5 inside
+TOWER_BASE = HEADLAND_TOP           # the rock the ground floor is
+LAMP_FLOOR = TOWER_BASE + 11        # lamp-room floor; the stair ends below it
+COTTAGE = dict(x0=22, x1=29, z0=24, z1=31)
+LAGOON_Z = 9                        # the sea fills z 0..LAGOON_Z
+JETTY_X = (28, 29)
+SEA_CAVE = dict(x0=9, x1=11, z0=11, z1=18)
+
+
+def headland_height(x: float, z: float) -> int:
+	"""Top of the headland at (x, z): a dome rising one node per 1.5 of radius.
+
+	That slope is what makes it walkable without a path — no two neighbouring
+	columns differ by more than one — and the plateau is wide enough for the
+	tower plus a walk around it.
+	"""
+	radius = math.hypot(x - HEADLAND[0], z - HEADLAND[1])
+	if radius > HEADLAND_RADIUS:
+		return SURFACE
+	return SURFACE + min(HEADLAND_TOP - SURFACE,
+		int((HEADLAND_RADIUS - radius) / 1.5))
+
+
+def tower_ring(half: int) -> list[tuple[int, int]]:
+	"""The cells of a square ring at ``half`` from the tower centre, in walking
+	order clockwise from the east face's middle cell. Four-connected, which is
+	what lets the spiral stair be a stair rather than a series of jumps."""
+	ring = []
+	for dz in range(0, -half - 1, -1):          # east face, going south
+		ring.append((half, dz))
+	for dx in range(half - 1, -half - 1, -1):   # south face, going west
+		ring.append((dx, -half))
+	for dz in range(-half + 1, half + 1):       # west face, going north
+		ring.append((-half, dz))
+	for dx in range(-half + 1, half + 1):       # north face, going east
+		ring.append((dx, half))
+	for dz in range(half - 1, 0, -1):           # back down the east face
+		ring.append((half, dz))
+	return ring
+
+
+def build_headland(build: Build) -> None:
+	for x in range(build.sx):
+		for z in range(build.sz):
+			top = headland_height(x, z)
+			if top <= SURFACE:
+				continue
+			build.box(x, SURFACE, z, x, top, z, SEA_ROCK)
+	# Tide pools in the rock at the water's edge, and a few sea stacks.
+	for x, z in ((2, 14), (4, 19), (1, 24), (5, 12)):
+		build.set(x, SURFACE, z, WATER)
+	for x, z, height in ((3, 5, 3), (33, 4, 2), (20, 2, 2), (0, 30, 3)):
+		build.box(x, SURFACE, z, x, SURFACE + height, z, SEA_ROCK)
+
+
+def build_tower(build: Build) -> None:
+	"""The square lighthouse: banded wool, a spiral stair, a lit lamp room
+	with a beacon that sweeps, and a gallery around the outside."""
+	cx, cz = TOWER
+	h = TOWER_HALF
+	base = TOWER_BASE
+	# Shell, then hollow it out.
+	build.box(cx - h, base + 1, cz - h, cx + h, LAMP_FLOOR - 1, cz + h, wool("white"))
+	for y in (base + 4, base + 8):
+		build.walls(cx - h, y, cz - h, cx + h, y, cz + h, wool("red"))
+	build.clear(cx - h + 1, base + 1, cz - h + 1, cx + h - 1, LAMP_FLOOR - 1, cz + h - 1)
+	# Door on the east face, at the foot of the stair.
+	build.clear(cx + h, base + 1, cz, cx + h, base + 2, cz)
+	build.set(cx + h, base + 3, cz, GOLD)
+	# Windows up the south face, one per storey.
+	for y in range(base + 3, LAMP_FLOOR - 1, 4):
+		build.set(cx, y, cz - h, GLASS)
+	# The spine the stair winds around; the treads are the inner ring.
+	build.box(cx, base + 1, cz, cx, LAMP_FLOOR - 1, cz, BEAM)
+	ring = tower_ring(h - 1)
+	treads = 2 * (LAMP_FLOOR - 1 - base)          # one rise every two cells
+	for index in range(1, treads + 1):
+		dx, dz = ring[index % len(ring)]
+		y = base + index // 2
+		build.set(cx + dx, y, cz + dz, PLANK_SLAB if index % 2 else PLANKS)
+		build.clear(cx + dx, y + 1, cz + dz, cx + dx, y + 3, cz + dz)
+	# Lamp-room floor, with a hatch over every tread that needs the headroom.
+	build.box(cx - h, LAMP_FLOOR, cz - h, cx + h, LAMP_FLOOR, cz + h, BRICK)
+	for index in range(1, treads + 1):
+		if base + index // 2 + 2 >= LAMP_FLOOR:
+			dx, dz = ring[index % len(ring)]
+			build.set(cx + dx, LAMP_FLOOR, cz + dz, AIR)
+	# Lamp room: glass all round, a lamp on a pedestal, and a beacon
+	# controller above it that sweeps the four mid-face windows.
+	build.clear(cx - h + 1, LAMP_FLOOR + 1, cz - h + 1, cx + h - 1, LAMP_FLOOR + 3, cz + h - 1)
+	build.walls(cx - h, LAMP_FLOOR + 1, cz - h, cx + h, LAMP_FLOOR + 3, cz + h, GLASS)
+	build.box(cx - h, LAMP_FLOOR + 4, cz - h, cx + h, LAMP_FLOOR + 4, cz + h, BRICK_SLAB)
+	build.box(cx - h + 1, LAMP_FLOOR + 4, cz - h + 1, cx + h - 1, LAMP_FLOOR + 4, cz + h - 1, BRICK)
+	build.set(cx, LAMP_FLOOR + 1, cz, PEDESTAL)
+	build.set(cx, LAMP_FLOOR + 2, cz, LAMP)
+	build.set(cx, LAMP_FLOOR + 3, cz, BEACON)
+	for dx, dz in ((h, 0), (-h, 0), (0, h), (0, -h)):
+		build.set(cx + dx, LAMP_FLOOR + 2, cz + dz, BEAM_LIGHT)
+	# The gallery: a walk around the lamp room, a fence at its edge, reached
+	# through a door in the west glass — one cell off the middle, because the
+	# middle of every face is a window the beacon sweeps.
+	g = h + 1
+	build.walls(cx - g, LAMP_FLOOR, cz - g, cx + g, LAMP_FLOOR, cz + g, BRICK)
+	build.walls(cx - g - 1, LAMP_FLOOR - 1, cz - g - 1, cx + g + 1, LAMP_FLOOR - 1, cz + g + 1, BRICK_SLAB)
+	for dx, dz in tower_ring(g + 1):
+		if (dx + dz) % 2 == 0:
+			build.set(cx + dx, LAMP_FLOOR + 1, cz + dz, FENCE)
+	build.clear(cx - h, LAMP_FLOOR + 1, cz - 1, cx - h, LAMP_FLOOR + 2, cz - 1)
+
+
+def build_cottage(build: Build) -> None:
+	c = COTTAGE
+	build.box(c["x0"], SURFACE, c["z0"], c["x1"], SURFACE, c["z1"], PLANKS)
+	build.walls(c["x0"], FLOOR, c["z0"], c["x1"], FLOOR + 2, c["z1"], wool("white"))
+	for x in (c["x0"], c["x1"]):
+		for z in (c["z0"], c["z1"]):
+			build.box(x, FLOOR, z, x, FLOOR + 2, z, BEAM)
+	build.box(c["x0"] - 1, FLOOR + 3, c["z0"] - 1, c["x1"] + 1, FLOOR + 3, c["z1"] + 1, PLANK_SLAB)
+	build.box(c["x0"] + 1, FLOOR + 3, c["z0"] + 1, c["x1"] - 1, FLOOR + 3, c["z1"] - 1, PLANKS)
+	build.box(c["x1"] - 1, FLOOR + 3, c["z0"] + 1, c["x1"] - 1, FLOOR + 5, c["z0"] + 1, BRICK)
+	# Door onto the boardwalk, windows either side of it.
+	build.clear(25, FLOOR, c["z1"], 26, FLOOR + 1, c["z1"])
+	build.set(23, FLOOR + 1, c["z1"], GLASS)
+	build.set(28, FLOOR + 1, c["z1"], GLASS)
+	build.set(c["x0"], FLOOR + 1, 27, GLASS)
+	# A bed, a table with a lamp, and a rug.
+	build.box(c["x0"] + 1, FLOOR, c["z0"] + 1, c["x0"] + 2, FLOOR, c["z0"] + 2, wool("red"))
+	build.set(c["x0"] + 1, FLOOR, c["z0"] + 2, wool("white"))
+	build.set(c["x1"] - 1, FLOOR, c["z0"] + 2, PEDESTAL)
+	build.set(c["x1"] - 1, FLOOR + 1, c["z0"] + 2, LAMP)
+	build.box(24, SURFACE, 27, 27, SURFACE, 29, CARPET)
+
+
+def build_shore(build: Build) -> None:
+	"""The lagoon, the boardwalk from the causeway, the jetty and the boat."""
+	build.box(0, SURFACE - 1, 0, build.sx - 1, SURFACE - 1, LAGOON_Z, STONE)
+	build.box(0, SURFACE, 0, build.sx - 1, SURFACE, LAGOON_Z, WATER)
+	# Boardwalk from the causeway to the cottage door, then a paved path on
+	# to the foot of the headland.
+	build.box(22, SURFACE, 32, build.sx - 1, SURFACE, 34, PLANKS)
+	build.box(21, SURFACE, 22, 23, SURFACE, 34, PAVING)
+	build.box(14, SURFACE, 21, 21, SURFACE, 23, PAVING)
+	for x in range(24, build.sx - 1, 4):
+		build.set(x, FLOOR, 35, DEAD_WOOD)
+		build.set(x, FLOOR + 1, 35, LAMP)
+	# Jetty out over the water, railed on one side, a boat tied up beside it.
+	jx0, jx1 = JETTY_X
+	build.box(jx0, FLOOR, 2, jx1, FLOOR, LAGOON_Z + 1, PLANKS)
+	for z in range(2, LAGOON_Z + 2, 2):
+		build.set(jx1 + 1, FLOOR + 1, z, FENCE)
+		build.set(jx0, SURFACE - 1, z, BEAM)
+	build.set(jx0, FLOOR + 1, 2, PEDESTAL)
+	build.set(jx0, FLOOR + 2, 2, LAMP)
+	build.box(jx0 - 3, FLOOR, 3, jx0 - 2, FLOOR, 6, wool("brown"))
+	build.box(jx0 - 3, FLOOR + 1, 3, jx0 - 2, FLOOR + 1, 6, wool("brown"))
+	build.clear(jx0 - 3, FLOOR + 1, 4, jx0 - 2, FLOOR + 1, 5)
+	build.set(jx0 - 3, FLOOR + 1, 4, wool("white"))
+	# A buoy and a foghorn post out on the rocks.
+	build.set(15, FLOOR, 4, wool("red"))
+	build.set(15, FLOOR + 1, 4, wool("white"))
+
+
+def build_sea_cave(build: Build) -> None:
+	"""A cave into the headland from the south shore, floored with rock pools."""
+	c = SEA_CAVE
+	carve(build, c["x0"], FLOOR, c["z0"], c["x1"], FLOOR + 2, c["z1"], floor=SEA_ROCK)
+	build.walls(c["x0"] - 1, FLOOR, c["z0"] + 2, c["x1"] + 1, FLOOR + 3, c["z1"] + 1, SEA_ROCK)
+	build.clear(c["x0"], FLOOR, c["z0"], c["x1"], FLOOR + 2, c["z1"])
+	for x, z in ((c["x0"], c["z1"] - 1), (c["x1"], c["z1"] - 3), (c["x0"] + 1, c["z0"] + 3)):
+		build.set(x, SURFACE, z, WATER)
+	build.set(c["x0"], FLOOR + 2, c["z1"] - 2, TORCH)
+	build.set(c["x1"], FLOOR + 2, c["z0"] + 3, TORCH)
+	build.set(c["x0"] + 1, FLOOR, c["z1"], BONE)
+	build.set(c["x1"], FLOOR + 1, c["z1"], COBWEB)
+
+
+def build_lighthouse() -> Build:
+	sx, sy, sz = LIGHTHOUSE_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(SAND, sub=STONE)
+	build_shore(build)
+	build_headland(build)
+	build_tower(build)
+	build_cottage(build)
+	# Interiors last: the cave cuts through whatever the dome put in its way.
+	build_sea_cave(build)
+	build.set(sx - 2, FLOOR, 32, PEDESTAL)
+	build.set(sx - 2, FLOOR + 1, 32, BEAM_LIGHT)
+	return build
+
+
+# --------------------------------------------------------------------------
+# 5. Crystal night bazaar
+# --------------------------------------------------------------------------
+
+BAZAAR_SIZE = (36, 20, 36)
+# The causeway's second leg lands at the south-west corner, which is why the
+# entrance is a corner and both main lanes leave from it.
+BAZAAR_SPAWN = (1, FLOOR, 1)
+
+BAZAAR_WALL_TOP = FLOOR + 3         # the perimeter wall; its top is a walk
+LANE_A = (1, 3)                     # x range of the lane north from the gate
+LANE_B = (1, 3)                     # z range of the lane east from the gate
+LANE_C = (17, 19)                   # the cross lanes through the dome
+DOME = (18, FLOOR + 1, 18)
+DOME_RADIUS = 7
+GROTTO = dict(x0=24, x1=32, z0=6, z1=12)
+GROTTO_FLOOR = 0
+ROOF_STAIR_Z = BAZAAR_SIZE[2] - 7   # first tread of the stair to the roof
+
+
+def build_walls_and_lanes(build: Build) -> None:
+	sx, sz = build.sx, build.sz
+	build.box(0, SURFACE, 0, sx - 1, SURFACE, sz - 1, SAND)
+	# Perimeter: one node thick on three sides, three on the north, whose
+	# top is the rooftop walk. The corner at the gate is left open.
+	build.walls(0, FLOOR, 0, sx - 1, BAZAAR_WALL_TOP, sz - 1, MUDBRICK)
+	build.box(0, FLOOR, sz - 3, sx - 1, BAZAAR_WALL_TOP, sz - 1, MUDBRICK)
+	build.clear(0, FLOOR, 0, LANE_A[1], FLOOR + 3, LANE_B[1])
+	# Gate arch over the corner, with lanterns.
+	build.box(0, FLOOR + 3, 0, LANE_A[1] + 1, FLOOR + 3, LANE_B[1] + 1, GOLD)
+	build.set(LANE_A[1] + 1, FLOOR + 4, LANE_B[1] + 1, LAMP)
+	# Lanes.
+	build.box(LANE_A[0], SURFACE, 0, LANE_A[1], SURFACE, sz - 1, PAVING)
+	build.box(0, SURFACE, LANE_B[0], sx - 1, SURFACE, LANE_B[1], PAVING)
+	build.box(LANE_C[0], SURFACE, 0, LANE_C[1], SURFACE, sz - 1, PAVING)
+	build.box(0, SURFACE, LANE_C[0], sx - 1, SURFACE, LANE_C[1], PAVING)
+	# Lamp posts at the lane crossings.
+	for x, z in ((4, 4), (16, 4), (4, 16), (16, 20), (20, 4), (20, 16),
+			(4, 20), (16, 32), (32, 16), (32, 32), (32, 4), (4, 32)):
+		build.box(x, FLOOR, z, x, FLOOR + 2, z, BEAM)
+		build.set(x, FLOOR + 3, z, LAMP)
+	# Stair up to the rooftop walk, from the north end of the west lane.
+	stair_run(build, LANE_A[0], LANE_A[1], ROOF_STAIR_Z, 1, FLOOR, 4, BRICK_STAIR)
+	build.box(LANE_A[0], SURFACE, ROOF_STAIR_Z, LANE_A[1], SURFACE, ROOF_STAIR_Z + 3, MUDBRICK)
+	for x in range(0, sx, 2):
+		build.set(x, BAZAAR_WALL_TOP + 1, sz - 1, FENCE)
+		build.set(x, BAZAAR_WALL_TOP + 1, sz - 3, FENCE)
+	build.clear(LANE_A[0], BAZAAR_WALL_TOP + 1, sz - 3, LANE_A[1], BAZAAR_WALL_TOP + 1, sz - 3)
+	# A minaret on the north-east corner, lit at the top.
+	build.box(sx - 4, FLOOR, sz - 4, sx - 2, FLOOR + 11, sz - 2, MUDBRICK)
+	build.walls(sx - 5, FLOOR + 9, sz - 5, sx - 1, FLOOR + 9, sz - 1, GOLD)
+	build.set(sx - 3, FLOOR + 12, sz - 3, LAMP)
+
+
+def stall(build: Build, x: int, z: int, along_x: bool, colors, tint: str) -> None:
+	"""One market stall: a plank counter three wide with crystals on it, an
+	awning of striped wool on two posts. ``along_x`` says which way the
+	counter runs; the customer stands on the lane side."""
+	if along_x:
+		build.box(x - 1, FLOOR, z, x + 1, FLOOR, z, PLANKS)
+		posts = ((x - 1, z + 1), (x + 1, z + 1))
+		build.box(x - 1, FLOOR + 3, z - 1, x + 1, FLOOR + 3, z + 1, wool(colors[0]))
+		build.box(x, FLOOR + 3, z - 1, x, FLOOR + 3, z + 1, wool(colors[1]))
+	else:
+		build.box(x, FLOOR, z - 1, x, FLOOR, z + 1, PLANKS)
+		posts = ((x + 1, z - 1), (x + 1, z + 1))
+		build.box(x - 1, FLOOR + 3, z - 1, x + 1, FLOOR + 3, z + 1, wool(colors[0]))
+		build.box(x - 1, FLOOR + 3, z, x + 1, FLOOR + 3, z, wool(colors[1]))
+	for px, pz in posts:
+		build.box(px, FLOOR, pz, px, FLOOR + 2, pz, BEAM)
+	build.set(x, FLOOR + 1, z, crystal(tint))
+	build.set(x, FLOOR + 2, z, HIDDEN_LIGHT)
+
+
+def build_stalls(build: Build) -> None:
+	stripes = (("red", "white"), ("blue", "yellow"), ("green", "white"),
+		("violet", "pink"), ("orange", "white"), ("cyan", "blue"))
+	index = 0
+	# Along the west lane's east side and the south lane's north side.
+	for z in (7, 11, 24, 28):
+		stall(build, 6, z, False, stripes[index % 6], CRYSTAL_TINTS[index % 4])
+		index += 1
+	for x in (7, 11, 24, 28):
+		stall(build, x, 6, True, stripes[index % 6], CRYSTAL_TINTS[index % 4])
+		index += 1
+	# Along both cross lanes, away from the dome.
+	for z in (7, 29):
+		for x in (14, 22):
+			stall(build, x, z, False, stripes[index % 6], CRYSTAL_TINTS[index % 4])
+			index += 1
+	for x in (30,):
+		for z in (14, 22):
+			stall(build, x, z, True, stripes[index % 6], CRYSTAL_TINTS[index % 4])
+			index += 1
+	# Rugs on the sand between stalls.
+	for x, z, color in ((9, 9, "red"), (26, 9, "violet"), (9, 26, "cyan"), (27, 27, "orange")):
+		build.box(x, SURFACE, z, x + 2, SURFACE, z + 2, wool(color))
+
+
+def build_dome(build: Build) -> None:
+	"""The covered crossing: a mudbrick dome over the two cross lanes, with a
+	crystal fountain in the middle and a doorway wherever a lane comes in."""
+	cx, cy, cz = DOME
+	build.sphere(cx, cy, cz, DOME_RADIUS, MUDBRICK, sy=DOME_RADIUS, shell=1)
+	build.sphere(cx, cy, cz, DOME_RADIUS - 1, AIR, sy=DOME_RADIUS - 1)
+	# The sphere's lower half is below ground; put the floor and lanes back.
+	build.box(cx - DOME_RADIUS, 0, cz - DOME_RADIUS, cx + DOME_RADIUS, SURFACE - 1, cz + DOME_RADIUS, STONE)
+	build.box(cx - DOME_RADIUS, SURFACE, cz - DOME_RADIUS, cx + DOME_RADIUS, SURFACE, cz + DOME_RADIUS, SAND)
+	build.box(LANE_C[0], SURFACE, cz - DOME_RADIUS, LANE_C[1], SURFACE, cz + DOME_RADIUS, PAVING)
+	build.box(cx - DOME_RADIUS, SURFACE, LANE_C[0], cx + DOME_RADIUS, SURFACE, LANE_C[1], PAVING)
+	build.box(cx - 2, SURFACE, cz - 2, cx + 2, SURFACE, cz + 2, POLISHED)
+	# Doorways where the lanes meet the shell, three wide and three high.
+	r = DOME_RADIUS
+	build.clear(LANE_C[0], FLOOR, cz - r, LANE_C[1], FLOOR + 2, cz - r + 1)
+	build.clear(LANE_C[0], FLOOR, cz + r - 1, LANE_C[1], FLOOR + 2, cz + r)
+	build.clear(cx - r, FLOOR, LANE_C[0], cx - r + 1, FLOOR + 2, LANE_C[1])
+	build.clear(cx + r - 1, FLOOR, LANE_C[0], cx + r, FLOOR + 2, LANE_C[1])
+	# Crystal fountain: a stepped cluster, lit from within.
+	build.box(cx - 1, FLOOR, cz - 1, cx + 1, FLOOR, cz + 1, GOLD)
+	build.set(cx, FLOOR + 1, cz, crystal("violet"))
+	build.set(cx, FLOOR + 2, cz, crystal("cyan"))
+	build.set(cx, FLOOR + 3, cz, crystal("rose"))
+	build.set(cx, FLOOR + 4, cz, HIDDEN_LIGHT)
+	for dx, dz, tint in ((1, 0, "amber"), (-1, 0, "cyan"), (0, 1, "rose"), (0, -1, "violet")):
+		build.set(cx + dx, FLOOR + 1, cz + dz, crystal(tint))
+	# An oculus and a ring of lanterns at the springing.
+	build.clear(cx, cy + r - 1, cz, cx, cy + r + 1, cz)
+	for dx, dz in ((r - 1, 0), (-(r - 1), 0), (0, r - 1), (0, -(r - 1))):
+		build.set(cx + dx, FLOOR + 4, cz + dz, LAMP)
+
+
+def build_grotto(build: Build) -> None:
+	"""The crystal grotto: a cellar under the south-east stalls, reached by a
+	stair off the south lane, lined with every tint the market sells."""
+	g = GROTTO
+	build.box(g["x0"], GROTTO_FLOOR, g["z0"], g["x1"], GROTTO_FLOOR, g["z1"], POLISHED)
+	build.clear(g["x0"], GROTTO_FLOOR + 1, g["z0"], g["x1"], SURFACE - 1, g["z1"])
+	build.walls(g["x0"] - 1, GROTTO_FLOOR + 1, g["z0"] - 1, g["x1"] + 1, SURFACE - 1, g["z1"] + 1, BRICK)
+	# Stair down from the lane: three treads north, cut through the ground.
+	sx0, sx1 = g["x0"] + 2, g["x0"] + 3
+	stair_run(build, sx0, sx1, LANE_B[1] + 1, 1, FLOOR - 1, -3, BRICK_STAIR)
+	build.clear(sx0, GROTTO_FLOOR + 1, g["z0"] - 1, sx1, SURFACE - 1, g["z0"] - 1)
+	build.box(sx0 - 1, FLOOR, LANE_B[1] + 1, sx0 - 1, FLOOR, g["z0"] - 1, FENCE)
+	build.box(sx1 + 1, FLOOR, LANE_B[1] + 1, sx1 + 1, FLOOR, g["z0"] - 1, FENCE)
+	build.set(sx1 + 1, FLOOR + 1, LANE_B[1] + 1, LAMP)
+	# Crystals grow from the walls and the floor.
+	for index, (x, z) in enumerate(((g["x0"], g["z0"]), (g["x1"], g["z0"] + 1),
+			(g["x0"] + 1, g["z1"]), (g["x1"] - 1, g["z1"] - 1), (g["x0"] + 4, g["z1"]),
+			(g["x1"], g["z1"] - 3), (g["x0"] + 6, g["z0"]))):
+		build.set(x, GROTTO_FLOOR + 1, z, crystal(CRYSTAL_TINTS[index % 4]))
+		if index % 2 == 0:
+			build.set(x, GROTTO_FLOOR + 2, z, crystal(CRYSTAL_TINTS[(index + 1) % 4]))
+	for x, z in ((g["x0"] + 3, g["z1"] - 2), (g["x1"] - 2, g["z0"] + 2)):
+		build.set(x, SURFACE - 1, z, crystal("violet"))
+	build.set(g["x0"] + 4, SURFACE - 1, g["z0"] + 3, HIDDEN_LIGHT)
+	build.set(g["x1"] - 2, SURFACE - 1, g["z1"] - 2, HIDDEN_LIGHT)
+
+
+def build_bazaar() -> Build:
+	sx, sy, sz = BAZAAR_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(SAND)
+	build_walls_and_lanes(build)
+	build_stalls(build)
+	build_dome(build)
+	build_grotto(build)
+	build.set(LANE_A[1] + 1, FLOOR, 0, PEDESTAL)
+	build.set(LANE_A[1] + 1, FLOOR + 1, 0, crystal("violet"))
+	return build
+
+
+# --------------------------------------------------------------------------
+# 6. Volcanic smoke caldera
+# --------------------------------------------------------------------------
+
+CALDERA_SIZE = (36, 24, 36)
+# The causeway's second leg lands at the south-east corner.
+CALDERA_SPAWN = (34, FLOOR, 1)
+
+CRATER = (17.5, 18.5)
+CRATER_TOP = 16                     # the rim walk
+CRATER_RIM = 6.0                    # plateau radius; the bowl is inside it
+CRATER_SLOPE = 1.2
+LAVA_LEVEL = CRATER_TOP - 7
+# The lava tube runs west from the east face into a chamber under the bowl.
+TUBE_Z = (9, 11)
+TUBE_X = (17, 34)
+CHAMBER = dict(x0=13, x1=22, z0=13, z1=23)
+VENT_STAIR_Z0 = 24                  # first tread, off the chamber's north wall
+VENT_STAIR_TOP = FLOOR + 6
+VENT_AT = (17, CRATER_TOP, 26)      # the smoke vent, just outside the rim walk
+
+
+def crater_height(x: float, z: float) -> int:
+	return cone_height(x, z, CRATER, CRATER_TOP, CRATER_RIM, CRATER_SLOPE)
+
+
+def build_cone(build: Build) -> None:
+	for x in range(build.sx):
+		for z in range(build.sz):
+			top = crater_height(x, z)
+			if top <= SURFACE:
+				continue
+			build.box(x, SURFACE + 1, z, x, top, z, BASALT)
+			# Ash on the lower shoulders, bare rock higher up.
+			if top < FLOOR + 6 and (x * 3 + z * 5) % 4 == 0:
+				build.set(x, top, z, ASH)
+
+
+def build_crater(build: Build) -> None:
+	"""The crater: terraces stepping down from the rim to a lava lake.
+
+	The bowl starts one node inside the plateau, so the trail's last treads,
+	which the spiral puts on the plateau's inner edge, stay where they are.
+	"""
+	cx, cz = CRATER
+	bowl = CRATER_RIM - 1.0
+	reach = int(CRATER_RIM) + 1
+	for x in range(int(cx) - reach, int(cx) + reach + 2):
+		for z in range(int(cz) - reach, int(cz) + reach + 2):
+			radius = math.hypot(x - cx, z - cz)
+			if radius > bowl:
+				continue
+			top = max(LAVA_LEVEL, CRATER_TOP - int((bowl - radius) * 4))
+			build.clear(x, top + 1, z, x, build.sy - 1, z)
+			if top == LAVA_LEVEL:
+				build.set(x, top, z, LAVA)
+				build.set(x, top - 1, z, BASALT)
+				if (x + z) % 3 == 0:
+					build.set(x, top + 3 + (x % 2), z, SMOKE)
+			else:
+				build.set(x, top, z, BASALT)
+	# The rim walk: a ring one course below the plateau, inside a parapet of
+	# whatever the cone left standing. It is cut after the spiral because the
+	# shelf's last lap crosses the plateau, and a walk at plateau height would
+	# be broken wherever that shelf's headroom is; a course lower, the shelf
+	# joins it instead.
+	for x in range(int(cx) - reach - 1, int(cx) + reach + 3):
+		for z in range(int(cz) - reach - 1, int(cz) + reach + 3):
+			radius = math.hypot(x - cx, z - cz)
+			if bowl < radius <= CRATER_RIM + 0.5:
+				build.set(x, CRATER_TOP - 1, z, BASALT)
+				build.clear(x, CRATER_TOP, z, x, CRATER_TOP + 3, z)
+	build.set(int(cx) + 5, CRATER_TOP - 1, int(cz) + 3, PEDESTAL)
+	build.set(int(cx) + 5, CRATER_TOP, int(cz) + 3, LAMP)
+	# The vent: a low basalt cone with the smoke controller in its mouth.
+	vx, vy, vz = VENT_AT
+	build.box(vx - 1, vy - 1, vz - 1, vx + 1, vy - 1, vz + 1, BASALT)
+	build.box(vx - 1, vy, vz - 1, vx + 1, vy, vz + 1, wool("yellow"))
+	build.set(vx, vy, vz, VENT)
+	build.clear(vx, vy + 1, vz, vx, vy + 6, vz)
+
+
+def build_lava_tube(build: Build) -> None:
+	"""In from the east face, under the bowl, and up again to the trail."""
+	x0, x1 = TUBE_X
+	z0, z1 = TUBE_Z
+	carve(build, x0, FLOOR, z0, x1, FLOOR + 2, z1, floor=BASALT)
+	for x in range(x1 - 3, x0, -6):
+		build.set(x, FLOOR + 2, z0, TORCH)
+	build.walls(x1 - 1, FLOOR, z0 - 1, x1 + 1, FLOOR + 3, z1 + 1, BRICK)
+	build.clear(x1 - 1, FLOOR, z0, x1 + 1, FLOOR + 2, z1)
+	build.box(x1, FLOOR + 3, z0, x1, FLOOR + 3, z1, BRICK)
+	c = CHAMBER
+	carve(build, c["x0"], FLOOR, c["z0"], c["x1"], FLOOR + 2, c["z1"], floor=BASALT)
+	build.clear(x0, FLOOR, z1 + 1, x0 + 1, FLOOR + 2, c["z0"] - 1)
+	build.box(x0, SURFACE, z1 + 1, x0 + 1, SURFACE, c["z0"] - 1, BASALT)
+	# Lava seeps in the chamber floor, each lit from beneath, and columns.
+	for x, z in ((c["x0"], c["z0"]), (c["x1"], c["z0"] + 1), (c["x0"], c["z1"]),
+			(c["x1"] - 1, c["z1"]), (c["x1"], c["z1"] - 4)):
+		build.set(x, SURFACE, z, LAVA)
+		build.set(x, SURFACE - 1, z, HIDDEN_LIGHT)
+	for x, z in ((c["x0"] + 3, c["z0"] + 3), (c["x1"] - 3, c["z1"] - 3)):
+		build.box(x, FLOOR, z, x, FLOOR + 2, z, BASALT)
+	build.set(c["x0"] + 3, FLOOR + 2, c["z1"] - 1, TORCH)
+	build.set(c["x1"] - 1, FLOOR + 2, c["z0"] + 3, TORCH)
+
+
+def build_vent_stair(build: Build, path) -> None:
+	"""From the chamber up to the trail, the way the mineshaft does it."""
+	x_lo, x_hi = 17, 18
+	build.clear(x_lo, FLOOR, CHAMBER["z1"] + 1, x_hi, FLOOR + 2, VENT_STAIR_Z0 - 1)
+	build.box(x_lo, SURFACE, CHAMBER["z1"] + 1, x_hi, SURFACE, VENT_STAIR_Z0 - 1, BASALT)
+	timbered_stair(build, x_lo, x_hi, VENT_STAIR_Z0, FLOOR, VENT_STAIR_TOP, path,
+		timber=DEAD_WOOD)
+
+
+def build_ash_field(build: Build) -> None:
+	"""The flat ground around the cone: ash, dead trees, basalt columns, a
+	hot spring, and the trailhead where the causeway lands."""
+	build.box(0, SURFACE, 0, build.sx - 1, SURFACE, build.sz - 1, ASH)
+	build.box(build.sx - 6, SURFACE, 0, build.sx - 1, SURFACE, 4, BASALT)
+	build.set(build.sx - 2, FLOOR, 3, PEDESTAL)
+	build.set(build.sx - 2, FLOOR + 1, 3, LAMP)
+	for x, z, height in ((3, 3, 4), (2, 30, 5), (33, 30, 3), (8, 33, 4)):
+		dead_tree(build, x, z, height, ((1, 0, height - 2), (0, -1, height - 1)))
+	for x, z, height in ((1, 12, 3), (2, 13, 4), (33, 22, 2), (34, 24, 3), (30, 33, 2)):
+		build.box(x, FLOOR, z, x, FLOOR + height - 1, z, BASALT)
+	# Hot spring: a sulphur-ringed pool in the north-west corner, off the cone.
+	build.box(2, SURFACE, 31, 5, SURFACE, 34, wool("yellow"))
+	build.box(3, SURFACE, 32, 4, SURFACE, 33, WATER)
+	build.set(3, SURFACE - 1, 32, HIDDEN_LIGHT)
+	build.set(3, FLOOR + 1, 32, SMOKE)
+
+
+def build_caldera() -> Build:
+	sx, sy, sz = CALDERA_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(ASH, sub=STONE)
+	build_ash_field(build)
+	build_cone(build)
+	path = spiral_shelf(build, CRATER, CRATER_TOP, CRATER_RIM, CRATER_SLOPE,
+		ASH, -math.pi / 4)
+	build_crater(build)
+	# Interiors last: they cut through whatever the cone put in their way.
+	build_lava_tube(build)
+	build_vent_stair(build, path)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -907,18 +1471,27 @@ MAPS = {
 	"map_halloween": build_halloween,
 	"map_snow_mountain": build_snow_mountain,
 	"map_fruit_garden": build_fruit_garden,
+	"map_lighthouse": build_lighthouse,
+	"map_bazaar": build_bazaar,
+	"map_caldera": build_caldera,
 }
 
 SIZES = {
 	"map_halloween": HALLOWEEN_SIZE,
 	"map_snow_mountain": SNOW_SIZE,
 	"map_fruit_garden": FRUIT_SIZE,
+	"map_lighthouse": LIGHTHOUSE_SIZE,
+	"map_bazaar": BAZAAR_SIZE,
+	"map_caldera": CALDERA_SIZE,
 }
 
 SPAWNS = {
 	"map_halloween": HALLOWEEN_SPAWN,
 	"map_snow_mountain": SNOW_SPAWN,
 	"map_fruit_garden": FRUIT_SPAWN,
+	"map_lighthouse": LIGHTHOUSE_SPAWN,
+	"map_bazaar": BAZAAR_SPAWN,
+	"map_caldera": CALDERA_SPAWN,
 }
 
 

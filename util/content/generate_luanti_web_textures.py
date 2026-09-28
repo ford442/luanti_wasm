@@ -956,6 +956,38 @@ def tex_vine() -> Image:
 	return image
 
 
+def tex_crystal() -> Image:
+	"""Greyscale facets, tinted per crystal with ``[multiply``.
+
+	Bright ridges on a mid grey, so the four tints read as cut stone rather
+	than as coloured glass, and the light they cast comes from the node.
+	"""
+	image = new_image(S, S, (150, 150, 150, 230))
+	facets = ((2, 2, 7, 7), (8, 1, 14, 6), (1, 8, 6, 14), (7, 8, 13, 13))
+	for index, (x0, y0, x1, y1) in enumerate(facets):
+		level = 120 + index * 18
+		fill_rect(image, x0, y0, x1, y1, (level, level, level, 235))
+		stroke_rect(image, x0, y0, x1, y1, (236, 236, 236, 255))
+	for x, y in ((4, 3), (10, 2), (3, 10), (9, 9), (12, 11)):
+		put(image, x, y, (255, 255, 255, 255))
+	return image
+
+
+def tex_smoke() -> Image:
+	"""A soft grey puff: dense in the middle, thinning out to nothing."""
+	image = new_image(S, S)
+	noise = Noise(131)
+	for y in range(S):
+		for x in range(S):
+			distance = math.hypot(x - 7.5, y - 7.5) / 8.0
+			alpha = 150 * max(0.0, 1.0 - distance) * (0.7 + 0.3 * noise.at(x, y))
+			if alpha < 8:
+				continue
+			level = clamp(120 + 60 * noise.at(x + 3, y + 5))
+			image[y][x] = (level, level, level, clamp(alpha))
+	return image
+
+
 MAP_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 	"lw_pumpkin_side.png": tex_pumpkin_side,
 	"lw_pumpkin_top.png": tex_pumpkin_top,
@@ -967,6 +999,8 @@ MAP_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 	"lw_torch.png": tex_torch,
 	"lw_leaves.png": tex_leaves,
 	"lw_vine.png": tex_vine,
+	"lw_crystal.png": tex_crystal,
+	"lw_smoke.png": tex_smoke,
 }
 
 

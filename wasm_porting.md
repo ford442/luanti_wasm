@@ -565,11 +565,12 @@ Bundle:
 * Showcase art as small generated PNGs — the whole `luanti_web` palette,
   theater filmstrips, map-pack props and menu art is under 90 KB, regenerated
   by `util/content/generate_luanti_web_textures.py`.
-* Authored themed maps as committed `.mts` schematics — the three in
-  `games/luanti_web/mods/lw_world/schems/map_*.mts` are under 7 KB on disk and
-  about 98k nodes in total. They are capped: `lw_world` loads each schematic
-  into Lua arrays that live in the heap for the session, so
-  `util/content/test_luanti_web_maps.py` fails if the maps grow past 120k
+* Authored themed maps as committed `.mts` schematics — the six in
+  `games/luanti_web/mods/lw_world/schems/map_*.mts` are under 13 KB on disk
+  and about 186k nodes in total. They are capped: `lw_world` loads each
+  schematic into two byte strings that live in the heap for the session (two
+  bytes a node, under 400 KB for all six), and
+  `util/content/test_luanti_web_maps.py` fails if the maps grow past 200k
   nodes. See `games/luanti_web/docs/maps.md`.
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.

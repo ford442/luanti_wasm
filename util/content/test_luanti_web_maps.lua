@@ -59,6 +59,9 @@ vector = {
 function vector.offset(v, x, y, z)
 	return {x = v.x + x, y = v.y + y, z = v.z + z}
 end
+function vector.add(a, b)
+	return {x = a.x + b.x, y = a.y + b.y, z = a.z + b.z}
+end
 
 local world = {}
 local metas = {}
@@ -207,7 +210,7 @@ end
 -- The registry
 --------------------------------------------------------------------------
 
-assert_eq(#lw_maps.maps, 3, "three maps are registered")
+assert_eq(#lw_maps.maps, 6, "six maps are registered")
 assert_eq(lw_maps.base_y, 5, "map schematics are stamped at world y 5")
 
 local seen_schems = {}
@@ -241,6 +244,71 @@ for _, map in ipairs(lw_maps.maps) do
 end
 
 assert_eq(lw_maps.at({x = 0, y = 10, z = -14}), nil, "the plaza is not a themed map")
+
+--------------------------------------------------------------------------
+-- The causeways
+--------------------------------------------------------------------------
+
+-- lw_world/maps.lua describes how a visitor walks to each map. It cannot be
+-- flood-filled here (the atlas is not a schematic), so this checks the shape
+-- of every causeway instead: the first leg leaves the plaza, each leg meets
+-- the next, and the last leg lands on the map's beach. The numbers mirror
+-- lw_world/init.lua's layout constants.
+local ISLAND = {x0 = -36, z0 = -22, x1 = 36, z1 = 66}
+local PLAZA = {x0 = -12, x1 = 12, z0 = -18, z1 = 4}
+local atlas = dofile(MODS .. "/lw_world/maps.lua")
+local causeways = atlas.causeways({ISLAND = ISLAND, PLAZA = PLAZA})
+
+local function boxes_touch(a, b)
+	return a.x0 <= b.x1 and b.x0 <= a.x1 and a.z0 <= b.z1 and b.z0 <= a.z1
+end
+
+local by_map = {}
+for _, way in ipairs(causeways) do
+	assert_true(lw_maps.by_id[way.map] ~= nil, "causeway to an unregistered map " .. way.map)
+	assert_true(not by_map[way.map], way.map .. " has two causeways")
+	by_map[way.map] = way
+	assert_true(#way.legs >= 1, way.map .. " causeway has no legs")
+	assert_true(boxes_touch(way.legs[1].deck, PLAZA), way.map .. " causeway does not leave the plaza")
+	assert_true(way.gate and way.gate.x >= PLAZA.x0 and way.gate.x <= PLAZA.x1
+		and way.gate.z >= PLAZA.z0 and way.gate.z <= PLAZA.z1,
+		way.map .. " gate is not on the plaza")
+	assert_true(core.registered_nodes[way.post] ~= nil,
+		way.map .. " gate post " .. tostring(way.post) .. " is not a node")
+	assert_true(type(way.sign) == "string" and #way.sign > 20, way.map .. " gate has no sign")
+	for index = 2, #way.legs do
+		assert_true(boxes_touch(way.legs[index - 1].deck, way.legs[index].deck),
+			("%s causeway leg %d does not meet leg %d"):format(way.map, index - 1, index))
+	end
+	local map = lw_maps.by_id[way.map]
+	local beach = {
+		x0 = map.min.x - atlas.RIM, z0 = map.min.z - atlas.RIM,
+		x1 = map.max.x + atlas.RIM, z1 = map.max.z + atlas.RIM,
+	}
+	assert_true(boxes_touch(way.legs[#way.legs].deck, beach),
+		way.map .. " causeway does not reach the map's beach")
+	-- And it must not run across any other map's footprint.
+	for _, other in ipairs(lw_maps.maps) do
+		if other ~= map then
+			local footprint = {x0 = other.min.x, z0 = other.min.z, x1 = other.max.x, z1 = other.max.z}
+			for index, leg in ipairs(way.legs) do
+				assert_true(not boxes_touch(leg.deck, footprint),
+					("%s causeway leg %d crosses %s"):format(way.map, index, other.id))
+			end
+		end
+	end
+	-- Every deck is a walkway, not a plaza: three or four wide (the snow
+	-- causeway is four), which is what the rails and the gate assume.
+	for index, leg in ipairs(way.legs) do
+		local deck = leg.deck
+		local width = math.min(deck.x1 - deck.x0, deck.z1 - deck.z0) + 1
+		assert_true(width == 3 or width == 4,
+			("%s causeway leg %d is %d wide"):format(way.map, index, width))
+	end
+end
+for _, map in ipairs(lw_maps.maps) do
+	assert_true(by_map[map.id] ~= nil, map.id .. " has no causeway from the plaza")
+end
 
 --------------------------------------------------------------------------
 -- Per-player atmosphere
@@ -321,6 +389,64 @@ for _ = 1, 20 do
 	flicker.on_timer(at)
 end
 assert_eq(core.get_node(lantern).name, "air", "the controller leaves a dug lantern alone")
+
+--------------------------------------------------------------------------
+-- The beacon and the vent
+--------------------------------------------------------------------------
+
+local beacon = core.registered_nodes["lw_maps:beacon"]
+assert_true(beacon ~= nil, "the beacon controller is registered")
+assert_eq(beacon.drawtype, "airlike", "the beacon is invisible")
+local lamp = {x = 100, y = 30, z = 100}
+local windows = {
+	{x = 103, y = 29, z = 100}, {x = 100, y = 29, z = 97},
+	{x = 97, y = 29, z = 100}, {x = 100, y = 29, z = 103},
+}
+for _, window in ipairs(windows) do
+	core.set_node(window, {name = "lw_nodes:glass"})
+end
+core.set_node(windows[1], {name = "lw_maps:beam"})
+core.set_node(lamp, {name = "lw_maps:beacon"})
+beacon.on_construct(lamp)
+assert_true(core.get_node_timer(lamp):get_timeout() > 0, "the beacon arms a timer")
+for _ = 1, 4 do
+	beacon.on_timer(lamp)
+	local lit = 0
+	for _, window in ipairs(windows) do
+		if core.get_node(window).name == "lw_maps:beam" then
+			lit = lit + 1
+		end
+	end
+	assert_eq(lit, 1, "exactly one window is lit at a time")
+end
+-- A window somebody replaced is left alone.
+core.set_node(windows[2], {name = "lw_nodes:wool_red"})
+for _ = 1, 4 do
+	beacon.on_timer(lamp)
+end
+assert_eq(core.get_node(windows[2]).name, "lw_nodes:wool_red", "the beacon leaves a replaced window alone")
+
+local vent = core.registered_nodes["lw_maps:vent"]
+assert_true(vent ~= nil, "the vent controller is registered")
+local mouth = {x = 200, y = 30, z = 200}
+core.set_node(mouth, {name = "lw_maps:vent"})
+vent.on_construct(mouth)
+local puffs = {}
+for _ = 1, 3 do
+	vent.on_timer(mouth)
+	local count = 0
+	for height = 1, 6 do
+		local name = core.get_node({x = 200, y = 30 + height, z = 200}).name
+		if name == "lw_maps:smoke" then
+			count = count + 1
+			puffs[height] = true
+		end
+	end
+	assert_eq(count, 2, "two puffs in the column at a time")
+end
+for height = 1, 6 do
+	assert_true(puffs[height], "the puff never reaches height " .. height)
+end
 
 --------------------------------------------------------------------------
 -- The weather vane

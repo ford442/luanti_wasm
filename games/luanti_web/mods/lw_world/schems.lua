@@ -39,10 +39,16 @@ end
 local loaded = {}
 
 -- Reads <modpath>/schems/<name>.mts into a compact form the stamper can index
--- without allocating per node: `nodes[i]` is an index into `names`, or 0 for a
--- node the schematic never places. Probabilities other than "never" are treated
--- as "always" — the showcase is authored, so it must come out the same on every
--- world.
+-- without allocating per node: byte `i` of `nodes` is an index into `names`,
+-- or 0 for a node the schematic never places, and byte `i` of `param2` is that
+-- node's param2. Probabilities other than "never" are treated as "always" —
+-- the showcase is authored, so it must come out the same on every world.
+--
+-- Strings rather than tables because every loaded piece lives in the WASM heap
+-- for the whole session: a Lua array slot is 16 bytes, so two arrays cost about
+-- 32 bytes per authored node, where two byte strings cost 2. That is what the
+-- node budget in docs/maps.md is priced against. A piece may name at most 255
+-- nodes, which is generous for anything built from one palette.
 --
 -- read_schematic is used rather than place_schematic because a file loaded by
 -- name is cached by the engine for the life of the server, and because the
@@ -67,6 +73,7 @@ function schems.load(name)
 			local n = index_of[entry.name]
 			if not n then
 				n = #names + 1
+				assert(n < 256, ("lw_world: %s names more than 255 nodes"):format(name))
 				names[n] = entry.name
 				index_of[entry.name] = n
 			end
@@ -80,11 +87,24 @@ function schems.load(name)
 		path = path,
 		size = schem.size,
 		names = names,
-		nodes = nodes,
-		param2 = param2,
+		nodes = schems.pack(nodes),
+		param2 = schems.pack(param2),
 	}
 	loaded[name] = piece
 	return piece
+end
+
+-- One byte per entry. string.char takes its arguments on the C stack, so it is
+-- fed in slices rather than one unpack of a 40k-element table.
+local PACK_SLICE = 4096
+
+function schems.pack(values)
+	local parts = {}
+	for first = 1, #values, PACK_SLICE do
+		local last = math.min(first + PACK_SLICE - 1, #values)
+		parts[#parts + 1] = string.char(unpack(values, first, last))
+	end
+	return table.concat(parts)
 end
 
 -- The node at a piece-local offset (0-based), or nil when the piece leaves that
@@ -92,7 +112,7 @@ end
 -- code that depends on it.
 function schems.node_at(piece, x, y, z)
 	local sx, sy = piece.size.x, piece.size.y
-	local n = piece.nodes[z * sy * sx + y * sx + x + 1]
+	local n = piece.nodes:byte(z * sy * sx + y * sx + x + 1)
 	return n and n ~= 0 and piece.names[n] or nil
 end
 
@@ -107,7 +127,7 @@ function schems.apply_diff(piece, origin)
 	for z = 0, sz - 1 do
 		for y = 0, sy - 1 do
 			for x = 0, sx - 1 do
-				local n = piece.nodes[z * sy * sx + y * sx + x + 1]
+				local n = piece.nodes:byte(z * sy * sx + y * sx + x + 1)
 				if n ~= 0 then
 					local pos = {x = origin.x + x, y = origin.y + y, z = origin.z + z}
 					local current = core.get_node(pos)
@@ -115,7 +135,7 @@ function schems.apply_diff(piece, origin)
 						return nil
 					end
 					local target = piece.names[n]
-					local param2 = piece.param2[z * sy * sx + y * sx + x + 1]
+					local param2 = piece.param2:byte(z * sy * sx + y * sx + x + 1)
 					if current.name ~= target or current.param2 ~= param2 then
 						changes[#changes + 1] = {
 							pos = pos,

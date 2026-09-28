@@ -763,15 +763,16 @@ local function stamp(data, param2, area, minp, maxp, only)
 					ids[n] = content_id(name)
 					construct[n] = has_on_construct(name)
 				end
+				local nodes, p2s = piece.nodes, piece.param2
 				for z = z0, z1 do
 					for y = y0, y1 do
 						local index = area:index(x0, y, z)
 						local i = (z - op.z0) * sy * sx + (y - op.y0) * sx + (x0 - op.x0) + 1
 						for x = x0, x1 do
-							local n = piece.nodes[i]
+							local n = nodes:byte(i)
 							if n ~= 0 then
 								data[index] = ids[n]
-								param2[index] = piece.param2[i]
+								param2[index] = p2s:byte(i)
 								if construct[n] then
 									constructs[#constructs + 1] =
 										{pos = vector.new(x, y, z), name = piece.names[n]}
