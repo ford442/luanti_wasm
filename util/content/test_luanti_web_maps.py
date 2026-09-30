@@ -17,6 +17,7 @@ rules and asserts that every landmark is standable and connected.
 from __future__ import annotations
 
 import collections
+import math
 import pathlib
 import re
 import subprocess
@@ -190,6 +191,24 @@ def bazaar_landmarks() -> dict:
 	}
 
 
+def caldera_landmarks() -> dict:
+	vx, vz = int(maps.VENT[0]), int(maps.VENT[1])
+	z_mid = (maps.TUBE_Z[0] + maps.TUBE_Z[1]) // 2
+	inner = int(maps.VENT[0] - maps.CRATER_RADIUS) + 1
+	rim = int(maps.VENT[1] + (maps.RIM_INNER + maps.RIM_OUTER) / 2)
+	return {
+		"trailhead": maps.CALDERA_SPAWN,
+		"rim, south": (vx, maps.RIM_TOP + 1, int(maps.VENT[1] - (maps.RIM_INNER + maps.RIM_OUTER) / 2)),
+		"rim, north": (vx, maps.RIM_TOP + 1, rim),
+		# Just behind the parapet at the lip's tip.
+		"observation lip": (vx, maps.RIM_TOP + 1, int(maps.VENT[1] + maps.LIP_REACH + 1.5)),
+		"crater floor": (vx, maps.CRATER_FLOOR + 1, int(maps.VENT[1] + maps.CRATER_RADIUS - 1)),
+		"lava lake": (vx + 1, maps.CRATER_FLOOR + 1, vz),
+		"tube, crater mouth": (inner, maps.CRATER_FLOOR + 1, z_mid),
+		"tube, far face": (maps.TUBE_MOUTH_X, maps.FLOOR, z_mid),
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -199,6 +218,7 @@ LANDMARKS = {
 	"map_fruit_garden": lambda schem: fruit_landmarks(),
 	"map_lighthouse_tide": lambda schem: lighthouse_landmarks(),
 	"map_crystal_bazaar": lambda schem: bazaar_landmarks(),
+	"map_smoke_caldera": lambda schem: caldera_landmarks(),
 }
 
 
@@ -355,6 +375,102 @@ def test_bazaar_dome_is_walkable() -> None:
 				assert_true(abs(here - there) <= 1,
 					f"the dome steps {abs(here - there)} nodes between "
 					f"({x}, {z}) and ({x + dx}, {z + dz})")
+
+
+def test_caldera_is_a_shell() -> None:
+	"""The cone is hollow — the snow mountain already spent the filled-cone
+	budget — and sealed, so nothing a visitor can reach looks into the hollow.
+
+	A shell here means no rock more than two nodes from open space, and a
+	hollow that open air cannot get into.
+	"""
+	world = World(maps.schematics()["map_smoke_caldera"])
+	mass = {maps.BASALT, maps.STONE}
+	cone = [(x, y, z) for x in range(world.sx) for z in range(world.sz)
+		for y in range(maps.FLOOR, maps.caldera_height(x, z) + 1)]
+
+	# Open space: air (or anything else not rock) the sky can reach.
+	outside = set()
+	queue = collections.deque()
+	for x in range(world.sx):
+		for z in range(world.sz):
+			cell = (x, world.sy - 1, z)
+			outside.add(cell)
+			queue.append(cell)
+	while queue:
+		x, y, z = queue.popleft()
+		for dx, dy, dz in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
+			n = (x + dx, y + dy, z + dz)
+			if n in outside or not (0 <= n[0] < world.sx and maps.FLOOR <= n[1] < world.sy
+					and 0 <= n[2] < world.sz):
+				continue
+			if world.at(*n) in mass:
+				continue
+			outside.add(n)
+			queue.append(n)
+
+	hollow = [cell for cell in cone if world.at(*cell) not in mass
+		and cell not in outside]
+	rock = [cell for cell in cone if world.at(*cell) in mass]
+	assert_true(len(hollow) > len(rock) // 2,
+		f"the caldera's cone has {len(rock)} rock nodes and only {len(hollow)} "
+		"hollow ones; it is supposed to be a shell")
+	# Every rock node is within two of open space or of the hollow's edge: the
+	# walls are two thick, not solid.
+	near = {}
+	queue = collections.deque()
+	for cell in cone:
+		if world.at(*cell) not in mass:
+			near[cell] = 0
+			queue.append(cell)
+	for x in range(world.sx):
+		for z in range(world.sz):
+			cell = (x, maps.caldera_height(x, z) + 1, z)
+			near.setdefault(cell, 0)
+			queue.append(cell)
+	while queue:
+		x, y, z = queue.popleft()
+		if near[(x, y, z)] >= 2:
+			continue
+		for dx, dy, dz in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
+			n = (x + dx, y + dy, z + dz)
+			if n not in near:
+				near[n] = near[(x, y, z)] + 1
+				queue.append(n)
+	deep = [cell for cell in rock if cell not in near]
+	assert_true(not deep, f"{len(deep)} nodes of the caldera's rock are more than "
+		f"two from any face, e.g. {deep[:3]}; the cone is filled there")
+	# Sealed: a visitor never stands in, or puts their head into, the hollow.
+	for x, y, z in world.reachable(maps.CALDERA_SPAWN):
+		for cell in ((x, y, z), (x, y + 1, z)):
+			assert_true(cell not in hollow,
+				f"a visitor at {(x, y, z)} can see into the caldera's hollow")
+
+
+def test_caldera_goes_through_and_round() -> None:
+	"""Up and through, like the snow mountain: the tube comes out on the far
+	face from the trailhead, and the rim can be walked all the way round."""
+	world = World(maps.schematics()["map_smoke_caldera"])
+	z_mid = (maps.TUBE_Z[0] + maps.TUBE_Z[1]) // 2
+	assert_true(maps.TUBE_MOUTH_X < maps.VENT[0] < maps.CALDERA_SPAWN[0],
+		"the tube does not come out on the far side from the trailhead")
+	column = [world.solid(maps.TUBE_MOUTH_X - 1 + 1, y, z_mid)
+		for y in range(maps.FLOOR, maps.FLOOR + 2)]
+	assert_true(not any(column), "the tube's far mouth is blocked")
+	seen = world.reachable(maps.CALDERA_SPAWN)
+	bins = {int(maps.vent_angle(x, z) / (2 * math.pi) * 36)
+		for (x, y, z) in seen if y == maps.RIM_TOP + 1
+		and maps.RIM_INNER < maps.vent_radius(x, z) <= maps.RIM_OUTER + 0.5}
+	missing = sorted(set(range(36)) - bins)
+	assert_true(not missing,
+		f"the rim walkway is broken at bearings {[b * 10 for b in missing]} degrees")
+	# The lip is glass over open crater: look down from it and there is air.
+	vx = int(maps.VENT[0])
+	lip_z = int(maps.VENT[1] + maps.LIP_REACH + 1.5)
+	assert_true(world.at(vx, maps.RIM_TOP, lip_z) == maps.GLASS,
+		"the observation lip is not glass")
+	assert_true(world.at(vx, maps.RIM_TOP - 1, lip_z) == maps.AIR,
+		"the observation lip is not out over the crater")
 
 
 def test_committed_files_match_the_generator() -> None:

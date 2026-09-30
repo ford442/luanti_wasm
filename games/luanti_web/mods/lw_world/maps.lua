@@ -8,8 +8,11 @@
 -- atmosphere it wants. This file owns where it sits relative to the plaza and
 -- how a visitor walks there:
 --
---                      [ hub plaza ]
---                     /   /  |    \
+--          smoke caldera                   crystal bazaar
+--           (northwest)                     (northeast)
+--                   \                         /
+--                    \     [ hub plaza ]     /
+--                     \   /   /  |    \     /
 --         Halloween lane /  snow    giant fruit
 --              (west)   / mountain     garden
 --                      /  (south)     (east)
@@ -152,6 +155,22 @@ function maps.causeways(api)
 				"arcade of stalls whose lanterns chase each other round it, a " ..
 				"dome you can walk up onto, and a cistern under it lit only by " ..
 				"torches. It is night over there.",
+		},
+		{
+			-- Out of the plaza's west side north of the Halloween causeway,
+			-- north up the channel between the showcase island and the lane,
+			-- then west onto the caldera's trailhead.
+			map = "smoke_caldera",
+			legs = {
+				{x0 = -47, z0 = -3, x1 = PLAZA.x0, z1 = -1},
+				{x0 = -47, z0 = -3, x1 = -45, z1 = 42},
+				{x0 = -57, z0 = 40, x1 = -45, z1 = 42},
+			},
+			gate = {x = PLAZA.x0 + 1, z = 1},
+			post = "lw_maps:lava",
+			sign = "Northwest: the smoke caldera. A ring trail up the cone, a " ..
+				"glass lip over the glowing crater, a switchback down into it, " ..
+				"and a basalt tube out the far side. It is red hour over there.",
 		},
 	}
 end

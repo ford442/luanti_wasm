@@ -777,7 +777,7 @@ STATIC_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 # Themed map-pack node tiles (16x16)
 # --------------------------------------------------------------------------
 
-# lw_maps holds the props the three authored maps need and the core palette
+# lw_maps holds the props the authored maps need and the core palette
 # cannot fake: a ribbed pumpkin, a lit face, cobweb, dead bark, hay, snow, a
 # torch, a canopy weave and a vine. Everything else those maps are built from
 # is a lw_nodes tile, often just tinted with ``[multiply`` the way the wool

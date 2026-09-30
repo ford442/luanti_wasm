@@ -2,14 +2,14 @@
 # Luanti
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Copyright (C) 2026 The Luanti Contributors
-"""Generate the three authored themed maps for games/luanti_web.
+"""Generate the authored themed maps for games/luanti_web.
 
     python3 util/content/generate_luanti_web_maps.py
 
 Each map is one hand-authored schematic written to
 ``games/luanti_web/mods/lw_world/schems/map_<name>.mts``. They are stamped
 into the atlas world by ``lw_world/maps.lua`` exactly like the plaza fountain
-or the theater, so a fresh world gets all three on first generation and an
+or the theater, so a fresh world gets every map on first generation and an
 existing world is never overwritten.
 
 Why a schematic and not mapgen: the content policy in ``wasm_porting.md``
@@ -24,9 +24,14 @@ the compositor.
 
 Layout, in the atlas the hub plaza sits in the middle of::
 
-              [ snow mountain ]        south of the plaza
-                     |
-    [ halloween ]--[ hub ]--[ fruit garden ]
+    [ smoke caldera ]                    [ crystal bazaar ]
+    [ halloween ]------[ hub ]------[ fruit garden ]
+                         |
+    [ lighthouse ]  [ snow mountain ]
+
+The diagonal three are reached by causeways that turn in the open water;
+lw_world/maps.lua has the legs, and games/luanti_web/docs/maps.md the recipe
+for adding a map.
 
 Local coordinates below run ``0..size-1`` on each axis. ``lw_world`` stamps
 local ``y = 0`` at world ``y = 5``, so local ``y = SURFACE`` is the world's
@@ -39,6 +44,7 @@ Only the standard library is used.
 from __future__ import annotations
 
 import argparse
+import collections
 import dataclasses
 import math
 import pathlib
@@ -1434,6 +1440,267 @@ def build_crystal_bazaar() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 6. Volcanic smoke caldera
+# --------------------------------------------------------------------------
+
+CALDERA_SIZE = (38, 22, 38)
+# The causeway lands on the east face, at the trailhead.
+CALDERA_SPAWN = (37, FLOOR, 19)
+
+VENT = (18.5, 18.5)                 # centre of the cone, in x and z
+CONE_BASE_RADIUS = 17.5             # where the outer slope meets the ash field
+CONE_SLOPE = 2.5                    # nodes of height per node of radius, outside
+RIM_TOP = FLOOR + 13                # local y of the rim's walkway
+RIM_OUTER = CONE_BASE_RADIUS - (RIM_TOP - SURFACE) / CONE_SLOPE
+RIM_INNER = 8.5                     # the crater's lip
+CRATER_FLOOR = SURFACE + 2          # local y of the crater floor
+CRATER_RADIUS = 5.0                 # flat floor inside this
+LAVA_RADIUS = 3.0                   # and the lava lake inside that
+INNER_SLOPE = (RIM_TOP - CRATER_FLOOR) / (RIM_INNER - CRATER_RADIUS)
+
+# The observation lip: a glass cantilever out over the crater, due north.
+LIP_ANGLE = math.pi / 2
+LIP_SPREAD = 0.4                    # radians either side
+LIP_REACH = 6.0                     # how far in towards the vent it goes
+
+# The tube runs due west from the crater floor and out the far face.
+TUBE_Z = (17, 19)
+TUBE_MOUTH_X = 0
+
+BASALT = "lw_maps:basalt"
+PACKED_BASALT = "lw_maps:packed_basalt"
+LAVA = "lw_maps:lava"
+LAVA_CRUST = "lw_maps:lava_crust"
+
+
+def vent_radius(x: float, z: float) -> float:
+	return math.hypot(x - VENT[0], z - VENT[1])
+
+
+def vent_angle(x: float, z: float) -> float:
+	return math.atan2(z - VENT[1], x - VENT[0]) % (2 * math.pi)
+
+
+def caldera_height(x: float, z: float) -> int:
+	"""Top of the cone's mass at (x, z), as a local y."""
+	radius = vent_radius(x, z)
+	if radius <= CRATER_RADIUS:
+		return CRATER_FLOOR
+	if radius <= RIM_INNER:
+		return min(RIM_TOP, CRATER_FLOOR + int((radius - CRATER_RADIUS) * INNER_SLOPE))
+	if radius <= RIM_OUTER:
+		return RIM_TOP
+	if radius >= CONE_BASE_RADIUS:
+		return SURFACE
+	return max(SURFACE, int(RIM_TOP - (radius - RIM_OUTER) * CONE_SLOPE))
+
+
+def tube_floor(x: int) -> int:
+	"""The tube steps down twice on its way out, to meet the ash field."""
+	if x >= 11:
+		return CRATER_FLOOR
+	if x >= 6:
+		return CRATER_FLOOR - 1
+	return SURFACE
+
+
+def build_cone(build: Build) -> None:
+	for x in range(build.sx):
+		for z in range(build.sz):
+			top = caldera_height(x, z)
+			if top <= SURFACE:
+				continue
+			build.box(x, FLOOR, z, x, top, z, BASALT)
+			# Streaks of grey where the flanks have weathered, and sulphur
+			# round the inside of the crater.
+			radius = vent_radius(x, z)
+			if radius > RIM_OUTER and (x * 7 + z * 3) % 5 == 0:
+				build.set(x, top, z, STONE)
+			if CRATER_RADIUS < radius <= RIM_INNER and (x * 3 + z * 5) % 7 == 0:
+				build.set(x, top, z, wool("yellow"))
+
+
+def build_ring_trail(build: Build) -> list[tuple[int, int, int]]:
+	"""The outer trail: a shelf cut into the flank, one node up every four
+	steps, from the trailhead on the east face to the rim."""
+	path: list[tuple[int, int, int]] = []
+	y = FLOOR
+	angle = 0.0
+	step = 0
+	while y <= RIM_TOP:
+		radius = CONE_BASE_RADIUS - (y - SURFACE) / CONE_SLOPE - 1.0
+		x = int(round(VENT[0] + radius * math.cos(angle)))
+		z = int(round(VENT[1] + radius * math.sin(angle)))
+		if not path or path[-1] != (x, y, z):
+			path.append((x, y, z))
+		for dx in (-1, 0, 1):
+			for dz in (-1, 0, 1):
+				build.set(x + dx, y, z + dz, PACKED_BASALT)
+				build.clear(x + dx, y + 1, z + dz, x + dx, y + 3, z + dz)
+		step += 1
+		if step % 4 == 0:
+			y += 1
+		angle += 1.0 / max(radius, 3.0)
+		if y == RIM_TOP and vent_radius(x, z) <= RIM_OUTER + 0.5:
+			break
+	return path
+
+
+def build_crater_shelf(build: Build, start_angle: float) -> list[tuple[int, int, int]]:
+	"""The switchback down the inside: a ledge cut into the crater wall, one
+	node down every three steps, from the rim to the crater floor."""
+	path: list[tuple[int, int, int]] = []
+	y = RIM_TOP
+	angle = start_angle
+	step = 0
+	while y >= CRATER_FLOOR:
+		# Half a node into the wall: any deeper and, near the top, the cut
+		# takes the rim walkway with it.
+		radius = CRATER_RADIUS + (y - CRATER_FLOOR) / INNER_SLOPE + 0.5
+		x = int(round(VENT[0] + radius * math.cos(angle)))
+		z = int(round(VENT[1] + radius * math.sin(angle)))
+		if not path or path[-1] != (x, y, z):
+			path.append((x, y, z))
+		for dx in (-1, 0, 1):
+			for dz in (-1, 0, 1):
+				build.set(x + dx, y, z + dz, PACKED_BASALT)
+				build.clear(x + dx, y + 1, z + dz, x + dx, y + 3, z + dz)
+		step += 1
+		if step % 3 == 0:
+			y -= 1
+		angle += 1.0 / max(radius, 3.0)
+	return path
+
+
+def build_crater(build: Build) -> None:
+	cx, cz = VENT
+	for x in range(build.sx):
+		for z in range(build.sz):
+			radius = vent_radius(x, z)
+			if radius > CRATER_RADIUS:
+				continue
+			if radius <= LAVA_RADIUS:
+				build.set(x, CRATER_FLOOR, z, LAVA)
+				# About one lava cell in three has a flicker over it, so the lake
+				# glows and dims in patches, never all at once.
+				if (x + 2 * z) % 3 == 0:
+					build.set(x, CRATER_FLOOR + 1, z, FLICKER)
+			else:
+				build.set(x, CRATER_FLOOR, z, BASALT)
+
+
+def build_lip(build: Build) -> None:
+	"""A glass cantilever off the rim, with a glass parapet at its end."""
+	for x in range(build.sx):
+		for z in range(build.sz):
+			radius = vent_radius(x, z)
+			off = abs((vent_angle(x, z) - LIP_ANGLE + math.pi) % (2 * math.pi) - math.pi)
+			if off > LIP_SPREAD or not (LIP_REACH <= radius <= RIM_OUTER):
+				continue
+			if radius <= RIM_INNER:
+				build.set(x, RIM_TOP, z, GLASS)
+				build.clear(x, RIM_TOP + 1, z, x, RIM_TOP + 3, z)
+			if radius < LIP_REACH + 0.9 or off > LIP_SPREAD - 0.12:
+				build.set(x, RIM_TOP + 1, z, GLASS)
+
+
+def build_tube(build: Build) -> None:
+	"""The packed-basalt tube from the crater floor out through the west face."""
+	z0, z1 = TUBE_Z
+	start = int(VENT[0] - CRATER_RADIUS) + 1
+	for x in range(TUBE_MOUTH_X, start + 1):
+		f = tube_floor(x)
+		build.box(x, f, z0 - 1, x, f + 4, z1 + 1, PACKED_BASALT)
+		build.clear(x, f + 1, z0, x, f + 3, z1)
+	# Half steps where it drops, so the walk out is a walk.
+	for x in range(TUBE_MOUTH_X + 1, start + 1):
+		if tube_floor(x) > tube_floor(x - 1):
+			build.box(x - 1, tube_floor(x - 1) + 1, z0, x - 1, tube_floor(x - 1) + 1,
+				z1, "lw_nodes:slab_stone_brick")
+	for x in range(TUBE_MOUTH_X + 3, start, 4):
+		build.set(x, tube_floor(x) + 3, z0, TORCH)
+	# A portal on the far face.
+	build.box(TUBE_MOUTH_X, SURFACE + 1, z0 - 2, TUBE_MOUTH_X, SURFACE + 5, z0 - 2,
+		PACKED_BASALT)
+	build.box(TUBE_MOUTH_X, SURFACE + 1, z1 + 2, TUBE_MOUTH_X, SURFACE + 5, z1 + 2,
+		PACKED_BASALT)
+	build.box(TUBE_MOUTH_X, SURFACE + 5, z0 - 2, TUBE_MOUTH_X, SURFACE + 5, z1 + 2,
+		PACKED_BASALT)
+
+
+def hollow(build: Build, mass: frozenset, keep: int = 2, y_min: int = FLOOR) -> None:
+	"""Empty every `mass` cell more than `keep` nodes from anything that is not.
+
+	The cone is generated solid and then carved, and only then hollowed, so
+	every cut — trail, shelf, tube — ends up with walls `keep` nodes thick and
+	nothing behind them. The hollow is sealed by construction: it is at least
+	`keep` nodes from every open cell.
+	"""
+	sx, sy, sz = build.sx, build.sy, build.sz
+	distance = {}
+	queue = collections.deque()
+	for x in range(sx):
+		for y in range(y_min, sy):
+			for z in range(sz):
+				if build.get(x, y, z) not in mass:
+					distance[(x, y, z)] = 0
+					queue.append((x, y, z))
+	while queue:
+		x, y, z = queue.popleft()
+		d = distance[(x, y, z)] + 1
+		if d > keep:
+			continue
+		for dx, dy, dz in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
+			n = (x + dx, y + dy, z + dz)
+			if n in distance or not build.inside(*n) or n[1] < y_min:
+				continue
+			distance[n] = d
+			queue.append(n)
+	for x in range(sx):
+		for y in range(y_min, sy):
+			for z in range(sz):
+				if (x, y, z) not in distance and build.get(x, y, z) in mass:
+					build.set(x, y, z, AIR)
+
+
+def build_ash_field(build: Build) -> None:
+	"""The flat ground round the cone: ash, pumice, dead trees, the trailhead."""
+	sx, _, sz = build.sx, build.sy, build.sz
+	for x, z in ((4, 4), (33, 5), (5, 33), (32, 33), (2, 12), (12, 2), (35, 28)):
+		height = 3 + (x + z) % 3
+		build.box(x, FLOOR, z, x, FLOOR + height - 1, z, DEAD_WOOD)
+		build.set(x + 1, FLOOR + height - 2, z, DEAD_WOOD)
+		build.set(x, FLOOR + height - 1, z + 1, DEAD_WOOD)
+	for x, z in ((8, 30), (29, 8), (30, 29), (9, 7), (24, 35)):
+		build.box(x, FLOOR, z, x + 1, FLOOR, z + 1, BASALT)
+		build.set(x, FLOOR + 1, z, BASALT)
+	# The trailhead, where the causeway lands.
+	build.box(sx - 5, SURFACE, 16, sx - 1, SURFACE, 22, PACKED_BASALT)
+	for z in (15, 23):
+		build.box(sx - 3, FLOOR, z, sx - 3, FLOOR + 1, z, PACKED_BASALT)
+		build.set(sx - 3, FLOOR + 2, z, JACK)
+		build.set(sx - 3, FLOOR + 3, z, FLICKER)
+
+
+def build_smoke_caldera() -> Build:
+	sx, sy, sz = CALDERA_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(wool("dark_grey"), sub=STONE)
+	build_ash_field(build)
+	build_cone(build)
+	trail = build_ring_trail(build)
+	build_crater(build)
+	# The way down starts a quarter turn past where the trail tops out, so the
+	# two never share a stretch of rim.
+	top = trail[-1]
+	build_crater_shelf(build, vent_angle(top[0], top[2]) + math.pi / 2)
+	build_lip(build)
+	build_tube(build)
+	hollow(build, frozenset({BASALT, STONE}))
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -1467,6 +1734,7 @@ SPECS = [
 	MapSpec("map_lighthouse_tide", LIGHTHOUSE_SIZE, LIGHTHOUSE_SPAWN,
 		build_lighthouse_tide),
 	MapSpec("map_crystal_bazaar", BAZAAR_SIZE, BAZAAR_SPAWN, build_crystal_bazaar),
+	MapSpec("map_smoke_caldera", CALDERA_SIZE, CALDERA_SPAWN, build_smoke_caldera),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}

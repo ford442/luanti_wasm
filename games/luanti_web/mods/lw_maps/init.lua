@@ -242,6 +242,40 @@ register("lantern_off", {
 })
 
 --------------------------------------------------------------------------
+-- Volcano
+--------------------------------------------------------------------------
+
+register("basalt", {
+	description = "Basalt",
+	tiles = {"lw_stone.png^[multiply:#4a4346"},
+	groups = {cracky = 2},
+	is_ground_content = true,
+})
+
+register("packed_basalt", {
+	description = "Packed Basalt",
+	tiles = {"lw_stone_brick.png^[multiply:#5a5054"},
+	groups = {cracky = 2},
+})
+
+-- "Lava" is dyed wool that glows, in a bright and a crusted state for the
+-- flicker controller: the look of a lava lake with none of a liquid's cost,
+-- and nothing that hurts. It is solid, so the crater floor is a floor.
+register("lava", {
+	description = "Glowing Lava Rock",
+	tiles = {"lw_wool.png^[multiply:#ff6a1a"},
+	paramtype = "light",
+	light_source = 11,
+	groups = {cracky = 3},
+})
+
+register("lava_crust", {
+	description = "Crusted Lava Rock",
+	tiles = {"lw_wool.png^[multiply:#6e2410"},
+	groups = {cracky = 3},
+})
+
+--------------------------------------------------------------------------
 -- Lamp controllers
 --------------------------------------------------------------------------
 
@@ -263,6 +297,7 @@ end
 
 lw_maps.register_lamp_pair("lw_maps:jack_o_lantern", "lw_maps:pumpkin")
 lw_maps.register_lamp_pair("lw_maps:lantern", "lw_maps:lantern_off")
+lw_maps.register_lamp_pair("lw_maps:lava", "lw_maps:lava_crust")
 
 -- Light or dim whatever lamp is one node below `pos`. Only ever swaps a lamp
 -- for its own twin: if a visitor dug the lamp out, or built something else in
@@ -513,6 +548,26 @@ lw_maps.register({
 		sky = "#2a1466", horizon = "#6a1f8a",
 		night_sky = "#1a0b45", night_horizon = "#4a1466", indoors = "#1f1040",
 		sun_tint = "#c070ff", moon_tint = "#7050d0",
+	}),
+})
+
+lw_maps.register({
+	id = "smoke_caldera",
+	title = "Smoke caldera",
+	blurb = "A volcano you climb and go through: a ring trail to the rim, a " ..
+		"glass lip over a glowing crater, a switchback down to it, and a " ..
+		"basalt tube out the far face.",
+	size = {x = 38, y = 22, z = 38},
+	origin = {x = -94, y = BASE, z = 22},
+	spawn = {x = -57, y = BASE + 4, z = 41},
+	-- Overcast red hour: the fog is warm and close, so the cone is a
+	-- silhouette from the causeway and the crater glows from inside it.
+	day_night_ratio = 0.35,
+	sky = lw_maps.sky({
+		sky = "#5a2a22", horizon = "#b0482a",
+		night_sky = "#2a1210", night_horizon = "#6a2418", indoors = "#3a1a14",
+		sun_tint = "#ff7a3a", moon_tint = "#a04a3a",
+		fog = 64, fog_start = 0.3,
 	}),
 })
 

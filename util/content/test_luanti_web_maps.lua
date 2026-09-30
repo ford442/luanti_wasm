@@ -132,7 +132,6 @@ core = {
 	register_on_placenode = function() end,
 	register_on_dignode = function() end,
 	register_on_generated = function() end,
-	register_on_mods_loaded = function() end,
 	register_privilege = function() end,
 	rotate_node = function() end,
 	add_entity = function(pos, name) spawned[#spawned + 1] = {pos = pos, name = name} end,
