@@ -39,9 +39,11 @@ Only the standard library is used.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import math
 import pathlib
 import sys
+import typing
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -93,6 +95,7 @@ COBWEB = "lw_maps:cobweb"
 BONE = "lw_maps:bone"
 DEAD_WOOD = "lw_maps:dead_wood"
 FLICKER = "lw_maps:flicker"
+CHASE = "lw_maps:chase"
 SNOW = "lw_maps:snow"
 PACKED_SNOW = "lw_maps:packed_snow"
 SNOW_SLAB = "lw_maps:slab_packed_snow"
@@ -116,7 +119,7 @@ def wool(color: str) -> str:
 # names it talks about — a new decorative node that is secretly solid would
 # otherwise wall off a route and nothing would notice.
 NON_WALKABLE = frozenset({
-	AIR, WATER, COBWEB, TORCH, FIRE, VINE, HIDDEN_LIGHT,
+	AIR, WATER, COBWEB, TORCH, FIRE, VINE, HIDDEN_LIGHT, FLICKER, CHASE,
 	JUICE_RED, JUICE_GREEN,
 })
 
@@ -219,7 +222,7 @@ def stair_run(build: Build, x0: int, x1: int, z: int, dz: int,
 # 1. Halloween lane
 # --------------------------------------------------------------------------
 
-HALLOWEEN_SIZE = (36, 16, 36)
+HALLOWEEN_SIZE = (36, 20, 36)
 # The causeway from the hub lands on the east face, mid-map.
 HALLOWEEN_SPAWN = (33, FLOOR, 17)
 
@@ -288,10 +291,13 @@ def build_haunted_house(build: Build) -> None:
 			break
 		build.box(x0 - 1, y, z0 + step, x1 + 1, y, z0 + step, PLANK_STAIR, 20)
 		build.box(x0 - 1, y, z1 - step, x1 + 1, y, z1 - step, PLANK_STAIR, 22)
+		# Gable ends, between the two slopes. At the ridge the slopes meet and
+		# there is nothing between them; box() would otherwise swap the range
+		# round and stand a stub of wall on each end of the ridge.
 		if z0 + step + 1 <= z1 - step - 1:
 			build.clear(x0, y, z0 + step + 1, x1, y, z1 - step - 1)
-		build.box(x0, y, z0 + step + 1, x0, y, z1 - step - 1, wall)
-		build.box(x1, y, z0 + step + 1, x1, y, z1 - step - 1, wall)
+			build.box(x0, y, z0 + step + 1, x0, y, z1 - step - 1, wall)
+			build.box(x1, y, z0 + step + 1, x1, y, z1 - step - 1, wall)
 
 	# Front door and hallway, straight through from the lane to the back wall.
 	hall_x0, hall_x1 = 24, 25
@@ -903,23 +909,56 @@ def build_fruit_garden() -> Build:
 # Driver
 # --------------------------------------------------------------------------
 
-MAPS = {
-	"map_halloween": build_halloween,
-	"map_snow_mountain": build_snow_mountain,
-	"map_fruit_garden": build_fruit_garden,
-}
+@dataclasses.dataclass(frozen=True)
+class MapSpec:
+	"""One map in the pack: the whole Python side of the add-a-map recipe.
 
-SIZES = {
-	"map_halloween": HALLOWEEN_SIZE,
-	"map_snow_mountain": SNOW_SIZE,
-	"map_fruit_garden": FRUIT_SIZE,
-}
+	``name`` is the schematic, ``map_<id>``, where ``<id>`` is what
+	``lw_maps.register`` and ``/maps`` call it. ``spawn`` is local and has to
+	be where the causeway lands; ``test_luanti_web_maps.py`` checks it against
+	the registry and flood-fills the map from it.
+	"""
+	name: str
+	size: tuple[int, int, int]
+	spawn: tuple[int, int, int]
+	build: typing.Callable[[], Build]
 
-SPAWNS = {
-	"map_halloween": HALLOWEEN_SPAWN,
-	"map_snow_mountain": SNOW_SPAWN,
-	"map_fruit_garden": FRUIT_SPAWN,
-}
+	@property
+	def id(self) -> str:
+		return self.name[len("map_"):]
+
+	@property
+	def volume(self) -> int:
+		return self.size[0] * self.size[1] * self.size[2]
+
+
+SPECS = [
+	MapSpec("map_halloween", HALLOWEEN_SIZE, HALLOWEEN_SPAWN, build_halloween),
+	MapSpec("map_snow_mountain", SNOW_SIZE, SNOW_SPAWN, build_snow_mountain),
+	MapSpec("map_fruit_garden", FRUIT_SIZE, FRUIT_SPAWN, build_fruit_garden),
+]
+
+MAPS = {spec.name: spec.build for spec in SPECS}
+SIZES = {spec.name: spec.size for spec in SPECS}
+SPAWNS = {spec.name: spec.spawn for spec in SPECS}
+
+# The pack's node budget, in schematic *volume*: lw_world/schems.lua loads a
+# schematic into two Lua arrays with a slot for every cell, air included, and
+# they stay in the WASM heap for the session. A sparse map is still cheaper to
+# mesh and to diff, but it is not cheaper to hold, so the cap counts the box.
+#
+# The heap is what the cap protects, and test_luanti_web_maps.py measures it
+# directly as well: Lua sizes an array part to a power of two, so a map keeps
+# 1 MiB up to 32,768 cells and 2 MiB up to 65,536. That step, not the node
+# count, is what makes a 36x24x36 map cheap and a 40x24x40 one twice the
+# price. The numbers and the reasoning are in wasm_porting.md ("Content
+# Budget") and games/luanti_web/docs/maps.md ("Budget").
+NODE_BUDGET = 200_000
+CHEAP_VOLUME = 32_768
+
+
+def pack_volume() -> int:
+	return sum(spec.volume for spec in SPECS)
 
 
 def schematics() -> dict[str, Schematic]:
@@ -968,7 +1007,11 @@ def main() -> int:
 		size = path.stat().st_size
 		total += size
 		print("{} ({:.1f} KiB)".format(path.relative_to(args.root), size / 1024))
-	print("{} maps, {:.1f} KiB".format(len(written), total / 1024))
+	print("{} maps, {:.1f} KiB, {} of {} nodes".format(len(written), total / 1024,
+		pack_volume(), NODE_BUDGET))
+	if pack_volume() > NODE_BUDGET:
+		print("warning: the pack is over its node budget; "
+			"test_luanti_web_maps.py will fail", file=sys.stderr)
 	return 0
 
 

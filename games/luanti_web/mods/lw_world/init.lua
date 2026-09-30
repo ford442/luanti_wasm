@@ -687,7 +687,7 @@ end
 -- The themed-map atlas
 --------------------------------------------------------------------------
 
--- Three authored islands around the hub, described by lw_maps and placed by
+-- The authored islands around the hub, described by lw_maps and placed by
 -- maps.lua with the same vocabulary the showcase is built from. It runs last
 -- so its causeways overwrite the moat railing they cross.
 local function build_atlas()
@@ -696,6 +696,9 @@ local function build_atlas()
 		fill = fill, put = put, walls = walls, schem = schem, label = label,
 		GROUND = GROUND, FLOOR = FLOOR, WATER = WATER,
 		ISLAND = ISLAND, PLAZA = PLAZA,
+		-- The showcase island and its moat, which the atlas's sea goes round.
+		HUB = {x0 = BOUNDS.min.x, z0 = BOUNDS.min.z,
+			x1 = BOUNDS.max.x, z1 = BOUNDS.max.z},
 	})
 	ATLAS.min.x = math.min(ATLAS.min.x, reach.min.x)
 	ATLAS.min.z = math.min(ATLAS.min.z, reach.min.z)

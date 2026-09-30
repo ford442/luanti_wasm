@@ -2,7 +2,7 @@
 # Luanti
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Copyright (C) 2026 The Luanti Contributors
-"""Checks for the three authored themed maps (no engine required).
+"""Checks for the authored themed maps (no engine required).
 
 The interesting property of a hand-authored map is not that it exists, it is
 that a visitor can *walk* it: the acceptance criteria on the map-pack issue
@@ -136,16 +136,32 @@ def fruit_landmarks() -> dict:
 	}
 
 
+# Every map in the pack, and what it has to deliver. A map the generator
+# builds but this table does not name fails test_every_map_has_landmarks: the
+# flood-fill is the acceptance test, so it is not optional for a new one.
+LANDMARKS = {
+	"map_halloween": lambda schem: halloween_landmarks(),
+	"map_snow_mountain": snow_landmarks,
+	"map_fruit_garden": lambda schem: fruit_landmarks(),
+}
+
+
+def test_every_map_has_landmarks() -> None:
+	for spec in maps.SPECS:
+		assert_true(spec.name in LANDMARKS,
+			f"{spec.name} has no landmarks in test_luanti_web_maps.py; say what a "
+			"visitor has to be able to walk to")
+	assert_true(set(LANDMARKS) <= {spec.name for spec in maps.SPECS},
+		"LANDMARKS names a map the generator does not build")
+
+
 def test_reachability() -> None:
 	built = maps.schematics()
-	cases = {
-		"map_halloween": (maps.HALLOWEEN_SPAWN, halloween_landmarks()),
-		"map_snow_mountain": (maps.SNOW_SPAWN, snow_landmarks(built["map_snow_mountain"])),
-		"map_fruit_garden": (maps.FRUIT_SPAWN, fruit_landmarks()),
-	}
-	for name, (spawn, landmarks) in cases.items():
+	for spec in maps.SPECS:
+		name = spec.name
+		landmarks = LANDMARKS[name](built[name])
 		world = World(built[name])
-		seen = world.reachable(spawn)
+		seen = world.reachable(spec.spawn)
 		for label, cell in landmarks.items():
 			assert_true(cell in seen,
 				f"{name}: cannot walk from the spawn to the {label} at {cell} "
@@ -212,10 +228,11 @@ def test_every_node_is_registered() -> None:
 	(``register_stair_and_slab``, the wool loop, the screen cells) and reading
 	them out of the source would miss exactly those.
 	"""
-	registered = run_lua_harness()
-	if registered is None:
+	harness = run_lua_harness()
+	if harness is None:
 		print("  (no Lua interpreter; skipped the node-registration check)")
 		return
+	registered = harness["nodes"]
 	for name, schem in maps.schematics().items():
 		for node in schem.names:
 			if node == "air":
@@ -236,22 +253,89 @@ def test_param2_survives() -> None:
 			f"{name} saved its seats at facedir 0; they would face the wrong way")
 
 
+# What the pack may cost the Lua heap for the session, measured by running
+# lw_world's loader under Lua 5.1 (measure_luanti_web_maps_heap.lua), and the
+# high-water mark while the largest map loads. See wasm_porting.md.
+HEAP_BUDGET_KIB = 8 * 1024
+LOAD_PEAK_BUDGET_KIB = 16 * 1024
+
+
+def measure_heap():
+	"""Returns ({map: (volume, kept KiB, peak KiB)}, kept, peak), or None."""
+	import tempfile
+	with tempfile.TemporaryDirectory() as tmp:
+		dumps = []
+		for name, schem in maps.schematics().items():
+			path = pathlib.Path(tmp) / f"{name}.dump"
+			with path.open("w", encoding="utf-8") as out:
+				out.write("%d %d %d\n" % schem.size)
+				out.write(" ".join(schem.names) + "\n")
+				out.write("\n".join(f"{c} {p}" for c, p in
+					zip(schem.content, schem.param2)) + "\n")
+			dumps.append(str(path))
+		script = SCRIPT_DIR / "measure_luanti_web_maps_heap.lua"
+		for binary in ("lua5.1", "lua", "luajit"):
+			try:
+				result = subprocess.run([binary, str(script), *dumps], cwd=str(ROOT),
+					check=False, capture_output=True, text=True)
+			except FileNotFoundError:
+				continue
+			if result.returncode != 0:
+				raise SystemExit(result.stdout + result.stderr)
+			per_map, kept, peak = {}, None, None
+			for line in result.stdout.splitlines():
+				fields = line.split()
+				if fields[0] == "MAP":
+					per_map[fields[1]] = (int(fields[2]), float(fields[3]), float(fields[4]))
+				elif fields[0] == "TOTAL":
+					kept, peak = float(fields[1]), float(fields[2])
+			return per_map, kept, peak
+	return None
+
+
 def test_budget() -> None:
 	"""The pack is content, and content is charged against luanti.data."""
 	total = sum(path.stat().st_size for path in SCHEM_DIR.glob("map_*.mts"))
 	assert_true(total < 64 * 1024,
-		f"the three map schematics are {total / 1024:.1f} KiB; budget is 64 KiB")
+		f"the map schematics are {total / 1024:.1f} KiB; budget is 64 KiB")
 	textures = sorted((LW_MAPS / "textures").glob("*.png"))
 	assert_true(len(textures) == 10,
 		f"lw_maps ships {len(textures)} textures, expected 10")
 	art = sum(path.stat().st_size for path in textures)
 	assert_true(art < 16 * 1024,
 		f"lw_maps textures are {art / 1024:.1f} KiB; budget is 16 KiB")
-	nodes = sum(size[0] * size[1] * size[2] for size in maps.SIZES.values())
+
+	nodes = maps.pack_volume()
+	print(f"  pack: {len(maps.SPECS)} maps, {nodes} nodes of {maps.NODE_BUDGET}, "
+		f"{total / 1024:.1f} KiB on disk")
 	# Each authored node costs two Lua table slots when lw_world loads the
 	# schematic, and that lives in the WASM heap for the whole session.
-	assert_true(nodes < 120_000,
-		f"the three maps are {nodes} nodes; the documented budget is 120k")
+	assert_true(nodes <= maps.NODE_BUDGET,
+		f"the maps are {nodes} nodes; the documented budget is {maps.NODE_BUDGET}")
+	# Past 32,768 cells a map's arrays double to the next power of two, so it
+	# costs what two small maps do. The snow mountain is the pack's one dense
+	# map; the next one has to fit or say why in wasm_porting.md.
+	dense = [spec.name for spec in maps.SPECS if spec.volume > maps.CHEAP_VOLUME]
+	assert_true(len(dense) <= 1,
+		f"{dense} are all over {maps.CHEAP_VOLUME} nodes; only one map may be, "
+		"because each one costs the heap twice what a smaller map does")
+
+	heap = measure_heap()
+	if heap is None:
+		print("  (no Lua interpreter; skipped the heap measurement)")
+		return
+	per_map, kept, peak = heap
+	for name, (volume, map_kept, map_peak) in per_map.items():
+		print(f"  {name}: {volume} nodes, keeps {map_kept / 1024:.1f} MiB, "
+			f"peaks at {map_peak / 1024:.1f} MiB while loading")
+	print(f"  heap: keeps {kept / 1024:.1f} MiB of {HEAP_BUDGET_KIB / 1024:.0f}, "
+		f"load peak {peak / 1024:.1f} MiB of {LOAD_PEAK_BUDGET_KIB / 1024:.0f}")
+	assert_true(kept <= HEAP_BUDGET_KIB,
+		f"the loaded maps keep {kept / 1024:.1f} MiB of Lua heap; the budget is "
+		f"{HEAP_BUDGET_KIB / 1024:.0f} MiB (see wasm_porting.md)")
+	assert_true(peak <= LOAD_PEAK_BUDGET_KIB,
+		f"loading one map peaks at {peak / 1024:.1f} MiB of Lua heap; the budget is "
+		f"{LOAD_PEAK_BUDGET_KIB / 1024:.0f} MiB (see wasm_porting.md)")
 
 
 BASE_Y = 5
@@ -268,12 +352,13 @@ def test_registry_agrees_with_the_schematics() -> None:
 	assert_true(f"lw_maps.base_y = {BASE_Y}" in source,
 		f"lw_maps.base_y is not {BASE_Y}, so local y {maps.SURFACE} is no "
 		"longer the world's GROUND")
-	for name, (sx, sy, sz) in maps.SIZES.items():
-		key = name[len("map_"):]
+	for spec in maps.SPECS:
+		name, key = spec.name, spec.id
+		sx, sy, sz = spec.size
 		block = source.split(f'id = "{key}"', 1)
 		assert_true(len(block) == 2, f"lw_maps does not register {key}")
-		block = block[1].split("})", 1)[0]
-		assert_true(f'schem = "{name}"' in block,
+		block = block[1].split("\n})", 1)[0]
+		assert_true('schem = ' not in block or f'schem = "{name}"' in block,
 			f"lw_maps' {key} does not point at {name}")
 		assert_true("size = {x = %d, y = %d, z = %d}" % (sx, sy, sz) in block,
 			f"lw_maps has no {sx}x{sy}x{sz} footprint for {key}")
@@ -282,7 +367,7 @@ def test_registry_agrees_with_the_schematics() -> None:
 			block)
 		assert_true(origin is not None and spawn is not None,
 			f"lw_maps' {key} has no origin/spawn in the expected shape")
-		local = maps.SPAWNS[name]
+		local = spec.spawn
 		want = (int(origin.group(1)) + local[0], BASE_Y + local[1],
 			int(origin.group(2)) + local[2])
 		got = (int(spawn.group(1)), BASE_Y + int(spawn.group(2)),
@@ -290,16 +375,42 @@ def test_registry_agrees_with_the_schematics() -> None:
 		assert_true(want == got,
 			f"lw_maps sends visitors to {got} on {key}, but the schematic's "
 			f"spawn {local} at that origin is {want}")
+	harness = run_lua_harness()
+	if harness is not None:
+		registered = harness["maps"]
+		built = [spec.id for spec in maps.SPECS]
+		assert_true(registered == built,
+			f"lw_maps registers {registered} but the generator builds {built}; "
+			"keep them in the same order so /maps lists them as the docs do")
 
 
-_HARNESS: list | None = []
+def test_entities_have_room() -> None:
+	"""A moving prop sits in air, on something: the vane on its mast."""
+	harness = run_lua_harness()
+	if harness is None:
+		return
+	built = maps.schematics()
+	for map_id, entity, (x, y, z) in harness["entities"]:
+		world = World(built["map_" + map_id])
+		assert_true(0 <= x < world.sx and 0 <= y < world.sy and 0 <= z < world.sz,
+			f"{map_id}: {entity} at {(x, y, z)} is outside the map")
+		assert_true(not world.solid(x, y, z),
+			f"{map_id}: {entity} at {(x, y, z)} is inside {world.at(x, y, z)}")
+		assert_true(world.solid(x, y - 1, z),
+			f"{map_id}: {entity} at {(x, y, z)} floats; the schematic has nothing "
+			"under it")
+
+
+_HARNESS: list = []
 
 
 def run_lua_harness():
-	"""Run the headless lw_maps harness once; return the nodes it registered.
+	"""Run the headless lw_maps harness once; return what it reported.
 
-	Returns None when no Lua interpreter is installed, which is how the checks
-	that depend on it degrade instead of failing on a bare container.
+	A dict with the ``nodes`` it registered, the map ids in registry order
+	(``maps``) and the moving props (``entities``). Returns None when no Lua
+	interpreter is installed, which is how the checks that depend on it degrade
+	instead of failing on a bare container.
 	"""
 	if _HARNESS:
 		return _HARNESS[0]
@@ -312,17 +423,27 @@ def run_lua_harness():
 			continue
 		if result.returncode != 0:
 			raise SystemExit(result.stdout + result.stderr)
-		nodes = {line[len("NODE "):].strip()
-			for line in result.stdout.splitlines() if line.startswith("NODE ")}
-		assert_true(bool(nodes), "the Lua harness registered no nodes at all")
-		_HARNESS.append(nodes)
-		return nodes
+		report = {"nodes": set(), "maps": [], "entities": []}
+		for line in result.stdout.splitlines():
+			fields = line.split()
+			if not fields:
+				continue
+			if fields[0] == "NODE":
+				report["nodes"].add(fields[1])
+			elif fields[0] == "MAP":
+				report["maps"].append(fields[1])
+			elif fields[0] == "ENTITY":
+				report["entities"].append((fields[1], fields[2],
+					tuple(int(v) for v in fields[3:6])))
+		assert_true(bool(report["nodes"]), "the Lua harness registered no nodes at all")
+		_HARNESS.append(report)
+		return report
 	_HARNESS.append(None)
 	return None
 
 
 def test_lua_logic() -> None:
-	"""The headless lw_maps harness: registry, atmosphere, flicker, /maps."""
+	"""The headless lw_maps harness: registry, atmosphere, lamps, /maps, atlas."""
 	if run_lua_harness() is None:
 		print("  (no Lua interpreter; skipped test_luanti_web_maps.lua)")
 

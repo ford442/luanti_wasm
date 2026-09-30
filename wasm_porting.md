@@ -565,12 +565,20 @@ Bundle:
 * Showcase art as small generated PNGs — the whole `luanti_web` palette,
   theater filmstrips, map-pack props and menu art is under 90 KB, regenerated
   by `util/content/generate_luanti_web_textures.py`.
-* Authored themed maps as committed `.mts` schematics — the three in
-  `games/luanti_web/mods/lw_world/schems/map_*.mts` are under 7 KB on disk and
-  about 98k nodes in total. They are capped: `lw_world` loads each schematic
-  into Lua arrays that live in the heap for the session, so
-  `util/content/test_luanti_web_maps.py` fails if the maps grow past 120k
-  nodes. See `games/luanti_web/docs/maps.md`.
+* Authored themed maps as committed `.mts` schematics in
+  `games/luanti_web/mods/lw_world/schems/map_*.mts` — a few KB each on disk.
+  What they cost is heap: `lw_world` loads each schematic into two Lua arrays
+  with a slot per cell of its box, air included, and keeps them for the
+  session. Measured with `lw_world`'s own loader under Lua 5.1 (a TValue is 16
+  bytes on wasm32 and x86-64 alike), a map keeps 1 MiB up to 32,768 cells and
+  2 MiB up to 65,536, because Lua sizes arrays to powers of two; loading one
+  peaks at about 290 bytes a cell (12.6 MiB for the 44,800-cell snow mountain)
+  until the engine's `read_schematic` table is collected.
+  `util/content/test_luanti_web_maps.py` repeats that measurement and fails
+  past 8 MiB kept, a 16 MiB load peak, 200,000 cells in total, or a second map
+  over 32,768 cells. The earlier 120k-cell cap predated the measurement; 8 MiB
+  is eight small maps against the 256 MB initial heap. See
+  `games/luanti_web/docs/maps.md`.
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.
 * An optional tiny authoring mod (e.g. a clone-stick tool) — not a full
