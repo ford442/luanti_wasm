@@ -23,6 +23,7 @@ same table, at the same phase if the director says so.
 | Theater | Walk to the stage in front of the screen and punch the violet **Stage Director** to the right of it. Three dancers take the marks and run `chorus_line_v1`. |
 | Halloween lane | Punch the director at the back of the porch: a scarecrow and two ghosts, slow. |
 | Fruit garden | Punch the director on the path by the melon bowl: a melon mascot stomping, and a berry that rides a raft down the juice channel. |
+| Crystal night bazaar | Climb onto the rim of the glass dome and punch the director on its north-east side: the theater's `chorus_line_v1`, danced on the dome's crown. It is the theater's routine on a second stage, so one of the two dances it at a time — punching either director while the other is dancing stops it first. |
 
 Or from chat:
 
@@ -145,6 +146,10 @@ lw_dance.register_stage({
 `pos` and `node` are separate because nobody wants a lectern in the middle of
 a chorus line. `/routine start <id> here` makes a throwaway stage where the
 visitor is standing, facing back at them.
+
+A routine can have more than one stage: give the extra one its own `id` (the
+bazaar's dome is `bazaar_dome`). Its director node plays the routine there,
+and `/routine start <id>` still goes to the first stage registered for it.
 
 ## Rigs
 

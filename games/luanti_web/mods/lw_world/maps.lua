@@ -136,6 +136,23 @@ function maps.causeways(api)
 				"then take the tunnel along the lagoon bed underneath it. " ..
 				"It is blue hour over there.",
 		},
+		{
+			-- Out of the plaza's east side north of the garden causeway, north
+			-- up the channel between the showcase island and the garden, then
+			-- east into the bazaar's arcade.
+			map = "crystal_bazaar",
+			legs = {
+				{x0 = PLAZA.x1, z0 = -3, x1 = 47, z1 = -1},
+				{x0 = 45, z0 = -3, x1 = 47, z1 = 43},
+				{x0 = 45, z0 = 41, x1 = 54, z1 = 43},
+			},
+			gate = {x = PLAZA.x1 - 1, z = 1},
+			post = "lw_maps:lantern",
+			sign = "Northeast: the crystal night bazaar. A glass-vaulted " ..
+				"arcade of stalls whose lanterns chase each other round it, a " ..
+				"dome you can walk up onto, and a cistern under it lit only by " ..
+				"torches. It is night over there.",
+		},
 	}
 end
 
@@ -302,6 +319,25 @@ function maps.build(api)
 			sign = "Garden director: punch to start the fruit stomp. The melon " ..
 				"has no skeleton and dances anyway; the berry rides the juice.",
 		},
+		{
+			-- The crown of the glass dome, with the audience on the rim and the
+			-- stair up from the north souk. The theater's own chorus line: a
+			-- second stage for an existing routine, not a new one.
+			id = "bazaar_dome",
+			routine = "chorus_line_v1",
+			map = "crystal_bazaar",
+			pos = {18, 12, 18},
+			node = {23, 9, 23},
+			facing = {x = 0, y = 0, z = 1},
+			marks = {
+				{18, 12, 18, "mark_lead"},
+				{16, 12, 18, "mark_1"},
+				{20, 12, 18, "mark_2"},
+			},
+			sign = "Dome director: punch for the theater's chorus line, up on " ..
+				"the glass. It is the theater's own routine, so one of the two " ..
+				"stages dances it at a time. /routine join dances along.",
+		},
 	}
 
 	for _, stage in ipairs(STAGES) do
@@ -321,6 +357,7 @@ function maps.build(api)
 		put(node.x, node.y, node.z, "lw_dance:director")
 		label(node.x, node.y, node.z, stage.sign)
 		lw_dance.register_stage({
+			id = stage.id,
 			routine = stage.routine,
 			pos = world(stage.pos),
 			node = node,

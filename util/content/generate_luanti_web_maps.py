@@ -1186,6 +1186,253 @@ def build_lighthouse_tide() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 5. Crystal night bazaar
+# --------------------------------------------------------------------------
+
+BAZAAR_SIZE = (36, 16, 36)
+# The causeway lands on the west face, at the mouth of the arcade.
+BAZAAR_SPAWN = (1, FLOOR, 18)
+
+# The arcade runs east-west through the middle of the map, in two vaulted
+# wings either side of a domed rotunda.
+AISLE_Z = (16, 20)                  # the walkway down the middle of the arcade
+STALL_BACK = (13, 23)               # the stalls' back walls, and the vault's feet
+VAULT_AXIS = 18                     # z of the barrel vault's crown line
+VAULT_SPRING = FLOOR + 4            # local y the vault springs from
+VAULT_RADIUS = 5.0                  # from the axis to the stall back walls
+WEST_WING = (0, 10)
+EAST_WING = (26, 35)
+# Stall partitions: a timber post at each, a lantern on it, and a chase
+# controller over the lantern.
+STALL_POSTS = {WEST_WING: (1, 4, 7, 10), EAST_WING: (26, 29, 32, 35)}
+
+ROTUNDA = (18, 18)                  # centre of the drum and dome, in x and z
+DRUM_RADIUS = 7.5                   # outer face of the drum wall
+RIM = FLOOR + 4                     # the terrace round the dome's foot
+RIM_RADIUS = 8.5
+DOME_RADIUS = 6.5
+DOME_RISE = 3                       # the crown is this far above the rim
+
+CISTERN = dict(x0=13, x1=23, z0=10, z1=22)
+CISTERN_STAIR_X = (17, 19)
+CISTERN_STAIR_Z = 14                # first tread down, from the rotunda floor
+TERRACE_STAIR_X = (17, 19)
+TERRACE_STAIR_Z = 30                # first tread up, from the north souk
+
+LANTERN = "lw_maps:lantern"
+LANTERN_OFF = "lw_maps:lantern_off"
+BRICK_STAIR = "lw_nodes:stair_stone_brick"
+
+# Stall awnings, round the loop in chase order.
+AWNINGS = ("violet", "magenta", "cyan", "blue", "yellow", "orange", "pink", "green")
+
+
+def rotunda_radius(x: float, z: float) -> float:
+	return math.hypot(x - ROTUNDA[0], z - ROTUNDA[1])
+
+
+def dome_height(radius: float) -> int:
+	"""Local y of the dome's glass surface at `radius` from its centre.
+
+	A paraboloid, low enough that its steepest point — the foot — rises less
+	than a node per node, so a visitor walks up it from the rim rather than
+	climbing it: that is the "dome you can walk onto".
+	"""
+	if radius > DOME_RADIUS:
+		return RIM
+	return RIM + int(DOME_RISE * (1 - (radius / DOME_RADIUS) ** 2) + 0.5)
+
+
+def build_bazaar_ground(build: Build) -> None:
+	sx, _, sz = build.sx, build.sy, build.sz
+	build.ground(PAVING)
+	# The arcade's floor and the rotunda's are polished; the souks either side
+	# are paving with a sand border.
+	build.box(0, SURFACE, STALL_BACK[0], sx - 1, SURFACE, STALL_BACK[1], POLISHED)
+	for x in range(sx):
+		for z in (0, sz - 1):
+			build.set(x, SURFACE, z, SAND)
+	for z in range(sz):
+		for x in (0, sx - 1):
+			if not STALL_BACK[0] <= z <= STALL_BACK[1]:
+				build.set(x, SURFACE, z, SAND)
+
+
+def build_vault(build: Build, x0: int, x1: int) -> None:
+	"""A barrel vault over one wing: glass panes between violet ribs."""
+	z0, z1 = STALL_BACK
+	# Stall back walls, up to the springing line.
+	for z in (z0, z1):
+		build.box(x0, FLOOR, z, x1, VAULT_SPRING - 1, z, BRICK)
+	for x in range(x0, x1 + 1):
+		rib = x % 3 == 0 or x in (x0, x1)
+		for z in range(z0, z1 + 1):
+			for y in range(VAULT_SPRING, build.sy):
+				d = math.hypot(z - VAULT_AXIS, y - VAULT_SPRING)
+				if VAULT_RADIUS - 0.5 < d <= VAULT_RADIUS + 0.5:
+					build.set(x, y, z, wool("violet") if rib else GLASS)
+				elif d <= VAULT_RADIUS - 0.5:
+					build.set(x, y, z, AIR)
+
+
+def build_stalls(build: Build) -> list[tuple[int, int]]:
+	"""Stalls both sides of both wings. Returns the post positions in chase
+	order: west to east along the south side, back east to west along the
+	north, so the lit pair runs round the arcade like a lap."""
+	south = []
+	north = []
+	for wing, posts in STALL_POSTS.items():
+		for x in posts:
+			south.append((x, STALL_BACK[0] + 2))
+			north.append((x, STALL_BACK[1] - 2))
+	loop = sorted(south) + sorted(north, reverse=True)
+
+	for side, (back, front, step) in (("south", (STALL_BACK[0], STALL_BACK[0] + 2, 1)),
+			("north", (STALL_BACK[1], STALL_BACK[1] - 2, -1))):
+		for wing, posts in STALL_POSTS.items():
+			for left, right in zip(posts, posts[1:]):
+				index = len([p for p in loop if p[0] < left])
+				color = AWNINGS[index % len(AWNINGS)]
+				# Counter across the front, awning over it, goods on the shelf.
+				build.box(left + 1, FLOOR, front, right - 1, FLOOR, front, PLANK_SLAB)
+				build.box(left + 1, VAULT_SPRING - 1, back + step, right - 1,
+					VAULT_SPRING - 1, front, wool(color))
+				build.box(left + 1, FLOOR, back + step, right - 1, FLOOR + 1,
+					back + step, GLASS)
+				build.set(left + 1, FLOOR + 2, back + step, wool(color))
+		# Partition posts, from the back wall to the counter.
+		for x, z in (p for p in loop if (p[1] < VAULT_AXIS) == (side == "south")):
+			build.box(x, FLOOR, back + step, x, VAULT_SPRING - 1, back + step, BEAM)
+			build.box(x, FLOOR, front, x, FLOOR + 1, front, BEAM)
+	for index, (x, z) in enumerate(loop):
+		build.set(x, FLOOR + 2, z, LANTERN_OFF)
+		build.set(x, FLOOR + 3, z, CHASE, index % 8)
+	return loop
+
+
+def build_rotunda(build: Build) -> None:
+	cx, cz = ROTUNDA
+	reach = int(RIM_RADIUS) + 1
+	columns = [(x, z) for x in range(cx - reach, cx + reach + 1)
+		for z in range(cz - reach, cz + reach + 1)]
+	surface = {(x, z): dome_height(rotunda_radius(x, z)) for x, z in columns}
+
+	for x, z in columns:
+		radius = rotunda_radius(x, z)
+		# The wings' end arches are the rotunda's neighbours, not its floor.
+		if radius > RIM_RADIUS or x <= WEST_WING[1] or x >= EAST_WING[0]:
+			continue
+		build.clear(x, FLOOR, z, x, build.sy - 1, z)
+		if radius > DOME_RADIUS:
+			# The drum, and the terrace on top of it that the dome sits in.
+			if radius <= DRUM_RADIUS:
+				build.box(x, FLOOR, z, x, RIM - 1, z, BRICK)
+			build.set(x, RIM, z, POLISHED)
+			landing = (TERRACE_STAIR_X[0] <= x <= TERRACE_STAIR_X[1] and z > cz)
+			if radius > RIM_RADIUS - 1.0 and (x + z) % 2 == 1 and not landing:
+				build.set(x, RIM + 1, z, FENCE)
+			continue
+		# The dome: glass from its own surface down to the lowest neighbour's,
+		# so where it steps up a node there is no slot to see daylight through.
+		top = surface[(x, z)]
+		low = min(surface.get((x + dx, z + dz), RIM)
+			for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+		build.box(x, min(low, top), z, x, top, z, GLASS)
+	# Crown and a ring of gold where the glass meets the stone.
+	build.set(cx, surface[(cx, cz)], cz, wool("cyan"))
+	for x, z in columns:
+		if DOME_RADIUS - 1.0 < rotunda_radius(x, z) <= DOME_RADIUS:
+			build.set(x, RIM, z, GOLD)
+	# Under the dome: a hall lit from below, with doors to both wings.
+	for z in range(AISLE_Z[0], AISLE_Z[1] + 1):
+		for x in range(cx - reach, cx + reach + 1):
+			if DOME_RADIUS < rotunda_radius(x, z) <= DRUM_RADIUS:
+				build.clear(x, FLOOR, z, x, FLOOR + 2, z)
+	for dx, dz in ((4, 4), (-4, 4), (4, -4), (-4, -4)):
+		build.set(cx + dx, FLOOR, cz + dz, UPLIGHT)
+	build.set(cx, FLOOR + 3, cz, HIDDEN_LIGHT)
+
+
+def build_terrace_stair(build: Build) -> None:
+	"""A straight flight from the north souk up onto the rim terrace."""
+	x0, x1 = TERRACE_STAIR_X
+	for step in range(RIM - FLOOR):
+		z = TERRACE_STAIR_Z - step
+		y = FLOOR + step
+		if y > FLOOR:
+			build.box(x0, FLOOR, z, x1, y - 1, z, BRICK)
+		build.box(x0, y, z, x1, y, z, BRICK_STAIR, SOUTH)
+		build.clear(x0, y + 1, z, x1, y + 3, z)
+	for x in (x0 - 1, x1 + 1):
+		for step in range(RIM - FLOOR):
+			z = TERRACE_STAIR_Z - step
+			build.box(x, FLOOR, z, x, FLOOR + step, z, BRICK)
+
+
+def build_cistern(build: Build) -> None:
+	"""Under the rotunda: a pillared cistern, lit only by torches."""
+	c = CISTERN
+	# Brick walls and floor; the roof is whatever floor is above it already.
+	build.box(c["x0"] - 1, 0, c["z0"] - 1, c["x1"] + 1, SURFACE - 1, c["z1"] + 1, BRICK)
+	build.box(c["x0"], 1, c["z0"], c["x1"], SURFACE - 1, c["z1"], AIR)
+	# A still pool in the middle, sunk one below the walkway.
+	cx, cz = ROTUNDA
+	build.box(cx - 2, 0, cz - 1, cx + 2, 0, cz + 3, WATER)
+	for px in range(c["x0"] + 2, c["x1"], 4):
+		for pz in range(c["z0"] + 2, c["z1"], 4):
+			if abs(px - cx) <= 2 and cz - 1 <= pz <= cz + 3:
+				continue
+			build.box(px, 1, pz, px, SURFACE - 1, pz, BRICK)
+			build.set(px + 1, 2, pz, TORCH)
+	# The stairwell down from the rotunda floor, three treads, with a kerb.
+	x0, x1 = CISTERN_STAIR_X
+	for step, y in enumerate((2, 1)):
+		z = CISTERN_STAIR_Z - step
+		build.box(x0, y, z, x1, y, z, PLANK_STAIR, NORTH)
+		build.clear(x0, y + 1, z, x1, FLOOR + 2, z)
+	build.clear(x0, 1, CISTERN_STAIR_Z - 2, x1, FLOOR + 2, CISTERN_STAIR_Z - 2)
+	# The drum wall closes the far end; the near end is the way in.
+	for z in range(CISTERN_STAIR_Z - 2, CISTERN_STAIR_Z + 1):
+		build.set(x0 - 1, FLOOR, z, FENCE)
+		build.set(x1 + 1, FLOOR, z, FENCE)
+
+
+def build_souks(build: Build) -> None:
+	"""The open squares north and south of the arcade: crystal clusters,
+	awnings on poles, and lamp posts to find your way between them."""
+	for x, z, color, height in ((5, 5, "cyan", 4), (30, 6, "violet", 5),
+			(6, 30, "magenta", 5), (29, 31, "blue", 4), (12, 3, "blue", 3),
+			(26, 32, "cyan", 3)):
+		build.box(x, FLOOR, z, x, FLOOR + height - 1, z, GLASS)
+		for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+			build.box(x + dx, FLOOR, z + dz, x + dx, FLOOR + height - 3, z + dz,
+				wool(color))
+		build.set(x, FLOOR + height, z, HIDDEN_LIGHT)
+	for x0, z0, color in ((20, 4, "orange"), (8, 27, "yellow"), (26, 26, "pink")):
+		for dx, dz in ((0, 0), (3, 0), (0, 3), (3, 3)):
+			build.box(x0 + dx, FLOOR, z0 + dz, x0 + dx, FLOOR + 2, z0 + dz, BEAM)
+		build.box(x0, FLOOR + 3, z0, x0 + 3, FLOOR + 3, z0 + 3, wool(color))
+		build.box(x0 + 1, FLOOR, z0 + 1, x0 + 2, FLOOR, z0 + 2, PLANK_SLAB)
+	for x, z in ((3, 11), (33, 11), (3, 25), (33, 25), (14, 30), (22, 30)):
+		build.box(x, FLOOR, z, x, FLOOR + 1, z, COLUMN)
+		build.set(x, FLOOR + 2, z, LANTERN)
+
+
+def build_crystal_bazaar() -> Build:
+	sx, sy, sz = BAZAAR_SIZE
+	build = Build(sx, sy, sz)
+	build_bazaar_ground(build)
+	build_souks(build)
+	build_vault(build, *WEST_WING)
+	build_vault(build, *EAST_WING)
+	build_stalls(build)
+	build_rotunda(build)
+	build_terrace_stair(build)
+	build_cistern(build)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -1218,6 +1465,7 @@ SPECS = [
 	MapSpec("map_fruit_garden", FRUIT_SIZE, FRUIT_SPAWN, build_fruit_garden),
 	MapSpec("map_lighthouse_tide", LIGHTHOUSE_SIZE, LIGHTHOUSE_SPAWN,
 		build_lighthouse_tide),
+	MapSpec("map_crystal_bazaar", BAZAAR_SIZE, BAZAAR_SPAWN, build_crystal_bazaar),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}

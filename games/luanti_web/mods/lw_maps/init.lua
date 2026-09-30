@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: LGPL-2.1-or-later
 -- Copyright (C) 2026 The Luanti Contributors
 
--- The themed map pack: the props the three authored maps need, the registry
+-- The themed map pack: the props the authored maps need, the registry
 -- that says where each map is and how it should feel, and the `/maps` helper.
 --
 -- This mod owns *what a map is*. `lw_world/maps.lua` owns *where it goes* —
@@ -221,6 +221,27 @@ register_juice("juice_red", "Watermelon Juice", "#d0323a")
 register_juice("juice_green", "Lime Juice", "#5aa83c")
 
 --------------------------------------------------------------------------
+-- Night bazaar
+--------------------------------------------------------------------------
+
+-- Stall lanterns: the palette's lamp tile, warmed, in a lit and an unlit
+-- state for the chase controller to swap between. Everything else on the
+-- bazaar — the crystal, the awnings, the vault — is glass and dyed wool.
+register("lantern", {
+	description = "Bazaar Lantern",
+	tiles = {"lw_lamp.png^[multiply:#ffc46a"},
+	paramtype = "light",
+	light_source = 12,
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+register("lantern_off", {
+	description = "Bazaar Lantern (unlit)",
+	tiles = {"lw_lamp.png^[multiply:#5c4634"},
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+--------------------------------------------------------------------------
 -- Lamp controllers
 --------------------------------------------------------------------------
 
@@ -241,6 +262,7 @@ function lw_maps.register_lamp_pair(lit, unlit)
 end
 
 lw_maps.register_lamp_pair("lw_maps:jack_o_lantern", "lw_maps:pumpkin")
+lw_maps.register_lamp_pair("lw_maps:lantern", "lw_maps:lantern_off")
 
 -- Light or dim whatever lamp is one node below `pos`. Only ever swaps a lamp
 -- for its own twin: if a visitor dug the lamp out, or built something else in
@@ -474,6 +496,24 @@ lw_maps.register({
 	}),
 	-- The lamp's beam sweeps from one node above the lamp itself.
 	entities = {{name = "lw_maps:lighthouse_beam", at = {x = 8, y = 21, z = 8}}},
+})
+
+lw_maps.register({
+	id = "crystal_bazaar",
+	title = "Crystal night bazaar",
+	blurb = "A vaulted glass arcade of lantern-lit stalls at night, a glass " ..
+		"dome you can walk up onto, and a torchlit cistern underneath it.",
+	size = {x = 36, y = 16, z = 36},
+	origin = {x = 54, y = BASE, z = 24},
+	spawn = {x = 55, y = BASE + 4, z = 42},
+	-- Night, with a saturated sky and no fog of its own, so glass reads as
+	-- glass against it and the lanterns are the brightest thing there.
+	day_night_ratio = 0.08,
+	sky = lw_maps.sky({
+		sky = "#2a1466", horizon = "#6a1f8a",
+		night_sky = "#1a0b45", night_horizon = "#4a1466", indoors = "#1f1040",
+		sun_tint = "#c070ff", moon_tint = "#7050d0",
+	}),
 })
 
 --------------------------------------------------------------------------

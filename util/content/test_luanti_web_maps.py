@@ -158,6 +158,23 @@ def lighthouse_landmarks() -> dict:
 	}
 
 
+def bazaar_landmarks() -> dict:
+	cx, cz = maps.ROTUNDA
+	c = maps.CISTERN
+	aisle = (maps.AISLE_Z[0] + maps.AISLE_Z[1]) // 2
+	return {
+		"arcade at the causeway": maps.BAZAAR_SPAWN,
+		"stall floor, west wing": (5, maps.FLOOR, maps.AISLE_Z[0]),
+		"rotunda under the dome": (cx, maps.FLOOR, cz + 2),
+		"far end of the arcade": (maps.BAZAAR_SIZE[0] - 1, maps.FLOOR, aisle),
+		"north souk": (10, maps.FLOOR, 30),
+		"south souk": (25, maps.FLOOR, 5),
+		"rim terrace": (cx, maps.RIM + 1, cz + 7),
+		"dome roof": (cx, maps.dome_height(0) + 1, cz),
+		"cistern": (c["x0"] + 1, 1, c["z0"] + 1),
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -166,6 +183,7 @@ LANDMARKS = {
 	"map_snow_mountain": snow_landmarks,
 	"map_fruit_garden": lambda schem: fruit_landmarks(),
 	"map_lighthouse_tide": lambda schem: lighthouse_landmarks(),
+	"map_crystal_bazaar": lambda schem: bazaar_landmarks(),
 }
 
 
@@ -279,6 +297,49 @@ def test_lighthouse_stair_climbs_every_turn() -> None:
 	missing = [y for y in range(maps.FLOOR, maps.LANTERN_FLOOR + 1) if y not in heights]
 	assert_true(not missing,
 		f"the lighthouse stair has no standable tread at heights {missing}")
+
+
+def test_bazaar_lanterns_chase_round_the_arcade() -> None:
+	"""Every chase controller has a lantern under it, and the loop is whole.
+
+	A controller over anything but a registered lamp does nothing, and a loop
+	with a missing index has a dark gap that travels round it.
+	"""
+	schem = maps.schematics()["map_crystal_bazaar"]
+	world = World(schem)
+	chase = schem.names.index(maps.CHASE)
+	indices = []
+	for i, content in enumerate(schem.content):
+		if content != chase:
+			continue
+		sx, sy = schem.size[0], schem.size[1]
+		x, y, z = i % sx, (i // sx) % sy, i // (sx * sy)
+		below = world.at(x, y - 1, z)
+		assert_true(below in (maps.LANTERN, maps.LANTERN_OFF),
+			f"the chase controller at {(x, y, z)} is over {below}, not a lantern")
+		indices.append(schem.param2[i])
+	period = 8
+	assert_true(len(indices) >= period,
+		f"only {len(indices)} lanterns chase; a loop needs at least {period}")
+	assert_true(set(indices) == set(range(period)),
+		f"the chase loop's places are {sorted(set(indices))}, not 0..{period - 1}")
+	# Stall posts carry the lanterns; none stands in the aisle.
+	aisle = range(maps.AISLE_Z[0], maps.AISLE_Z[1] + 1)
+	for x, z in maps.build_stalls(maps.Build(*maps.BAZAAR_SIZE)):
+		assert_true(z not in aisle, f"a stall post at ({x}, {z}) is in the aisle")
+
+
+def test_bazaar_dome_is_walkable() -> None:
+	"""No step up the dome is more than a node: it is walked, not climbed."""
+	cx, cz = maps.ROTUNDA
+	for x in range(cx - 8, cx + 9):
+		for z in range(cz - 8, cz + 9):
+			here = maps.dome_height(maps.rotunda_radius(x, z))
+			for dx, dz in ((1, 0), (0, 1)):
+				there = maps.dome_height(maps.rotunda_radius(x + dx, z + dz))
+				assert_true(abs(here - there) <= 1,
+					f"the dome steps {abs(here - there)} nodes between "
+					f"({x}, {z}) and ({x + dx}, {z + dz})")
 
 
 def test_committed_files_match_the_generator() -> None:

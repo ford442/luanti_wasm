@@ -6,16 +6,16 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Four authored maps ship with the showcase pack, as islands around the hub
+Five authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
 
 ```
-                        [ hub tour ]            north of the plaza
-                             |
-        [ Halloween ]---[ hub plaza ]---[ fruit garden ]
-             west          |    |            east
+                        [ hub tour ]         .---[ crystal bazaar ]
+                             |               |        northeast
+        [ Halloween ]---[ hub plaza ]--------+---[ fruit garden ]
+             west          |    |                     east
                            |  [ snow mountain ]
                            |       south
        [ lighthouse ]------'
@@ -33,6 +33,7 @@ tour never needs them.
 | Snowy mountain | `snow_mountain` | `map_snow_mountain.mts` | 40 × 28 × 40 |  `(-20, 5, -74)` | `(6, 9, -37)` | bright overcast (`0.85`, pale sky) |
 | Giant fruit garden | `fruit_garden` | `map_fruit_garden.mts` | 40 × 20 × 40 | `(53, 5, -28)` | `(55, 9, -7)` | the world's own midday |
 | Lighthouse tide | `lighthouse_tide` | `map_lighthouse_tide.mts` | 36 × 24 × 36 | `(-66, 5, -80)` | `(-39, 9, -46)` | late blue hour (`0.28`, dark water sky, light fog) |
+| Crystal night bazaar | `crystal_bazaar` | `map_crystal_bazaar.mts` | 36 × 16 × 36 | `(54, 5, 24)` | `(55, 9, 42)` | night (`0.08`, saturated violet sky, no fog of its own) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -130,6 +131,36 @@ lighthouse on it, and a rocky ledge runs down the east side.
 No boats, no flowing water, no mobs: the water is the pack's still
 `lw_nodes:water`, and the map adds no nodes.
 
+### Crystal night bazaar
+
+The fruit garden's oversized-architecture idea at night, where glass and a few
+warm lamps do what new shaders would otherwise have to.
+
+* **The arcade** runs east–west through the middle of the map from the
+  causeway, in two wings either side of a rotunda. Each wing is a barrel vault
+  of glass panes between violet wool ribs, springing from the stalls' back
+  walls: hollow, one node thick.
+* **The stalls** line both sides of both wings: a glass shelf, a counter, and a
+  dyed awning. Their posts carry lanterns (`lw_maps:lantern`), and a `chase`
+  controller over each one lights them round the arcade in a lap — along the
+  south side, back along the north — two at a time. The controllers' places in
+  the loop are in their `param2`.
+* **The rotunda** is a brick drum with doors on the aisle, a hall under the
+  dome lit from below, and a terrace round the dome's foot reached by a stair
+  from the north souk. **The dome** is glass, and low: a paraboloid whose
+  steepest step is one node, so a visitor walks up it to the crown. A Stage
+  Director on the rim plays the theater's `chorus_line_v1` on the crown (see
+  [`routines.md`](routines.md)).
+* **The cistern** is under the rotunda, down a stairwell in the hall floor: a
+  pillared brick vault with a still pool, lit only by `lw_maps:torch`, in the
+  snow mountain's cave language.
+* **The souks** north and south of the arcade are open squares with crystal
+  clusters — glass cores in dyed wool, lit from inside — awnings on poles and
+  lamp posts.
+
+Everything is glass and dyed wool from the core palette; the only new nodes are
+the lantern and its unlit twin, both the palette's lamp tile re-tinted.
+
 ## Getting there
 
 * Walk. A causeway leaves the plaza for every map, each with a gate whose
@@ -226,7 +257,7 @@ launcher feature, not a teleport.
 
 ## Nodes the pack adds
 
-`lw_maps` registers twenty nodes. They are deliberately **not** in the
+`lw_maps` registers twenty-two nodes. They are deliberately **not** in the
 `lw_palette` group — that group builds the material library's pedestals and the
 room is full — so they appear in the palette inventory (`i`) but not in the
 library. Everything else the maps are built from is a `lw_nodes` tile.
@@ -245,6 +276,7 @@ library. Everything else the maps are built from is a `lw_nodes` tile.
 | `leaves`, `pine_leaves` | the garden canopy and the pines |
 | `vine` | the patch and the canopy |
 | `juice_red`, `juice_green` | the juice channel |
+| `lantern`, `lantern_off` | the bazaar's chasing stall lanterns and its lamp posts |
 
 Ten new textures cover all of it: the rest are the existing tiles re-tinted
 with `[multiply`, the same trick the sixteen wool cubes use. They are
@@ -257,8 +289,8 @@ Both controllers are airlike nodes that drive the lamp one node below them,
 from a node timer, which only runs while the block is loaded — a map nobody is
 on costs nothing. They switch a lamp for its twin from a registered pair
 (`lw_maps.register_lamp_pair(lit, unlit)`); the jack-o'-lantern and the
-pumpkin are the first pair, and a map that wants its own kind of lamp registers
-two nodes and reuses both controllers. Neither will grow a lamp where a visitor
+pumpkin are the first pair and the bazaar's lantern the second, and a map that
+wants its own kind of lamp registers two nodes and reuses both controllers. Neither will grow a lamp where a visitor
 dug one out.
 
 * `flicker` gutters on a fixed pattern, phase-offset by position.
@@ -273,8 +305,9 @@ A map's cost is its box, not its nodes. `lw_world` loads each schematic into two
 Lua arrays — node and `param2` — with a slot for every cell, air included, and
 keeps them in the WASM heap for the session. Lua sizes an array to a power of
 two, so a map keeps **1 MiB up to 32,768 cells and 2 MiB up to 65,536**:
-halloween (25,920 cells), the fruit garden (32,000) and the lighthouse
-(31,104) cost 1 MiB each, the snow mountain (44,800) costs 2 MiB. While a map loads, the engine's
+halloween (25,920 cells), the fruit garden (32,000), the lighthouse (31,104)
+and the bazaar (20,736) cost 1 MiB each, the snow mountain (44,800) costs
+2 MiB. While a map loads, the engine's
 `read_schematic` table exists alongside it — one small table per cell, about
 290 bytes each — and that peaks at 12.6 MiB for the mountain before the
 collector takes it back.
