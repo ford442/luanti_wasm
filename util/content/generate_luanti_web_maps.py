@@ -906,6 +906,286 @@ def build_fruit_garden() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 4. Lighthouse tide
+# --------------------------------------------------------------------------
+
+LIGHTHOUSE_SIZE = (36, 24, 36)
+# The causeway lands on the north face, on the shore promenade.
+LIGHTHOUSE_SPAWN = (27, FLOOR, 34)
+
+# The lagoon's surface is local y 3, level with the shore and with the beach
+# lw_world lays round the island, so the water inside the footprint is three
+# deep and a tunnel on its bed has water over its roof.
+TIDE_TOP = SURFACE
+
+TOWER = (8, 8)                      # centre, in x and z
+TOWER_RADIUS = 6.5                  # outer face of the wall
+TOWER_WALL = 1.0
+NEWEL_RADIUS = 1.5                  # the solid core the stair winds round
+STAIR_BASE = FLOOR                  # first tread
+STAIR_PITCH = 5                     # rise per full turn: four nodes of head room
+# Where the first tread is, as an angle from +x towards +z. The door faces
+# north (+z), so starting the flight just past it leaves the doorway opening
+# onto floor rather than onto the underside of the last turn.
+STAIR_START = math.pi / 2 + 0.7
+LANTERN_FLOOR = FLOOR + 15          # the gallery deck, and the top of the stair
+LANTERN_RADIUS = 3.5                # the glass lantern on it
+GALLERY_RADIUS = 7.5                # the railed walkway round the lantern
+
+JETTY = dict(x0=20, x1=24, z0=7, z1=26)
+JETTY_HEAD = dict(x0=18, x1=26, z0=3, z1=7)
+JETTY_DECK = SURFACE + 1            # one proud of the water, on piles
+# Two glass-bottomed tide pools set into the jetty deck. The first is over the
+# tunnel, so its glass is the tunnel's roof.
+TIDE_POOLS = ((21, 23, 16, 18), (21, 23, 10, 12))
+
+# The tunnel runs east-west under the lagoon and under the jetty, from a
+# stairwell on the west spine to one on the east ledge. You walk on local y 0
+# with your head at y 2 and the lagoon's surface in the roof.
+TIDE_TUNNEL = dict(x0=13, x1=30, z0=16, z1=18, floor=0)
+TUNNEL_WEST_STAIR = 10              # first tread down, west end
+TUNNEL_EAST_STAIR = 31              # first tread up, east end
+
+
+def tower_angle(x: float, z: float) -> float:
+	"""Angle round the tower, measured from where the stair starts."""
+	angle = math.atan2(z - TOWER[1], x - TOWER[0]) - STAIR_START
+	return angle % (2 * math.pi)
+
+
+def tower_radius(x: float, z: float) -> float:
+	return math.hypot(x - TOWER[0], z - TOWER[1])
+
+
+def stair_treads(x: int, z: int) -> list[int]:
+	"""Every tread height of the spiral stair in column (x, z), bottom up.
+
+	The stair is a helicoid: a cell at angle a has a tread on each turn, at
+	STAIR_BASE + (a / 2pi + turn) * STAIR_PITCH. Neighbouring cells round the
+	annulus are never more than one node apart, so the whole flight is walkable
+	without a jump, and each turn clears the one below by four nodes.
+
+	The last two rises would put a visitor's head through the lantern deck, so
+	only the outer lane of the flight takes them — up through a hatch in the
+	gallery, outside the lantern's glass — and the inner lane, under the lantern
+	itself, stops short and leaves its floor whole.
+	"""
+	radius = tower_radius(x, z)
+	if not (NEWEL_RADIUS < radius <= TOWER_RADIUS - TOWER_WALL):
+		return []
+	top = LANTERN_FLOOR if radius > LANTERN_RADIUS else LANTERN_FLOOR - 2
+	fraction = tower_angle(x, z) / (2 * math.pi)
+	treads = []
+	turn = 0
+	while True:
+		y = STAIR_BASE + int((fraction + turn) * STAIR_PITCH)
+		if y >= top:
+			return treads
+		treads.append(y)
+		turn += 1
+
+
+def build_tide_ground(build: Build) -> None:
+	"""A lagoon three deep, with land round three sides of it."""
+	sx, _, sz = build.sx, build.sy, build.sz
+	# Everything starts as lagoon: a sand bed on local y 0 and water to the top.
+	build.box(0, 0, 0, sx - 1, 0, sz - 1, SAND)
+	build.box(0, 1, 0, sx - 1, TIDE_TOP, sz - 1, WATER)
+
+	def land(x: int, z: int) -> bool:
+		return (z >= 27                                   # north shore
+			or x <= 14 and z >= 12                        # west spine
+			or x >= 30                                    # east ledge
+			or math.hypot(x - 8, z - 8) <= 8.5)           # tower headland
+
+	for x in range(sx):
+		for z in range(sz):
+			if not land(x, z):
+				continue
+			build.box(x, 0, z, x, SURFACE - 2, z, STONE)
+			build.set(x, SURFACE - 1, z, DIRT)
+			# A sand margin wherever the land meets the water.
+			wet = any(not land(x + dx, z + dz) and build.inside(x + dx, 0, z + dz)
+				for dx in (-1, 0, 1) for dz in (-1, 0, 1))
+			build.set(x, SURFACE, z, SAND if wet else GRASS)
+
+	# Paths: a promenade along the shore from the causeway, down the spine to
+	# the lighthouse door, and down the east ledge to the far tunnel mouth.
+	build.box(3, SURFACE, 29, sx - 1, SURFACE, 31, PAVING)
+	build.box(26, SURFACE, 29, 28, SURFACE, sz - 1, PAVING)
+	build.box(7, SURFACE, 15, 9, SURFACE, 31, PAVING)
+	build.box(32, SURFACE, 16, 34, SURFACE, 31, PAVING)
+	for x, z in ((25, 34), (29, 34), (10, 28), (6, 20), (35, 22)):
+		build.set(x, FLOOR, z, UPLIGHT)
+	# Rocks in the shallows, so the lagoon reads as a tide line, not a pool.
+	for x, z in ((16, 3), (28, 1), (17, 24), (28, 22), (12, 1)):
+		build.box(x, 1, z, x, TIDE_TOP, z, STONE)
+
+
+def build_lighthouse_tower(build: Build) -> None:
+	cx, cz = TOWER
+	reach = int(GALLERY_RADIUS) + 1
+	columns = [(x, z) for x in range(cx - reach, cx + reach + 1)
+		for z in range(cz - reach, cz + reach + 1)]
+
+	# The floor, the shell and the core. Painted in bands, three courses of
+	# white to three of red, like every lighthouse a child has drawn.
+	for x, z in columns:
+		radius = tower_radius(x, z)
+		if radius > TOWER_RADIUS:
+			continue
+		build.set(x, SURFACE, z, POLISHED)
+		build.clear(x, FLOOR, z, x, LANTERN_FLOOR - 1, z)
+		if radius > TOWER_RADIUS - TOWER_WALL:
+			for y in range(FLOOR, LANTERN_FLOOR):
+				band = "white" if (y - FLOOR) // 3 % 2 == 0 else "red"
+				build.set(x, y, z, wool(band))
+		elif radius <= NEWEL_RADIUS:
+			build.box(x, FLOOR, z, x, LANTERN_FLOOR - 1, z, BRICK)
+
+	# Windows at the four compass points, above the door.
+	for y0 in (FLOOR + 4, FLOOR + 9):
+		for dx, dz in ((0, 6), (6, 0), (0, -6), (-6, 0)):
+			build.box(cx + dx, y0, cz + dz, cx + dx, y0 + 1, cz + dz, GLASS)
+
+	# The door, north, facing the spine path.
+	build.clear(cx - 1, FLOOR, cz + 6, cx + 1, FLOOR + 1, cz + 6)
+	build.box(cx - 1, FLOOR + 2, cz + 6, cx + 1, FLOOR + 2, cz + 6, GOLD)
+
+	# The spiral stair. A tread that has the next one up beside it is a stair
+	# node climbing towards it, so most of the flight is half steps.
+	treads = {}
+	for x, z in columns:
+		for y in stair_treads(x, z):
+			treads[(x, y, z)] = True
+	for (x, y, z) in treads:
+		facing = None
+		for dx, dz, facedir in ((0, 1, NORTH), (1, 0, EAST), (0, -1, SOUTH), (-1, 0, WEST)):
+			if (x + dx, y + 1, z + dz) in treads:
+				facing = facedir
+				break
+		if facing is None:
+			build.set(x, y, z, PLANKS)
+		else:
+			build.set(x, y, z, PLANK_STAIR, facing)
+
+	# The lantern deck, open only over the stair's last two rises: the hatch
+	# a visitor climbs out of onto the gallery.
+	def hatch(x: int, z: int) -> bool:
+		heights = stair_treads(x, z)
+		return bool(heights) and heights[-1] >= LANTERN_FLOOR - 2
+
+	deck = LANTERN_FLOOR
+	for x, z in columns:
+		radius = tower_radius(x, z)
+		if radius > GALLERY_RADIUS:
+			continue
+		if not hatch(x, z):
+			build.set(x, deck, z, POLISHED if radius <= TOWER_RADIUS else PLANKS)
+		if radius > GALLERY_RADIUS - 1.0 and (x + z) % 2 == 0:
+			build.set(x, deck + 1, z, FENCE)
+		if LANTERN_RADIUS - 1.0 < radius <= LANTERN_RADIUS:
+			build.box(x, deck + 1, z, x, deck + 3, z, GLASS)
+		if radius <= LANTERN_RADIUS:
+			build.set(x, deck + 4, z, wool("black"))
+	# A door in the glass on the seaward side, opposite the hatch.
+	build.clear(cx, deck + 1, cz - 3, cx, deck + 2, cz - 3)
+	# The lamp, on the core, with the beam entity one above it (lw_maps).
+	build.set(cx, deck + 1, cz, LAMP)
+	build.set(cx, deck + 4, cz, GOLD)
+
+
+def build_jetty(build: Build) -> None:
+	"""A plank jetty on piles, one node proud of the lagoon."""
+	for part in (JETTY, JETTY_HEAD):
+		build.box(part["x0"], JETTY_DECK, part["z0"], part["x1"], JETTY_DECK,
+			part["z1"], PLANKS)
+		build.clear(part["x0"], JETTY_DECK + 1, part["z0"], part["x1"],
+			JETTY_DECK + 3, part["z1"])
+	# Piles at the corners and down both edges, clear of the tunnel crossing.
+	for x in (JETTY["x0"], JETTY["x1"]):
+		for z in (8, 12, 22, 26):
+			build.box(x, 1, z, x, JETTY_DECK - 1, z, BEAM)
+	for x in (JETTY_HEAD["x0"], JETTY_HEAD["x1"]):
+		for z in (JETTY_HEAD["z0"], JETTY_HEAD["z1"]):
+			build.box(x, 1, z, x, JETTY_DECK - 1, z, BEAM)
+	# Step up from the shore.
+	build.box(JETTY["x0"], JETTY_DECK, JETTY["z1"], JETTY["x1"], JETTY_DECK,
+		JETTY["z1"], PLANK_STAIR, SOUTH)
+	# Rails down both sides, with gaps, and a lamp post and a bench at the head.
+	for z in range(JETTY["z0"] + 1, JETTY["z1"], 3):
+		build.set(JETTY["x0"], JETTY_DECK + 1, z, FENCE)
+		build.set(JETTY["x1"], JETTY_DECK + 1, z, FENCE)
+	build.box(JETTY_HEAD["x0"], JETTY_DECK + 1, JETTY_HEAD["z0"],
+		JETTY_HEAD["x0"], JETTY_DECK + 2, JETTY_HEAD["z0"], BEAM)
+	build.set(JETTY_HEAD["x0"], JETTY_DECK + 3, JETTY_HEAD["z0"], LAMP)
+	build.box(JETTY_HEAD["x0"] + 2, JETTY_DECK + 1, JETTY_HEAD["z0"],
+		JETTY_HEAD["x0"] + 4, JETTY_DECK + 1, JETTY_HEAD["z0"], PLANK_SLAB)
+
+	# The tide pools: water one node deep, on glass, in the deck.
+	for x0, x1, z0, z1 in TIDE_POOLS:
+		build.box(x0, JETTY_DECK, z0, x1, JETTY_DECK, z1, WATER)
+		build.box(x0, JETTY_DECK - 1, z0, x1, JETTY_DECK - 1, z1, GLASS)
+
+
+def build_tide_tunnel(build: Build) -> None:
+	"""A glass tube along the lagoon bed, under the jetty and out the far side."""
+	t = TIDE_TUNNEL
+	floor = t["floor"]
+	x0, x1, z0, z1 = t["x0"], t["x1"], t["z0"], t["z1"]
+	# Walls and roof first, then hollow them: glass where there is water
+	# outside, whatever was there already (shore, pile) where there is not.
+	for x in range(x0, x1 + 1):
+		for z in range(z0 - 1, z1 + 2):
+			for y in range(floor + 1, TIDE_TOP + 1):
+				if build.get(x, y, z) == WATER:
+					build.set(x, y, z, GLASS)
+	build.box(x0, floor, z0, x1, floor, z1, POLISHED)
+	build.clear(x0, floor + 1, z0, x1, floor + 2, z1)
+	# The roof is glass the whole way under the lagoon, including the pool's
+	# floor, which is the same node.
+	for x in range(x0, x1 + 1):
+		for z in range(z0, z1 + 1):
+			if build.get(x, TIDE_TOP, z) not in (GLASS, GRASS, SAND, PAVING, DIRT):
+				build.set(x, TIDE_TOP, z, GLASS)
+	for x in range(x0 + 2, x1, 5):
+		build.set(x, floor + 1, z0, UPLIGHT)
+		build.set(x + 2, floor + 1, z1, UPLIGHT)
+
+	# Stairwells at both ends, three treads each, open to the sky.
+	for x, y in ((TUNNEL_WEST_STAIR, floor + 2), (TUNNEL_WEST_STAIR + 1, floor + 1),
+			(TUNNEL_WEST_STAIR + 2, floor)):
+		build.box(x, y, z0, x, y, z1, PLANK_STAIR if y > floor else POLISHED, WEST)
+		build.clear(x, y + 1, z0, x, SURFACE + 3, z1)
+	for x, y in ((TUNNEL_EAST_STAIR, floor), (TUNNEL_EAST_STAIR + 1, floor + 1),
+			(TUNNEL_EAST_STAIR + 2, floor + 2)):
+		build.box(x, y, z0, x, y, z1, PLANK_STAIR if y > floor else POLISHED, EAST)
+		build.clear(x, y + 1, z0, x, SURFACE + 3, z1)
+	# A kerb of fence round each stairwell, open on the side you walk in from.
+	for x0_, x1_, open_x in ((TUNNEL_WEST_STAIR, TUNNEL_WEST_STAIR + 2, TUNNEL_WEST_STAIR),
+			(TUNNEL_EAST_STAIR, TUNNEL_EAST_STAIR + 2, TUNNEL_EAST_STAIR + 2)):
+		for x in range(x0_, x1_ + 1):
+			build.set(x, FLOOR, z0 - 1, FENCE)
+			build.set(x, FLOOR, z1 + 1, FENCE)
+
+
+def build_lighthouse_tide() -> Build:
+	sx, sy, sz = LIGHTHOUSE_SIZE
+	build = Build(sx, sy, sz)
+	build_tide_ground(build)
+	build_jetty(build)
+	# The tunnel after the jetty, so it cuts through the pile it passes and
+	# finds the pool's glass already in its roof.
+	build_tide_tunnel(build)
+	build_lighthouse_tower(build)
+	# Where the causeway lands, a pair of lamp posts.
+	for x in (25, 29):
+		build.box(x, FLOOR, sz - 1, x, FLOOR + 1, sz - 1, BEAM)
+		build.set(x, FLOOR + 2, sz - 1, LAMP)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -936,6 +1216,8 @@ SPECS = [
 	MapSpec("map_halloween", HALLOWEEN_SIZE, HALLOWEEN_SPAWN, build_halloween),
 	MapSpec("map_snow_mountain", SNOW_SIZE, SNOW_SPAWN, build_snow_mountain),
 	MapSpec("map_fruit_garden", FRUIT_SIZE, FRUIT_SPAWN, build_fruit_garden),
+	MapSpec("map_lighthouse_tide", LIGHTHOUSE_SIZE, LIGHTHOUSE_SPAWN,
+		build_lighthouse_tide),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}

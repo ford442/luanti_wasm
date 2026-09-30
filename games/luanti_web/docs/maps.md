@@ -6,28 +6,33 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Three authored maps ship with the showcase pack, as islands around the hub
+Four authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
 
 ```
-                      [ snow mountain ]
+                        [ hub tour ]            north of the plaza
                              |
         [ Halloween ]---[ hub plaza ]---[ fruit garden ]
-             west                            east
+             west          |    |            east
+                           |  [ snow mountain ]
+                           |       south
+       [ lighthouse ]------'
+         southwest
 ```
 
 Every causeway is walkable. Fly, fast and noclip are on for everyone, but the
 tour never needs them.
 
-## The three maps
+## The maps
 
 | Map | `id` | Schematic | Footprint (`size`) | Origin (min corner) | Spawn | Time of day |
 |-----|------|-----------|--------------------|---------------------|-------|-------------|
 | Halloween lane | `halloween` | `map_halloween.mts` | 36 × 20 × 36 | `(-88, 5, -26)` | `(-55, 9, -9)` | dusk (`day_night_ratio = 0.16`, fogged sky) |
 | Snowy mountain | `snow_mountain` | `map_snow_mountain.mts` | 40 × 28 × 40 |  `(-20, 5, -74)` | `(6, 9, -37)` | bright overcast (`0.85`, pale sky) |
 | Giant fruit garden | `fruit_garden` | `map_fruit_garden.mts` | 40 × 20 × 40 | `(53, 5, -28)` | `(55, 9, -7)` | the world's own midday |
+| Lighthouse tide | `lighthouse_tide` | `map_lighthouse_tide.mts` | 36 × 24 × 36 | `(-66, 5, -80)` | `(-39, 9, -46)` | late blue hour (`0.28`, dark water sky, light fog) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -94,6 +99,36 @@ Oversized produce as architecture.
 
 Every fruit here is dyed wool from the core palette. The map adds no fruit
 nodes at all.
+
+### Lighthouse tide
+
+A lagoon at blue hour, with land round three sides of it: the causeway lands on
+the north shore, a spine runs down the west side to a headland with the
+lighthouse on it, and a rocky ledge runs down the east side.
+
+* **The lighthouse** is a hollow shell, thirteen nodes across, painted in
+  bands of white and red. A spiral stair winds round a solid core from the
+  door to the lantern: a helicoid, one rise every few treads, each turn four
+  nodes above the last, and stair nodes wherever a tread has the next one up
+  beside it, so the climb is half steps. The last two rises come up through a
+  hatch in the gallery rather than through the lantern's floor.
+* **The lantern room** is a ring of glass on the gallery deck with a door on
+  the seaward side and the lamp in the middle. The beam is one entity
+  (`lw_maps:lighthouse_beam`): a long glowing translucent sprite that turns
+  about the lamp, `static_save = false` like the Halloween vane.
+* **The jetty** stands on piles one node proud of the lagoon, with two tide
+  pools set into its deck: water on glass, so you look straight down into the
+  lagoon.
+* **The tunnel** runs along the lagoon bed from a stairwell on the west spine,
+  under the lagoon and under the jetty, to a stairwell on the east ledge — the
+  far side of the jetty. Its walls and roof are glass wherever there is water
+  outside them, and the first tide pool's glass floor is its roof, so from the
+  tunnel you look up into the pool and from the jetty down into the tunnel.
+  The lagoon's surface is level with the shore, so a visitor's head in the
+  tunnel is below the waterline.
+
+No boats, no flowing water, no mobs: the water is the pack's still
+`lw_nodes:water`, and the map adds no nodes.
 
 ## Getting there
 
@@ -238,8 +273,8 @@ A map's cost is its box, not its nodes. `lw_world` loads each schematic into two
 Lua arrays — node and `param2` — with a slot for every cell, air included, and
 keeps them in the WASM heap for the session. Lua sizes an array to a power of
 two, so a map keeps **1 MiB up to 32,768 cells and 2 MiB up to 65,536**:
-halloween (25,920 cells) and the fruit garden (32,000) cost 1 MiB each, the snow
-mountain (44,800) costs 2 MiB. While a map loads, the engine's
+halloween (25,920 cells), the fruit garden (32,000) and the lighthouse
+(31,104) cost 1 MiB each, the snow mountain (44,800) costs 2 MiB. While a map loads, the engine's
 `read_schematic` table exists alongside it — one small table per cell, about
 290 bytes each — and that peaks at 12.6 MiB for the mountain before the
 collector takes it back.

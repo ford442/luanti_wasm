@@ -9,10 +9,12 @@
 -- how a visitor walks there:
 --
 --                      [ hub plaza ]
---                       /    |    \
---         Halloween lane   snow    giant fruit
---              (west)    mountain     garden
---                         (south)     (east)
+--                     /   /  |    \
+--         Halloween lane /  snow    giant fruit
+--              (west)   / mountain     garden
+--                      /  (south)     (east)
+--          lighthouse tide
+--            (southwest)
 --
 -- Each map is one island with its own beach, in one sea, joined to the plaza
 -- by a paved causeway with a themed gate at the hub end. Fly is on for
@@ -116,6 +118,23 @@ function maps.causeways(api)
 			sign = "South: the snowy mountain. A switchback trail to the " ..
 				"overlook, an ice cave, a timbered mineshaft, and a tunnel " ..
 				"that comes out on the far face.",
+		},
+		{
+			-- Out of the plaza's south side west of the snow causeway, west
+			-- along the gap between the showcase island and the mountain's
+			-- beach, then south onto the lighthouse's shore.
+			map = "lighthouse_tide",
+			legs = {
+				{x0 = -8, z0 = -30, x1 = -5, z1 = PLAZA.z0},
+				{x0 = -40, z0 = -30, x1 = -5, z1 = -28},
+				{x0 = -40, z0 = -45, x1 = -38, z1 = -28},
+			},
+			gate = {x = -10, z = PLAZA.z0 + 1},
+			post = "lw_nodes:lamp",
+			sign = "Southwest: the lighthouse tide. Climb the spiral stair to " ..
+				"the lamp, walk the jetty over its glass-bottomed tide pools, " ..
+				"then take the tunnel along the lagoon bed underneath it. " ..
+				"It is blue hour over there.",
 		},
 	}
 end

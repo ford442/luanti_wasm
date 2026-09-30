@@ -136,6 +136,28 @@ def fruit_landmarks() -> dict:
 	}
 
 
+def lighthouse_landmarks() -> dict:
+	cx, cz = maps.TOWER
+	t = maps.TIDE_TUNNEL
+	mid_z = (t["z0"] + t["z1"]) // 2
+	head = maps.JETTY_HEAD
+	pool = maps.TIDE_POOLS[1]
+	return {
+		"shore at the causeway": maps.LIGHTHOUSE_SPAWN,
+		"lighthouse door": (cx, maps.FLOOR, cz + 5),
+		"foot of the stair": (cx, maps.FLOOR, cz + 3),
+		"lantern room": (cx, maps.LANTERN_FLOOR + 1, cz - 2),
+		"gallery": (cx, maps.LANTERN_FLOOR + 1, cz - 6),
+		"jetty head": ((head["x0"] + head["x1"]) // 2, maps.JETTY_DECK + 1, head["z0"] + 1),
+		"tide pool": (pool[0] + 1, maps.JETTY_DECK, pool[2] + 1),
+		"tunnel, west mouth": (maps.TUNNEL_WEST_STAIR + 2, t["floor"] + 1, mid_z),
+		"tunnel, under the jetty": ((maps.JETTY["x0"] + maps.JETTY["x1"]) // 2,
+			t["floor"] + 1, mid_z),
+		"tunnel, east mouth": (maps.TUNNEL_EAST_STAIR, t["floor"] + 1, mid_z),
+		"east ledge": (maps.TUNNEL_EAST_STAIR + 3, maps.FLOOR, mid_z),
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -143,6 +165,7 @@ LANDMARKS = {
 	"map_halloween": lambda schem: halloween_landmarks(),
 	"map_snow_mountain": snow_landmarks,
 	"map_fruit_garden": lambda schem: fruit_landmarks(),
+	"map_lighthouse_tide": lambda schem: lighthouse_landmarks(),
 }
 
 
@@ -203,6 +226,59 @@ def test_watermelon_is_walk_in() -> None:
 	for part in ("dark_green", "green", "red", "black"):
 		assert_true(shell["lw_nodes:wool_" + part] > 0,
 			f"the watermelon has no {part} nodes")
+
+
+def test_lighthouse_tunnel_is_under_water() -> None:
+	"""The tunnel is the lagoon's floor, not a corridor beside it.
+
+	Under open water every wall and roof node is glass with water on its far
+	side, and the pool on the jetty is water on the same glass the tunnel has
+	for a roof — so from inside you look up into the pool, and from the jetty
+	down through it into the tunnel.
+	"""
+	world = World(maps.schematics()["map_lighthouse_tide"])
+	t = maps.TIDE_TUNNEL
+	top = maps.TIDE_TOP
+	submerged = 0
+	for x in range(t["x0"], t["x1"] + 1):
+		if world.at(x, top, t["z0"] - 2) != maps.WATER:
+			continue
+		submerged += 1
+		for y in range(t["floor"] + 1, top + 1):
+			for z in (t["z0"] - 1, t["z1"] + 1):
+				assert_true(world.at(x, y, z) == maps.GLASS,
+					f"tunnel wall ({x},{y},{z}) under the lagoon is {world.at(x, y, z)}")
+		for z in range(t["z0"], t["z1"] + 1):
+			assert_true(world.at(x, top, z) == maps.GLASS,
+				f"tunnel roof ({x},{top},{z}) under the lagoon is {world.at(x, top, z)}")
+			# Head height is below the lagoon's surface: this is under water.
+			assert_true(t["floor"] + 2 < top + 1,
+				"the tunnel's head room is above the waterline")
+	assert_true(submerged >= 10,
+		f"only {submerged} columns of the tunnel are under the lagoon")
+	x0, x1, z0, z1 = maps.TIDE_POOLS[0]
+	for x in range(x0, x1 + 1):
+		for z in range(z0, z1 + 1):
+			assert_true(world.at(x, maps.JETTY_DECK, z) == maps.WATER,
+				f"the tide pool over the tunnel is dry at ({x}, {z})")
+			assert_true(world.at(x, maps.JETTY_DECK - 1, z) == maps.GLASS,
+				f"the tide pool over the tunnel has no glass floor at ({x}, {z})")
+			assert_true(z0 < t["z0"] or z > t["z1"]
+				or world.at(x, t["floor"] + 2, z) == maps.AIR,
+				f"the pool's glass is not the tunnel's roof at ({x}, {z})")
+
+
+def test_lighthouse_stair_climbs_every_turn() -> None:
+	"""The spiral goes all the way up: no turn is a jump, none is a ceiling."""
+	world = World(maps.schematics()["map_lighthouse_tide"])
+	seen = world.reachable(maps.LIGHTHOUSE_SPAWN)
+	cx, cz = maps.TOWER
+	inside = {cell for cell in seen
+		if maps.tower_radius(cell[0], cell[2]) <= maps.TOWER_RADIUS - maps.TOWER_WALL}
+	heights = {cell[1] for cell in inside}
+	missing = [y for y in range(maps.FLOOR, maps.LANTERN_FLOOR + 1) if y not in heights]
+	assert_true(not missing,
+		f"the lighthouse stair has no standable tread at heights {missing}")
 
 
 def test_committed_files_match_the_generator() -> None:

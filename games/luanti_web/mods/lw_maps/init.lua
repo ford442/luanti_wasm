@@ -453,6 +453,29 @@ lw_maps.register({
 	spawn = {x = 55, y = BASE + 4, z = -7},
 })
 
+lw_maps.register({
+	id = "lighthouse_tide",
+	title = "Lighthouse tide",
+	blurb = "Blue hour on a lagoon: a lighthouse you climb to the lamp, a " ..
+		"jetty with glass-bottomed tide pools, and a glass tunnel along the " ..
+		"bed underneath it.",
+	size = {x = 36, y = 24, z = 36},
+	origin = {x = -66, y = BASE, z = -80},
+	spawn = {x = -39, y = BASE + 4, z = -46},
+	-- Late blue hour: dark enough that the beam reads, light enough that the
+	-- lagoon still has a colour. The fog is light, because the horizon is
+	-- what a lighthouse is for.
+	day_night_ratio = 0.28,
+	sky = lw_maps.sky({
+		sky = "#1d3a66", horizon = "#46679a",
+		night_sky = "#0c1a33", night_horizon = "#1e3150", indoors = "#15243d",
+		sun_tint = "#8fa8d8", moon_tint = "#5d7bb0",
+		fog = 110, fog_start = 0.6,
+	}),
+	-- The lamp's beam sweeps from one node above the lamp itself.
+	entities = {{name = "lw_maps:lighthouse_beam", at = {x = 8, y = 21, z = 8}}},
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------
@@ -517,6 +540,32 @@ core.register_entity("lw_maps:weather_vane", {
 	on_step = function(self, dtime)
 		self.age = self.age + dtime
 		self.object:set_yaw(self.age * 0.9)
+	end,
+})
+
+-- A lighthouse beam, the cheapest way there is: one long translucent sprite,
+-- two quads, turning about the lamp. It glows so blue hour does not dim it.
+core.register_entity("lw_maps:lighthouse_beam", {
+	initial_properties = {
+		physical = false,
+		collide_with_objects = false,
+		pointable = false,
+		visual = "upright_sprite",
+		visual_size = {x = 24, y = 1.2},
+		textures = {
+			"lw_glass.png^[multiply:#fff1b0^[opacity:120",
+			"lw_glass.png^[multiply:#fff1b0^[opacity:120",
+		},
+		use_texture_alpha = true,
+		glow = 14,
+		shaded = false,
+		static_save = false,
+		infotext = "Lighthouse beam",
+	},
+	age = 0,
+	on_step = function(self, dtime)
+		self.age = self.age + dtime
+		self.object:set_yaw(self.age * 0.7)
 	end,
 })
 
