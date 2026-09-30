@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: LGPL-2.1-or-later
 -- Copyright (C) 2026 The Luanti Contributors
 
--- The themed map pack: the props the three authored maps need, the registry
+-- The themed map pack: the props the authored maps need, the registry
 -- that says where each map is and how it should feel, and the `/maps` helper.
 --
 -- This mod owns *what a map is*. `lw_world/maps.lua` owns *where it goes* —
@@ -221,29 +221,119 @@ register_juice("juice_red", "Watermelon Juice", "#d0323a")
 register_juice("juice_green", "Lime Juice", "#5aa83c")
 
 --------------------------------------------------------------------------
--- Flickering lanterns
+-- Night bazaar
 --------------------------------------------------------------------------
 
--- An airlike controller that guts the lantern one node below it. A node timer
--- runs only while the block is loaded, unlike an ABM, which is what keeps a
--- map nobody is standing on from costing anything (see the same argument in
--- lw_world's kinetic courtyard).
+-- Stall lanterns: the palette's lamp tile, warmed, in a lit and an unlit
+-- state for the chase controller to swap between. Everything else on the
+-- bazaar — the crystal, the awnings, the vault — is glass and dyed wool.
+register("lantern", {
+	description = "Bazaar Lantern",
+	tiles = {"lw_lamp.png^[multiply:#ffc46a"},
+	paramtype = "light",
+	light_source = 12,
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+register("lantern_off", {
+	description = "Bazaar Lantern (unlit)",
+	tiles = {"lw_lamp.png^[multiply:#5c4634"},
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+--------------------------------------------------------------------------
+-- Volcano
+--------------------------------------------------------------------------
+
+register("basalt", {
+	description = "Basalt",
+	tiles = {"lw_stone.png^[multiply:#4a4346"},
+	groups = {cracky = 2},
+	is_ground_content = true,
+})
+
+register("packed_basalt", {
+	description = "Packed Basalt",
+	tiles = {"lw_stone_brick.png^[multiply:#5a5054"},
+	groups = {cracky = 2},
+})
+
+-- "Lava" is dyed wool that glows, in a bright and a crusted state for the
+-- flicker controller: the look of a lava lake with none of a liquid's cost,
+-- and nothing that hurts. It is solid, so the crater floor is a floor.
+register("lava", {
+	description = "Glowing Lava Rock",
+	tiles = {"lw_wool.png^[multiply:#ff6a1a"},
+	paramtype = "light",
+	light_source = 11,
+	groups = {cracky = 3},
+})
+
+register("lava_crust", {
+	description = "Crusted Lava Rock",
+	tiles = {"lw_wool.png^[multiply:#6e2410"},
+	groups = {cracky = 3},
+})
+
+--------------------------------------------------------------------------
+-- Lamp controllers
+--------------------------------------------------------------------------
+
+-- Airlike controllers that switch the node one below them between a lit and
+-- an unlit twin. A node timer runs only while the block is loaded, unlike an
+-- ABM, which is what keeps a map nobody is standing on from costing anything
+-- (see the same argument in lw_world's kinetic courtyard).
 --
--- The pattern is a fixed string rather than a random roll so a reload does not
+-- The pairs are data: a map that wants a new kind of lamp to gutter or chase
+-- registers its two nodes here and reuses both controllers unchanged.
+lw_maps.lamp_pairs = {}
+local lit_of, unlit_of = {}, {}
+
+function lw_maps.register_lamp_pair(lit, unlit)
+	lw_maps.lamp_pairs[#lw_maps.lamp_pairs + 1] = {lit = lit, unlit = unlit}
+	lit_of[lit], lit_of[unlit] = lit, lit
+	unlit_of[lit], unlit_of[unlit] = unlit, unlit
+end
+
+lw_maps.register_lamp_pair("lw_maps:jack_o_lantern", "lw_maps:pumpkin")
+lw_maps.register_lamp_pair("lw_maps:lantern", "lw_maps:lantern_off")
+lw_maps.register_lamp_pair("lw_maps:lava", "lw_maps:lava_crust")
+
+-- Light or dim whatever lamp is one node below `pos`. Only ever swaps a lamp
+-- for its own twin: if a visitor dug the lamp out, or built something else in
+-- its place, the controller leaves it alone instead of growing a lamp there.
+local function set_lamp(pos, lit)
+	local at = {x = pos.x, y = pos.y - 1, z = pos.z}
+	local node = core.get_node(at)
+	local target = lit and lit_of[node.name] or unlit_of[node.name]
+	if target and target ~= node.name then
+		core.swap_node(at, {name = target, param2 = node.param2})
+	end
+end
+lw_maps.set_lamp = set_lamp
+
+local function controller(name, description, def)
+	core.register_node("lw_maps:" .. name, {
+		description = description,
+		drawtype = "airlike",
+		paramtype = "light",
+		sunlight_propagates = true,
+		walkable = false,
+		pointable = false,
+		diggable = false,
+		buildable_to = false,
+		groups = {not_in_creative_inventory = 1},
+		on_construct = def.on_construct,
+		on_timer = def.on_timer,
+	})
+end
+
+-- Flicker: a fixed string rather than a random roll, so a reload does not
 -- resynchronise every lantern on the lane into one big blink.
 local FLICKER_PATTERN = "1110110111101110110011111011"
 local FLICKER_INTERVAL = 0.45
 
-core.register_node("lw_maps:flicker", {
-	description = "Lantern Flicker Controller",
-	drawtype = "airlike",
-	paramtype = "light",
-	sunlight_propagates = true,
-	walkable = false,
-	pointable = false,
-	diggable = false,
-	buildable_to = false,
-	groups = {not_in_creative_inventory = 1},
+controller("flicker", "Lantern Flicker Controller", {
 	on_construct = function(pos)
 		-- Offset the phase by position so neighbouring lanterns gutter out of
 		-- step with each other.
@@ -254,17 +344,36 @@ core.register_node("lw_maps:flicker", {
 		local meta = core.get_meta(pos)
 		local step = (meta:get_int("step") + 1) % #FLICKER_PATTERN
 		meta:set_int("step", step)
-		local lit = FLICKER_PATTERN:sub(step + 1, step + 1) == "1"
-		local target = lit and "lw_maps:jack_o_lantern" or "lw_maps:pumpkin"
-		local at = {x = pos.x, y = pos.y - 1, z = pos.z}
-		local node = core.get_node(at)
-		-- Only ever swap between the two lantern states: if a visitor dug the
-		-- lantern out, leave the hole alone instead of growing a pumpkin in it.
-		if node.name ~= target
-				and (node.name == "lw_maps:jack_o_lantern"
-					or node.name == "lw_maps:pumpkin") then
-			core.swap_node(at, {name = target, param2 = node.param2})
-		end
+		set_lamp(pos, FLICKER_PATTERN:sub(step + 1, step + 1) == "1")
+		return true
+	end,
+})
+
+-- Chase: lamps that light one after another round a loop, like the
+-- courtyard's chase-light cornice, but with no wiring between them. Each
+-- controller carries its place in the loop in param2 (the schematic keeps
+-- it), and every one of them reads the same clock, so lamps in different map
+-- blocks — whose timers were started at different moments — still agree on
+-- whose turn it is.
+lw_maps.CHASE_PERIOD = 8
+lw_maps.CHASE_WIDTH = 2
+local CHASE_INTERVAL = 0.5
+
+function lw_maps.chase_lit(index, tick)
+	return (tick - index) % lw_maps.CHASE_PERIOD < lw_maps.CHASE_WIDTH
+end
+
+local function chase_tick()
+	return math.floor(core.get_us_time() / (CHASE_INTERVAL * 1000000))
+end
+
+controller("chase", "Lantern Chase Controller", {
+	on_construct = function(pos)
+		core.get_node_timer(pos):start(CHASE_INTERVAL)
+	end,
+	on_timer = function(pos)
+		local index = core.get_node(pos).param2
+		set_lamp(pos, lw_maps.chase_lit(index, chase_tick()))
 		return true
 	end,
 })
@@ -282,17 +391,37 @@ lw_maps.maps = {}
 lw_maps.by_id = {}
 
 -- A map is: a committed schematic, an origin in the atlas, a spawn to send a
--- visitor to, and the atmosphere it should be seen in.
+-- visitor to, and the atmosphere it should be seen in. Only `id`, `size`,
+-- `origin` and `spawn` are required; the schematic defaults to map_<id>.mts,
+-- and a map with no `sky` or `day_night_ratio` is seen in the hub's midday.
+--
+-- `entities` are props that move and so cannot live in a schematic: each is
+-- `{name = <entity>, at = <map-local position>}`, respawned near whoever
+-- joins, and must be registered with `static_save = false` so they do not
+-- pile up in the map file.
 function lw_maps.register(def)
-	assert(def.id and def.schem and def.origin and def.size and def.spawn,
-		"lw_maps.register needs id, schem, origin, size and spawn")
+	assert(def.id and def.origin and def.size and def.spawn,
+		"lw_maps.register needs id, origin, size and spawn")
 	assert(not lw_maps.by_id[def.id], "lw_maps: duplicate map " .. def.id)
+	def.schem = def.schem or ("map_" .. def.id)
+	def.title = def.title or def.id
+	def.blurb = def.blurb or ""
 	def.min = vector.new(def.origin)
 	def.max = vector.new(def.origin.x + def.size.x - 1,
 		def.origin.y + def.size.y - 1, def.origin.z + def.size.z - 1)
+	def.entities = def.entities or {}
+	for _, entity in ipairs(def.entities) do
+		entity.pos = lw_maps.to_world(def, entity.at)
+	end
 	lw_maps.maps[#lw_maps.maps + 1] = def
 	lw_maps.by_id[def.id] = def
 	return def
+end
+
+-- A map-local position (what util/content/generate_luanti_web_maps.py
+-- thinks in) as a world position.
+function lw_maps.to_world(map, at)
+	return vector.new(map.origin.x + at.x, map.origin.y + at.y, map.origin.z + at.z)
 end
 
 function lw_maps.at(pos)
@@ -307,6 +436,29 @@ function lw_maps.at(pos)
 	return nil
 end
 
+-- A set_sky table from the handful of colours a map actually chooses. Dawn
+-- follows day and the night colours default to the day ones, because the
+-- ratio override pins each map at one time of day anyway.
+function lw_maps.sky(def)
+	local sky = {
+		type = "regular",
+		clouds = def.clouds ~= false,
+		sky_color = {
+			day_sky = def.sky, day_horizon = def.horizon,
+			dawn_sky = def.sky, dawn_horizon = def.horizon,
+			night_sky = def.night_sky or def.sky,
+			night_horizon = def.night_horizon or def.horizon,
+			indoors = def.indoors or def.night_sky or def.sky,
+			fog_sun_tint = def.sun_tint, fog_moon_tint = def.moon_tint,
+			fog_tint_type = "custom",
+		},
+	}
+	if def.fog then
+		sky.fog = {fog_distance = def.fog, fog_start = def.fog_start}
+	end
+	return sky
+end
+
 local BASE = lw_maps.base_y
 
 lw_maps.register({
@@ -314,28 +466,21 @@ lw_maps.register({
 	title = "Halloween lane",
 	blurb = "Dusk lane of carved lanterns, a graveyard, a haunted house with " ..
 		"a cellar and an attic, and a porch stage at the end.",
-	schem = "map_halloween",
-	size = {x = 36, y = 16, z = 36},
+	size = {x = 36, y = 20, z = 36},
 	origin = {x = -88, y = BASE, z = -26},
 	spawn = {x = -55, y = BASE + 4, z = -9},
 	-- Dusk, per player, so the hub's frozen midday is untouched. An honest
 	-- view distance is part of the look: fog is the point, not a limitation.
 	day_night_ratio = 0.16,
-	sky = {
-		type = "regular",
-		clouds = true,
-		sky_color = {
-			day_sky = "#241a2e", day_horizon = "#4a2a22",
-			dawn_sky = "#241a2e", dawn_horizon = "#4a2a22",
-			night_sky = "#140f1c", night_horizon = "#2a1a18",
-			indoors = "#1a1420",
-			fog_sun_tint = "#c86a28", fog_moon_tint = "#5a4a78",
-			fog_tint_type = "custom",
-		},
-		fog = {fog_distance = 72, fog_start = 0.35},
-	},
-	-- The kinetic beat: a vane that spins on the house ridge.
-	vane = {x = -63, y = BASE + 19, z = 1},
+	sky = lw_maps.sky({
+		sky = "#241a2e", horizon = "#4a2a22",
+		night_sky = "#140f1c", night_horizon = "#2a1a18", indoors = "#1a1420",
+		sun_tint = "#c86a28", moon_tint = "#5a4a78",
+		fog = 72, fog_start = 0.35,
+	}),
+	-- The kinetic beat: a vane that spins on the house ridge, one node above
+	-- the mast the generator puts there.
+	entities = {{name = "lw_maps:weather_vane", at = {x = 25, y = 19, z = 27}}},
 })
 
 lw_maps.register({
@@ -343,24 +488,16 @@ lw_maps.register({
 	title = "Snowy mountain",
 	blurb = "A peak you can climb and also go through: switchback trail, ice " ..
 		"cave, timbered mineshaft, and a tunnel out the far face.",
-	schem = "map_snow_mountain",
 	size = {x = 40, y = 28, z = 40},
 	origin = {x = -20, y = BASE, z = -74},
 	spawn = {x = 6, y = BASE + 4, z = -37},
 	day_night_ratio = 0.85,
-	sky = {
-		type = "regular",
-		clouds = true,
-		sky_color = {
-			day_sky = "#9fb8cf", day_horizon = "#cfdce8",
-			dawn_sky = "#9fb8cf", dawn_horizon = "#cfdce8",
-			night_sky = "#2a3a4a", night_horizon = "#3a4a5a",
-			indoors = "#6a7a8a",
-			fog_sun_tint = "#dfe8f2", fog_moon_tint = "#b0c0d0",
-			fog_tint_type = "custom",
-		},
-		fog = {fog_distance = 110, fog_start = 0.5},
-	},
+	sky = lw_maps.sky({
+		sky = "#9fb8cf", horizon = "#cfdce8",
+		night_sky = "#2a3a4a", night_horizon = "#3a4a5a", indoors = "#6a7a8a",
+		sun_tint = "#dfe8f2", moon_tint = "#b0c0d0",
+		fog = 110, fog_start = 0.5,
+	}),
 })
 
 lw_maps.register({
@@ -368,10 +505,70 @@ lw_maps.register({
 	title = "Giant fruit garden",
 	blurb = "Oversized produce as architecture: a walk-in watermelon, a " ..
 		"sliced-melon amphitheatre, and a juice channel between them.",
-	schem = "map_fruit_garden",
 	size = {x = 40, y = 20, z = 40},
 	origin = {x = 53, y = BASE, z = -28},
 	spawn = {x = 55, y = BASE + 4, z = -7},
+})
+
+lw_maps.register({
+	id = "lighthouse_tide",
+	title = "Lighthouse tide",
+	blurb = "Blue hour on a lagoon: a lighthouse you climb to the lamp, a " ..
+		"jetty with glass-bottomed tide pools, and a glass tunnel along the " ..
+		"bed underneath it.",
+	size = {x = 36, y = 24, z = 36},
+	origin = {x = -66, y = BASE, z = -80},
+	spawn = {x = -39, y = BASE + 4, z = -46},
+	-- Late blue hour: dark enough that the beam reads, light enough that the
+	-- lagoon still has a colour. The fog is light, because the horizon is
+	-- what a lighthouse is for.
+	day_night_ratio = 0.28,
+	sky = lw_maps.sky({
+		sky = "#1d3a66", horizon = "#46679a",
+		night_sky = "#0c1a33", night_horizon = "#1e3150", indoors = "#15243d",
+		sun_tint = "#8fa8d8", moon_tint = "#5d7bb0",
+		fog = 110, fog_start = 0.6,
+	}),
+	-- The lamp's beam sweeps from one node above the lamp itself.
+	entities = {{name = "lw_maps:lighthouse_beam", at = {x = 8, y = 21, z = 8}}},
+})
+
+lw_maps.register({
+	id = "crystal_bazaar",
+	title = "Crystal night bazaar",
+	blurb = "A vaulted glass arcade of lantern-lit stalls at night, a glass " ..
+		"dome you can walk up onto, and a torchlit cistern underneath it.",
+	size = {x = 36, y = 16, z = 36},
+	origin = {x = 54, y = BASE, z = 24},
+	spawn = {x = 55, y = BASE + 4, z = 42},
+	-- Night, with a saturated sky and no fog of its own, so glass reads as
+	-- glass against it and the lanterns are the brightest thing there.
+	day_night_ratio = 0.08,
+	sky = lw_maps.sky({
+		sky = "#2a1466", horizon = "#6a1f8a",
+		night_sky = "#1a0b45", night_horizon = "#4a1466", indoors = "#1f1040",
+		sun_tint = "#c070ff", moon_tint = "#7050d0",
+	}),
+})
+
+lw_maps.register({
+	id = "smoke_caldera",
+	title = "Smoke caldera",
+	blurb = "A volcano you climb and go through: a ring trail to the rim, a " ..
+		"glass lip over a glowing crater, a switchback down to it, and a " ..
+		"basalt tube out the far face.",
+	size = {x = 38, y = 22, z = 38},
+	origin = {x = -94, y = BASE, z = 22},
+	spawn = {x = -57, y = BASE + 4, z = 41},
+	-- Overcast red hour: the fog is warm and close, so the cone is a
+	-- silhouette from the causeway and the crater glows from inside it.
+	day_night_ratio = 0.35,
+	sky = lw_maps.sky({
+		sky = "#5a2a22", horizon = "#b0482a",
+		night_sky = "#2a1210", night_horizon = "#6a2418", indoors = "#3a1a14",
+		sun_tint = "#ff7a3a", moon_tint = "#a04a3a",
+		fog = 64, fog_start = 0.3,
+	}),
 })
 
 --------------------------------------------------------------------------
@@ -390,10 +587,12 @@ local function apply(player, map)
 		return
 	end
 	current[name] = map and map.id or nil
+	-- set_sky() with no argument is the only call that resets the sky: an
+	-- empty table leaves every field as it was, which would carry one map's
+	-- fog back to the hub, or onto the next map a visitor travels to.
+	player:set_sky()
 	if map and map.sky then
 		player:set_sky(map.sky)
-	else
-		player:set_sky({})
 	end
 	player:override_day_night_ratio(map and map.day_night_ratio or nil)
 end
@@ -417,7 +616,7 @@ core.register_on_leaveplayer(function(player)
 end)
 
 --------------------------------------------------------------------------
--- The weather vane
+-- Moving props
 --------------------------------------------------------------------------
 
 core.register_entity("lw_maps:weather_vane", {
@@ -439,21 +638,47 @@ core.register_entity("lw_maps:weather_vane", {
 	end,
 })
 
-local function ensure_vane(pos)
+-- A lighthouse beam, the cheapest way there is: one long translucent sprite,
+-- two quads, turning about the lamp. It glows so blue hour does not dim it.
+core.register_entity("lw_maps:lighthouse_beam", {
+	initial_properties = {
+		physical = false,
+		collide_with_objects = false,
+		pointable = false,
+		visual = "upright_sprite",
+		visual_size = {x = 24, y = 1.2},
+		textures = {
+			"lw_glass.png^[multiply:#fff1b0^[opacity:120",
+			"lw_glass.png^[multiply:#fff1b0^[opacity:120",
+		},
+		use_texture_alpha = true,
+		glow = 14,
+		shaded = false,
+		static_save = false,
+		infotext = "Lighthouse beam",
+	},
+	age = 0,
+	on_step = function(self, dtime)
+		self.age = self.age + dtime
+		self.object:set_yaw(self.age * 0.7)
+	end,
+})
+
+local function ensure_entity(name, pos)
 	for _, object in ipairs(core.get_objects_inside_radius(pos, 6)) do
 		local entity = object:get_luaentity()
-		if entity and entity.name == "lw_maps:weather_vane" then
+		if entity and entity.name == name then
 			return
 		end
 	end
-	core.add_entity(pos, "lw_maps:weather_vane")
+	core.add_entity(pos, name)
 end
 
 core.register_on_joinplayer(function()
 	core.after(3, function()
 		for _, map in ipairs(lw_maps.maps) do
-			if map.vane then
-				ensure_vane(map.vane)
+			for _, entity in ipairs(map.entities) do
+				ensure_entity(entity.name, entity.pos)
 			end
 		end
 	end)
@@ -463,38 +688,59 @@ end)
 -- /maps
 --------------------------------------------------------------------------
 
-function lw_maps.teleport(player, id)
+-- How much of a map to have on hand before a visitor lands on it: the spawn's
+-- own neighbourhood, not the island. A couple of map blocks either way is
+-- what the first frame needs; the rest streams in as they walk.
+local EMERGE_RADIUS = 16
+
+-- Sends `player` to map `id` once the ground under its spawn exists. The
+-- islands are far enough from the hub that a visitor moved straight away can
+-- arrive before the chunk does and fall through the place it will be, so the
+-- move waits for the emerge. `done(ok)` is called when the move happens, or
+-- with false if the player left in the meantime.
+function lw_maps.teleport(player, id, done)
 	local map = lw_maps.by_id[id]
 	if not map then
 		return false
 	end
+	local name = player:get_player_name()
 	local spawn = vector.new(map.spawn)
-	-- The islands are far enough from the hub that a visitor can arrive before
-	-- the chunk does; emerging first is the difference between landing on the
-	-- lane and falling through it.
-	core.emerge_area(vector.offset(spawn, -16, -8, -16),
-		vector.offset(spawn, 16, 16, 16))
-	player:set_pos(spawn)
+	core.emerge_area(vector.offset(spawn, -EMERGE_RADIUS, -8, -EMERGE_RADIUS),
+		vector.offset(spawn, EMERGE_RADIUS, EMERGE_RADIUS, EMERGE_RADIUS),
+		function(_, _, remaining)
+			if remaining > 0 then
+				return
+			end
+			local still_here = core.get_player_by_name(name)
+			if still_here then
+				still_here:set_pos(spawn)
+			end
+			if done then
+				done(still_here ~= nil)
+			end
+		end)
 	return true
 end
 
 local function listing()
 	local lines = {"Themed maps (walk the causeways from the plaza, or /maps <name>):"}
 	for _, map in ipairs(lw_maps.maps) do
-		lines[#lines + 1] = ("  %-14s %s"):format(map.id, map.title)
-		lines[#lines + 1] = ("                 %s"):format(map.blurb)
+		lines[#lines + 1] = ("  %-15s %s"):format(map.id, map.title)
+		lines[#lines + 1] = ("                  %s"):format(map.blurb)
 	end
 	return table.concat(lines, "\n")
 end
 
+local function ids()
+	local list = {}
+	for _, map in ipairs(lw_maps.maps) do
+		list[#list + 1] = map.id
+	end
+	return list
+end
+
 core.register_chatcommand("maps", {
-	params = "[" .. table.concat((function()
-		local ids = {}
-		for _, map in ipairs(lw_maps.maps) do
-			ids[#ids + 1] = map.id
-		end
-		return ids
-	end)(), "|") .. "]",
+	params = "[" .. table.concat(ids(), "|") .. "]",
 	description = "List the themed maps, or travel to one",
 	func = function(name, param)
 		param = param:trim()
@@ -505,10 +751,15 @@ core.register_chatcommand("maps", {
 		if not player then
 			return false, "You have to be in the world to travel."
 		end
-		if not lw_maps.teleport(player, param) then
+		local map = lw_maps.by_id[param]
+		if not map then
 			return false, "No map called " .. param .. ".\n" .. listing()
 		end
-		local map = lw_maps.by_id[param]
-		return true, map.title .. " — " .. map.blurb
+		lw_maps.teleport(player, param, function(arrived)
+			if arrived then
+				core.chat_send_player(name, map.title .. " — " .. map.blurb)
+			end
+		end)
+		return true, "Travelling to " .. map.title .. "…"
 	end,
 })

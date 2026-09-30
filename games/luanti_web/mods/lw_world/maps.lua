@@ -8,30 +8,35 @@
 -- atmosphere it wants. This file owns where it sits relative to the plaza and
 -- how a visitor walks there:
 --
---                      [ hub plaza ]
---                       /    |    \
---         Halloween lane   snow    giant fruit
---              (west)    mountain     garden
---                         (south)     (east)
+--          smoke caldera                   crystal bazaar
+--           (northwest)                     (northeast)
+--                   \                         /
+--                    \     [ hub plaza ]     /
+--                     \   /   /  |    \     /
+--         Halloween lane /  snow    giant fruit
+--              (west)   / mountain     garden
+--                      /  (south)     (east)
+--          lighthouse tide
+--            (southwest)
 --
--- Each map is one island with its own beach and moat, joined to the plaza by
--- a paved causeway with a themed gate at the hub end. Fly is on for everyone,
--- but every causeway is walkable, which is the point of the acceptance test:
--- a visitor with no privileges can still get to all three.
+-- Each map is one island with its own beach, in one sea, joined to the plaza
+-- by a paved causeway with a themed gate at the hub end. Fly is on for
+-- everyone, but every causeway is walkable, which is the point of the
+-- acceptance test: a visitor with no privileges can still get to all of them.
 --
--- Each island is a single schematic op. That is deliberate: the three maps
--- together are about 98k authored nodes, and expressing them as box ops would
--- put tens of thousands of entries in the build list that every chunk in the
--- atlas then has to be tested against.
+-- Each island is a single schematic op. That is deliberate: the maps together
+-- are tens of thousands of authored nodes, and expressing them as box ops
+-- would put that many entries in the build list that every chunk in the atlas
+-- then has to be tested against.
 
 local maps = {}
 
--- Beach around each map's footprint, then water around that. The moat is wide
--- enough that each island's water meets the showcase island's own moat
--- (x -44..44, z -30..74), so the atlas reads as one sea rather than as three
--- ponds with voids between them.
+-- Beach around each map's footprint, then open water around that.
 local RIM = 2
 local MOAT = 7
+
+maps.RIM = RIM
+maps.MOAT = MOAT
 
 local function expand(box, amount)
 	return {
@@ -40,36 +45,55 @@ local function expand(box, amount)
 	}
 end
 
--- `api` is lw_world's build vocabulary: see init.lua. Returns the bounding box
--- the atlas adds, so init.lua can widen the box it generates into.
-function maps.build(api)
-	local fill, put, schem, label = api.fill, api.put, api.schem, api.label
-	local GROUND, FLOOR, WATER = api.GROUND, api.FLOOR, api.WATER
-	local ISLAND, PLAZA = api.ISLAND, api.PLAZA
+local function footprint(map)
+	return {x0 = map.min.x, z0 = map.min.z, x1 = map.max.x, z1 = map.max.z}
+end
+maps.footprint = footprint
 
-	local bounds = nil
-	local function cover(x0, z0, x1, z1, y1)
-		if not bounds then
-			bounds = {x0 = x0, z0 = z0, x1 = x1, z1 = z1, y1 = y1}
-			return
-		end
-		bounds.x0 = math.min(bounds.x0, x0)
-		bounds.z0 = math.min(bounds.z0, z0)
-		bounds.x1 = math.max(bounds.x1, x1)
-		bounds.z1 = math.max(bounds.z1, z1)
-		bounds.y1 = math.max(bounds.y1, y1)
+-- `box` minus `hole`, as up to four boxes. Used to lay water everywhere the
+-- showcase island is not: a fill wide enough to be convenient would otherwise
+-- punch a channel through the island the ops before it built.
+local function subtract(box, hole)
+	if hole.x1 < box.x0 or hole.x0 > box.x1 or hole.z1 < box.z0 or hole.z0 > box.z1 then
+		return {box}
 	end
+	local out = {}
+	local function add(x0, z0, x1, z1)
+		if x0 <= x1 and z0 <= z1 then
+			out[#out + 1] = {x0 = x0, z0 = z0, x1 = x1, z1 = z1}
+		end
+	end
+	add(box.x0, box.z0, hole.x0 - 1, box.z1)
+	add(hole.x1 + 1, box.z0, box.x1, box.z1)
+	local x0, x1 = math.max(box.x0, hole.x0), math.min(box.x1, hole.x1)
+	add(x0, box.z0, x1, hole.z0 - 1)
+	add(x0, hole.z1 + 1, x1, box.z1)
+	return out
+end
+maps.subtract = subtract
 
-	-- A causeway is described by the gap it has to cross; the water under it
-	-- fills only that gap, because a fill wide enough to be convenient would
-	-- punch a channel through the showcase island the ops before it built.
-	local CAUSEWAYS = {
+-- The causeways, one per map, each a list of legs from the plaza outward.
+--
+-- A leg is a paved strip one node above the water, three or four nodes wide,
+-- axis-aligned so it is one box op. Consecutive legs overlap by their width,
+-- which is what makes the corner. The first leg starts on the plaza's edge
+-- and crosses the showcase island's open lawn; the last one ends on the map's
+-- own edge, level with its spawn. The north side of the plaza is the hub tour
+-- (library, courtyard, gallery, theater), so the three diagonal maps leave by
+-- the plaza's sides and turn in the open water instead.
+--
+-- `gate` is where the themed posts and the poster stand, beside the first leg
+-- inside the plaza. util/content/test_luanti_web_maps.lua walks every leg and
+-- checks it reaches the spawn without crossing another island, another
+-- causeway or a hub building.
+function maps.causeways(api)
+	local PLAZA = api.PLAZA
+	return {
 		{
 			map = "halloween",
-			deck = {x0 = -52, z0 = -9, x1 = PLAZA.x0, z1 = -7},
-			-- The gap stops at the showcase island's sand shelf, three nodes
-			-- outside ISLAND: a channel dug any closer would undercut it.
-			gap = {x0 = -52, z0 = -9, x1 = ISLAND.x0 - 4, z1 = -7},
+			legs = {
+				{x0 = -52, z0 = -9, x1 = PLAZA.x0, z1 = -7},
+			},
 			gate = {x = PLAZA.x0 + 1, z = -11},
 			post = "lw_maps:pumpkin",
 			sign = "West: the Halloween lane. Carved lanterns, a graveyard, a " ..
@@ -78,8 +102,9 @@ function maps.build(api)
 		},
 		{
 			map = "fruit_garden",
-			deck = {x0 = PLAZA.x1, z0 = -9, x1 = 52, z1 = -7},
-			gap = {x0 = ISLAND.x1 + 4, z0 = -9, x1 = 52, z1 = -7},
+			legs = {
+				{x0 = PLAZA.x1, z0 = -9, x1 = 52, z1 = -7},
+			},
 			gate = {x = PLAZA.x1 - 1, z = -11},
 			post = "lw_maps:leaves",
 			sign = "East: the giant fruit garden. A watermelon you walk into, " ..
@@ -88,39 +113,118 @@ function maps.build(api)
 		},
 		{
 			map = "snow_mountain",
-			deck = {x0 = 5, z0 = -34, x1 = 8, z1 = PLAZA.z0},
-			gap = {x0 = 5, z0 = -34, x1 = 8, z1 = ISLAND.z0 - 4},
+			legs = {
+				{x0 = 5, z0 = -34, x1 = 8, z1 = PLAZA.z0},
+			},
 			gate = {x = 10, z = PLAZA.z0 + 1},
 			post = "lw_maps:packed_snow",
 			sign = "South: the snowy mountain. A switchback trail to the " ..
 				"overlook, an ice cave, a timbered mineshaft, and a tunnel " ..
 				"that comes out on the far face.",
 		},
+		{
+			-- Out of the plaza's south side west of the snow causeway, west
+			-- along the gap between the showcase island and the mountain's
+			-- beach, then south onto the lighthouse's shore.
+			map = "lighthouse_tide",
+			legs = {
+				{x0 = -8, z0 = -30, x1 = -5, z1 = PLAZA.z0},
+				{x0 = -40, z0 = -30, x1 = -5, z1 = -28},
+				{x0 = -40, z0 = -45, x1 = -38, z1 = -28},
+			},
+			gate = {x = -10, z = PLAZA.z0 + 1},
+			post = "lw_nodes:lamp",
+			sign = "Southwest: the lighthouse tide. Climb the spiral stair to " ..
+				"the lamp, walk the jetty over its glass-bottomed tide pools, " ..
+				"then take the tunnel along the lagoon bed underneath it. " ..
+				"It is blue hour over there.",
+		},
+		{
+			-- Out of the plaza's east side north of the garden causeway, north
+			-- up the channel between the showcase island and the garden, then
+			-- east into the bazaar's arcade.
+			map = "crystal_bazaar",
+			legs = {
+				{x0 = PLAZA.x1, z0 = -3, x1 = 47, z1 = -1},
+				{x0 = 45, z0 = -3, x1 = 47, z1 = 43},
+				{x0 = 45, z0 = 41, x1 = 54, z1 = 43},
+			},
+			gate = {x = PLAZA.x1 - 1, z = 1},
+			post = "lw_maps:lantern",
+			sign = "Northeast: the crystal night bazaar. A glass-vaulted " ..
+				"arcade of stalls whose lanterns chase each other round it, a " ..
+				"dome you can walk up onto, and a cistern under it lit only by " ..
+				"torches. It is night over there.",
+		},
+		{
+			-- Out of the plaza's west side north of the Halloween causeway,
+			-- north up the channel between the showcase island and the lane,
+			-- then west onto the caldera's trailhead.
+			map = "smoke_caldera",
+			legs = {
+				{x0 = -47, z0 = -3, x1 = PLAZA.x0, z1 = -1},
+				{x0 = -47, z0 = -3, x1 = -45, z1 = 42},
+				{x0 = -57, z0 = 40, x1 = -45, z1 = 42},
+			},
+			gate = {x = PLAZA.x0 + 1, z = 1},
+			post = "lw_maps:lava",
+			sign = "Northwest: the smoke caldera. A ring trail up the cone, a " ..
+				"glass lip over the glowing crater, a switchback down into it, " ..
+				"and a basalt tube out the far side. It is red hour over there.",
+		},
 	}
+end
 
-	-- 1. Water first, everywhere, so the land below overwrites it.
-	for _, map in ipairs(lw_maps.maps) do
-		local box = expand({x0 = map.min.x, z0 = map.min.z,
-			x1 = map.max.x, z1 = map.max.z}, RIM + MOAT)
-		fill(box.x0, 0, box.z0, box.x1, WATER, box.z1, "lw_nodes:water")
-		cover(box.x0, box.z0, box.x1, box.z1, map.max.y)
-	end
-	for _, way in ipairs(CAUSEWAYS) do
-		-- Widen the channel sideways only. Widening it along its own axis
-		-- would push the water past the ends the gap was measured to.
-		local gap = way.gap
-		if gap.x1 - gap.x0 > gap.z1 - gap.z0 then
-			fill(gap.x0, 0, gap.z0 - 2, gap.x1, WATER, gap.z1 + 2, "lw_nodes:water")
-		else
-			fill(gap.x0 - 2, 0, gap.z0, gap.x1 + 2, WATER, gap.z1, "lw_nodes:water")
+-- Is the leg's long axis x? Decides which way its rails and gate run.
+local function along_x(box)
+	return box.x1 - box.x0 > box.z1 - box.z0
+end
+maps.along_x = along_x
+
+-- `api` is lw_world's build vocabulary: see init.lua. Returns the bounding box
+-- the atlas adds, so init.lua can widen the box it generates into.
+function maps.build(api)
+	local fill, put, schem, label = api.fill, api.put, api.schem, api.label
+	local GROUND, FLOOR, WATER = api.GROUND, api.FLOOR, api.WATER
+	local HUB = api.HUB
+
+	local causeways = maps.causeways(api)
+
+	-- The atlas is one sea: everything from the showcase island's own moat out
+	-- to the far side of the farthest island's moat. Measured first, because
+	-- the islands are then built on top of it.
+	local sea = nil
+	local function cover(box)
+		if not sea then
+			sea = {x0 = box.x0, z0 = box.z0, x1 = box.x1, z1 = box.z1}
+			return
 		end
-		cover(gap.x0 - 2, gap.z0 - 2, gap.x1 + 2, gap.z1 + 2, FLOOR + 4)
+		sea.x0 = math.min(sea.x0, box.x0)
+		sea.z0 = math.min(sea.z0, box.z0)
+		sea.x1 = math.max(sea.x1, box.x1)
+		sea.z1 = math.max(sea.z1, box.z1)
+	end
+	local top = FLOOR + 4
+	for _, map in ipairs(lw_maps.maps) do
+		cover(expand(footprint(map), RIM + MOAT))
+		top = math.max(top, map.max.y)
+	end
+	for _, way in ipairs(causeways) do
+		for _, leg in ipairs(way.legs) do
+			cover(expand(leg, 2))
+		end
+	end
+
+	-- 1. Water first, everywhere but the showcase island's own box (which
+	-- build_island() has already flooded and built on), so the land below
+	-- overwrites it and the sea has no holes between the islands.
+	for _, box in ipairs(subtract(sea, HUB)) do
+		fill(box.x0, 0, box.z0, box.x1, WATER, box.z1, "lw_nodes:water")
 	end
 
 	-- 2. Each island's shelf and beach, and solid rock under the schematic.
 	for _, map in ipairs(lw_maps.maps) do
-		local box = expand({x0 = map.min.x, z0 = map.min.z,
-			x1 = map.max.x, z1 = map.max.z}, RIM)
+		local box = expand(footprint(map), RIM)
 		fill(box.x0, 0, box.z0, box.x1, GROUND - 1, box.z1, "lw_nodes:stone")
 		fill(box.x0, GROUND, box.z0, box.x1, GROUND, box.z1, "lw_nodes:sand")
 		-- The schematic carries its own three ground layers from map.min.y up,
@@ -130,31 +234,49 @@ function maps.build(api)
 	end
 
 	-- 3. Causeway decks, their rails, and the gate they leave the hub by.
-	for _, way in ipairs(CAUSEWAYS) do
-		local deck = way.deck
-		fill(deck.x0, GROUND, deck.z0, deck.x1, GROUND, deck.z1, "lw_nodes:paving")
-		-- Clear the moat rail where the deck crosses the showcase island's
-		-- edge: build_paths() fences that line, and a fence in the middle of
-		-- a causeway is exactly the sort of thing nobody notices until a
-		-- visitor walks into it.
-		fill(deck.x0, FLOOR, deck.z0, deck.x1, FLOOR + 3, deck.z1, "air")
-		if deck.x1 - deck.x0 > deck.z1 - deck.z0 then
-			for x = deck.x0, deck.x1, 2 do
-				put(x, FLOOR, deck.z0 - 1, "lw_nodes:fence")
-				put(x, FLOOR, deck.z1 + 1, "lw_nodes:fence")
+	for _, way in ipairs(causeways) do
+		for _, deck in ipairs(way.legs) do
+			fill(deck.x0, GROUND, deck.z0, deck.x1, GROUND, deck.z1, "lw_nodes:paving")
+			-- Clear the moat rail where the deck crosses the showcase island's
+			-- edge: build_paths() fences that line, and a fence in the middle
+			-- of a causeway is exactly the sort of thing nobody notices until
+			-- a visitor walks into it.
+			fill(deck.x0, FLOOR, deck.z0, deck.x1, FLOOR + 3, deck.z1, "air")
+		end
+		-- Rails go on after every leg is cleared, and only where they would
+		-- not stand on another leg: that is what leaves the corners open.
+		local function on_deck(x, z)
+			for _, leg in ipairs(way.legs) do
+				if x >= leg.x0 and x <= leg.x1 and z >= leg.z0 and z <= leg.z1 then
+					return true
+				end
 			end
-		else
-			for z = deck.z0, deck.z1, 2 do
-				put(deck.x0 - 1, FLOOR, z, "lw_nodes:fence")
-				put(deck.x1 + 1, FLOOR, z, "lw_nodes:fence")
+			return false
+		end
+		local function rail(x, z)
+			if not on_deck(x, z) then
+				put(x, FLOOR, z, "lw_nodes:fence")
+			end
+		end
+		for _, deck in ipairs(way.legs) do
+			if along_x(deck) then
+				for x = deck.x0, deck.x1, 2 do
+					rail(x, deck.z0 - 1)
+					rail(x, deck.z1 + 1)
+				end
+			else
+				for z = deck.z0, deck.z1, 2 do
+					rail(deck.x0 - 1, z)
+					rail(deck.x1 + 1, z)
+				end
 			end
 		end
 
 		-- The gate: two posts topped with something from the map they point
-		-- at, so the three exits read apart at a glance from the fountain.
+		-- at, so the exits read apart at a glance from the fountain.
 		local map = lw_maps.by_id[way.map]
 		local gx, gz = way.gate.x, way.gate.z
-		local across = (deck.x1 - deck.x0 > deck.z1 - deck.z0)
+		local across = along_x(way.legs[1])
 		for _, offset in ipairs({-2, 2}) do
 			local px = across and gx or gx + offset
 			local pz = across and gz + offset or gz
@@ -216,6 +338,25 @@ function maps.build(api)
 			sign = "Garden director: punch to start the fruit stomp. The melon " ..
 				"has no skeleton and dances anyway; the berry rides the juice.",
 		},
+		{
+			-- The crown of the glass dome, with the audience on the rim and the
+			-- stair up from the north souk. The theater's own chorus line: a
+			-- second stage for an existing routine, not a new one.
+			id = "bazaar_dome",
+			routine = "chorus_line_v1",
+			map = "crystal_bazaar",
+			pos = {18, 12, 18},
+			node = {23, 9, 23},
+			facing = {x = 0, y = 0, z = 1},
+			marks = {
+				{18, 12, 18, "mark_lead"},
+				{16, 12, 18, "mark_1"},
+				{20, 12, 18, "mark_2"},
+			},
+			sign = "Dome director: punch for the theater's chorus line, up on " ..
+				"the glass. It is the theater's own routine, so one of the two " ..
+				"stages dances it at a time. /routine join dances along.",
+		},
 	}
 
 	for _, stage in ipairs(STAGES) do
@@ -235,6 +376,7 @@ function maps.build(api)
 		put(node.x, node.y, node.z, "lw_dance:director")
 		label(node.x, node.y, node.z, stage.sign)
 		lw_dance.register_stage({
+			id = stage.id,
 			routine = stage.routine,
 			pos = world(stage.pos),
 			node = node,
@@ -243,8 +385,8 @@ function maps.build(api)
 	end
 
 	return {
-		min = {x = bounds.x0, y = 0, z = bounds.z0},
-		max = {x = bounds.x1, y = bounds.y1 + 2, z = bounds.z1},
+		min = {x = sea.x0, y = 0, z = sea.z0},
+		max = {x = sea.x1, y = top + 2, z = sea.z1},
 	}
 end
 

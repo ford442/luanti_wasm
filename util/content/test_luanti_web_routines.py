@@ -79,6 +79,12 @@ MAP_STAGES = {
 		(28, 2, 11, "lw_nodes:wool_red"),  # mark_lead, the melon bowl floor
 		(26, 4, 20, "lw_nodes:dirt"),      # the director node, on the spine
 	],
+	"map_crystal_bazaar.mts": [
+		(18, 12, 18, "lw_nodes:wool_cyan"),  # mark_lead, the dome's crown
+		(16, 12, 18, "lw_nodes:glass"),      # mark_1
+		(20, 12, 18, "lw_nodes:glass"),      # mark_2
+		(23, 9, 23, "lw_nodes:polished_stone"),  # the director, on the rim
+	],
 }
 
 

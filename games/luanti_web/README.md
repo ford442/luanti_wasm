@@ -16,18 +16,22 @@ QA sandbox and this game is not a replacement for it.
 ## The tour
 
 ```
-                       [ theater ]                 z = 34..62
-                            |
-           [ library ]--[ courtyard ]--[ gallery ]   z = 4..32
-                            |
+ smoke caldera         [ theater ]                 z = 34..62     crystal bazaar
+  (northwest)               |                                      (northeast)
+      |    [ library ]--[ courtyard ]--[ gallery ]   z = 4..32           |
+      '----------------.    |    .---------------------------------------'
  Halloween --------------[ plaza ]-------------- fruit garden
-   (west)                    |                      (east)
-                       snow mountain
-                         (south)
+   (west)            |       |                      (east)
+                     |  snow mountain
+                     |    (south)
+ lighthouse tide ----'
+  (southwest)
 ```
 
-The plaza is the hub. The showcase tour runs north from it; three causeways
-leave it west, south and east for the [themed maps](docs/maps.md).
+The plaza is the hub. The showcase tour runs north from it; six causeways
+leave it for the [themed maps](docs/maps.md) — straight out west, south and
+east, and turning in the open water for the three diagonals, so none of them
+crosses the tour.
 
 1. **Spawn plaza** — fountain, colonnade, and a gate whose banner spells
    `LUANTI WEB` out of wool. Walk north through the arch.
@@ -40,10 +44,13 @@ leave it west, south and east for the [themed maps](docs/maps.md).
    and floating title card, and a six-frame living pavilion inside the cart
    loop. All engine-native: no shaders, no video.
 5. **Theater** (north) — marquee, curtains, raked seating, and a 6x4 screen.
-6. **Themed maps** (west, south, east) — a dusk Halloween lane, a snowy
-   mountain you can climb and tunnel through, and a garden of giant fruit.
-   Walk a causeway or use `/maps`. Full footprints, spawns and intended time
-   of day are in [`docs/maps.md`](docs/maps.md).
+6. **Themed maps** (all round the plaza) — a dusk Halloween lane, a snowy
+   mountain you can climb and tunnel through, a garden of giant fruit, a
+   lighthouse on a blue-hour lagoon with a tunnel under it, a crystal bazaar at
+   night with a dome you walk onto, and a volcano you climb, look into and
+   leave through its far side. Walk a causeway or use `/maps`. Full
+   footprints, spawns and intended time of day are in
+   [`docs/maps.md`](docs/maps.md).
 
 ## Mods
 
@@ -62,7 +69,7 @@ leave it west, south and east for the [themed maps](docs/maps.md).
 * `i` opens the **palette inventory**: every node, paged, infinite. Taking from
   it never empties it.
 * `/stuff` re-gives the starter kit, `/palette` reopens the palette.
-* `/maps` lists the three themed maps; `/maps halloween` travels to one.
+* `/maps` lists the themed maps; `/maps halloween` travels to one.
 * **Hold sneak+zoom** (`Shift`+`Z`) or `/dance` toggles **dance mode**. While it
   is on, the number keys are the moves — `1` groove, `2` spin, `3` wave,
   `4` stomp, `5` robot, `6` bow, `7` random, `8` stop — and your hotbar slot and
@@ -141,7 +148,7 @@ ffmpeg -y -i clip.mp4 \
 	-frames:v 1 strip.png
 ```
 
-The living pavilion's six schematic frames and the three themed maps are
+The living pavilion's six schematic frames and the themed maps are
 generated separately:
 
 ```sh
@@ -160,7 +167,7 @@ mapgen from two sources, both in git, the first time each chunk is generated:
   raked floor, screen and all), the plaza fountain, the colonnade column, the
   gallery frame, and the six living-pavilion frames. `init.lua` says where
   each one goes with `schem()`.
-* `lw_world/maps.lua` — the atlas: the three themed islands, their moats, the
+* `lw_world/maps.lua` — the atlas: the themed islands in one sea, the
   causeways out of the plaza and the gates at the hub end. It reads the
   registry in `lw_maps` for each map's footprint and spawn, and places
   `schems/map_*.mts` (generated, not hand-authored) the same way. See
