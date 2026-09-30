@@ -72,7 +72,15 @@ class World:
 			and not self.solid(x, y, z) and not self.solid(x, y + 1, z))
 
 	def reachable(self, start) -> set:
-		"""Every cell a walker can get to from `start`: step up one, fall some."""
+		"""Every cell a walker can get to from `start`: step up one, fall some.
+
+		A step up needs room to jump — the walker's own column clear one above
+		their head — unless it is onto a stair or slab, which is half a node
+		and walked up. Anything else is a walk across at the walker's own height,
+		so the neighbouring column has to be clear there — body and head — and
+		only then can they drop down it. Without that, a wall with a cave on
+		the far side would count as a way into the cave.
+		"""
 		assert_true(self.standable(*start),
 			f"spawn {start} is not somewhere a player can stand "
 			f"(node {self.at(*start)!r}, floor {self.at(start[0], start[1] - 1, start[2])!r})")
@@ -82,13 +90,20 @@ class World:
 			x, y, z = queue.popleft()
 			for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
 				nx, nz = x + dx, z + dz
-				for ny in [y + 1] + list(range(y, y - MAX_FALL - 1, -1)):
-					if not self.standable(nx, ny, nz):
-						continue
-					if (nx, ny, nz) not in seen:
-						seen.add((nx, ny, nz))
-						queue.append((nx, ny, nz))
-					break
+				landing = None
+				if self.standable(nx, y + 1, nz) and (not self.solid(x, y + 2, z)
+						or self.at(nx, y, nz) in maps.HALF_HEIGHT):
+					landing = (nx, y + 1, nz)
+				elif not self.solid(nx, y, nz) and not self.solid(nx, y + 1, nz):
+					for ny in range(y, y - MAX_FALL - 1, -1):
+						if self.standable(nx, ny, nz):
+							landing = (nx, ny, nz)
+							break
+						if self.solid(nx, ny - 1, nz):
+							break
+				if landing is not None and landing not in seen:
+					seen.add(landing)
+					queue.append(landing)
 		return seen
 
 

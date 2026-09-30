@@ -127,6 +127,7 @@ NON_WALKABLE = frozenset({
 # standing on them is fine and so is standing *in* them.
 HALF_HEIGHT = frozenset({
 	PLANK_SLAB, BRICK_SLAB, SNOW_SLAB, PLANK_STAIR, SNOW_STAIR, CARPET,
+	"lw_nodes:stair_stone_brick", "lw_nodes:slab_stone_brick",
 })
 
 
@@ -1052,8 +1053,8 @@ def build_lighthouse_tower(build: Build) -> None:
 	build.clear(cx - 1, FLOOR, cz + 6, cx + 1, FLOOR + 1, cz + 6)
 	build.box(cx - 1, FLOOR + 2, cz + 6, cx + 1, FLOOR + 2, cz + 6, GOLD)
 
-	# The spiral stair. A tread that has the next one up beside it is a stair
-	# node climbing towards it, so most of the flight is half steps.
+	# The spiral stair. A tread one up from its neighbour is a stair node with
+	# its low half towards that neighbour, so each rise is two half steps.
 	treads = {}
 	for x, z in columns:
 		for y in stair_treads(x, z):
@@ -1061,7 +1062,7 @@ def build_lighthouse_tower(build: Build) -> None:
 	for (x, y, z) in treads:
 		facing = None
 		for dx, dz, facedir in ((0, 1, NORTH), (1, 0, EAST), (0, -1, SOUTH), (-1, 0, WEST)):
-			if (x + dx, y + 1, z + dz) in treads:
+			if (x - dx, y - 1, z - dz) in treads:
 				facing = facedir
 				break
 		if facing is None:
