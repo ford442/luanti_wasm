@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Cloud Agent environment bootstrap for luanti_wasm.
 # Idempotent: safe to run repeatedly. Prepares the native (Linux) toolchain,
-# the Lua lint/test tooling, and the pinned Emscripten SDK for the WASM build.
+# the Lua lint/test tooling, Node dependencies, and the pinned Emscripten SDK
+# for the WASM build.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,11 +15,14 @@ EMSDK_DIR="${EMSDK_DIR:-$HOME/emsdk}"
 # is only needed when the SDK is installed read-only; overriding it here would
 # leave the Emscripten ports (png/jpeg/freetype/...) out of the sysroot the
 # build actually compiles against.
+PROFILE_SNIPPET="/etc/profile.d/luanti-wasm.sh"
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
 # ---------------------------------------------------------------------------
 # 1. System packages (native client+server build, Lua tooling, headless GL).
+#    Optional map backends match the CMake defaults (Postgres client, LevelDB,
+#    Redis, SpatialIndex) so a stock configure does not silently drop them.
 # ---------------------------------------------------------------------------
 log "Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
@@ -30,15 +34,17 @@ sudo apt-get install -y --no-install-recommends \
 	libogg-dev libvorbis-dev libopenal-dev libcurl4-openssl-dev \
 	libfreetype-dev zlib1g-dev libgmp-dev libjsoncpp-dev libzstd-dev \
 	libluajit-5.1-dev luajit gettext libsdl2-dev libssl-dev \
+	libpq-dev libleveldb-dev libhiredis-dev libspatialindex-dev libncurses-dev \
 	xvfb mesa-utils libgl1-mesa-dri \
 	lua5.1 luarocks
 
 # ---------------------------------------------------------------------------
-# 2. Lua lint/test tooling (luacheck + busted), installed to ~/.luarocks.
+# 2. Lua lint/test tooling (luacheck + busted) on the default PATH.
+#    System luarocks targets Lua 5.1, which is what builtin/ and devtest use.
 # ---------------------------------------------------------------------------
 log "Installing Lua tooling (luacheck, busted)"
-luarocks install --local luacheck
-luarocks install --local busted
+sudo luarocks --lua-version=5.1 install luacheck
+sudo luarocks --lua-version=5.1 install busted
 
 # Playwright drives the WASM browser smoke tests (util/wasm/test_*.py). It uses
 # the system Google Chrome, so no extra browser download is required. Ubuntu's
@@ -59,19 +65,56 @@ git -C "$EMSDK_DIR" checkout --detach "$EMSDK_COMMIT"
 "$EMSDK_DIR/emsdk" activate "$EMSDK_VERSION"
 
 # ---------------------------------------------------------------------------
-# 4. Make emsdk + tooling available in every interactive shell (idempotent).
+# 4. Publish EMSDK for every login shell and for this image's session startup.
+#    Cloud Agent install/start run as non-interactive login shells, which read
+#    /etc/profile.d but do not execute the interactive half of ~/.bashrc.
+#    Appending to the bottom of ~/.bashrc is not enough: Ubuntu's stock bashrc
+#    returns before that point when the shell is not interactive. Wrappers in
+#    /usr/local/bin cover emcc when a process never sources a profile.
 # ---------------------------------------------------------------------------
+log "Publishing emsdk for login shells and /usr/local/bin"
+sudo tee "$PROFILE_SNIPPET" >/dev/null <<EOF
+# Installed by .cursor/install.sh. Sourced from /etc/profile and ~/.bashrc.
+if [ -z "\${LUANTI_WASM_ENV:-}" ]; then
+	export LUANTI_WASM_ENV=1
+	export EMSDK_DIR="$EMSDK_DIR"
+	if [ -f "$EMSDK_DIR/emsdk_env.sh" ]; then
+		. "$EMSDK_DIR/emsdk_env.sh" >/dev/null
+	fi
+fi
+EOF
+sudo chmod 644 "$PROFILE_SNIPPET"
+
 MARKER="# >>> luanti_wasm env >>>"
 if ! grep -qF "$MARKER" "$HOME/.bashrc" 2>/dev/null; then
-	log "Wiring emsdk + luarocks into ~/.bashrc"
+	tmp="$(mktemp)"
 	{
-		echo ""
 		echo "$MARKER"
-		echo "[ -f \"$EMSDK_DIR/emsdk_env.sh\" ] && source \"$EMSDK_DIR/emsdk_env.sh\" >/dev/null 2>&1 || true"
-		echo "command -v luarocks >/dev/null 2>&1 && eval \"\$(luarocks path --bin 2>/dev/null)\" || true"
+		echo "[ -f \"$PROFILE_SNIPPET\" ] && . \"$PROFILE_SNIPPET\""
 		echo "# <<< luanti_wasm env <<<"
-	} >> "$HOME/.bashrc"
+		echo
+		cat "$HOME/.bashrc"
+	} > "$tmp"
+	mv "$tmp" "$HOME/.bashrc"
 fi
+
+install_em_wrapper() {
+	local name="$1"
+	local target="$EMSDK_DIR/upstream/emscripten/$name"
+	sudo tee "/usr/local/bin/$name" >/dev/null <<EOF
+#!/bin/sh
+if [ -z "\${EMSDK:-}" ] && [ -f "$PROFILE_SNIPPET" ]; then
+	. "$PROFILE_SNIPPET"
+fi
+exec "$target" "\$@"
+EOF
+	sudo chmod 755 "/usr/local/bin/$name"
+}
+for tool in emcc em++ emcmake emmake emar emranlib emconfigure emsize; do
+	if [[ -e "$EMSDK_DIR/upstream/emscripten/$tool" ]]; then
+		install_em_wrapper "$tool"
+	fi
+done
 
 # ---------------------------------------------------------------------------
 # 5. Prime Emscripten ports (SDL2, zlib, png, jpeg, freetype, ogg, vorbis,
@@ -79,11 +122,30 @@ fi
 # ---------------------------------------------------------------------------
 log "Priming Emscripten ports via a WASM configure"
 # shellcheck disable=SC1091
+set +u
 source "$EMSDK_DIR/emsdk_env.sh"
+set -u
 emcc --version
 cd "$REPO_ROOT"
 # Configuring the Emscripten preset downloads and builds the emscripten ports
-# into EM_CACHE. This is dependency setup, so it belongs in install.
+# into the SDK cache. This is dependency setup, so it belongs in install.
 cmake --preset Emscripten
+
+# ---------------------------------------------------------------------------
+# 6. Node dependencies for the root smoke harness and the WebSocket proxy.
+#    Done after the toolchain so a registry hiccup cannot skip Emscripten.
+# ---------------------------------------------------------------------------
+log "Installing Node dependencies"
+if [[ -f "$REPO_ROOT/package-lock.json" ]]; then
+	npm ci --prefix "$REPO_ROOT"
+fi
+if [[ -f "$REPO_ROOT/util/wasm/proxy/package-lock.json" ]]; then
+	npm ci --prefix "$REPO_ROOT/util/wasm/proxy"
+fi
+
+log "Checking login-shell visibility of emcc"
+# install/start are non-interactive login shells. Prove they see EMSDK
+# without relying on the caller's exported environment.
+env -u EMSDK -u LUANTI_WASM_ENV bash -lc 'command -v emcc && emcc --version && test -n "$EMSDK"'
 
 log "Environment bootstrap complete"

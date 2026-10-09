@@ -388,3 +388,13 @@ with socketserver.TCPServer(('', 8000), H) as httpd:
 "
 # Then open http://localhost:8000/build-wasm/bin/luanti.html
 ```
+
+---
+
+## Cursor Cloud specific instructions
+
+Cloud Agent machines run `.cursor/install.sh` (from `.cursor/environment.json`) after checkout. The script is idempotent. It installs the native client/server build dependencies (including the optional LevelDB, Redis, PostgreSQL client, and SpatialIndex libraries CMake enables by default), Lua 5.1 `luacheck` and `busted` on `/usr/local/bin`, Playwright 1.59.0 for `util/wasm/test_*.py`, Node packages for the repo root and `util/wasm/proxy`, and Emscripten 6.0.3 at `$HOME/emsdk` (the same commit as `.github/workflows/wasm.yml`).
+
+`/etc/profile.d/luanti-wasm.sh` exports `EMSDK` and puts `emcc` on `PATH`. Login shells and this image's session startup source it. The `Emscripten` CMake preset reads `$EMSDK` for its toolchain file, so if a shell does not have `EMSDK` set, run `source /etc/profile.d/luanti-wasm.sh` before `cmake --preset Emscripten`. `emcc` itself is also wrapped in `/usr/local/bin`.
+
+Google Chrome for the WASM smoke tests is `/usr/local/bin/google-chrome`. Serve a built client with `python3 util/wasm/serve.py` (COOP/COEP); do not open `luanti.html` from a plain static server. Native configure, unit tests, and Lua checks use the cheat sheet above. The install script configures `build-wasm` once so Emscripten ports are cached; it does not compile the engine.
