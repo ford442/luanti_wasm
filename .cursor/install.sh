@@ -28,7 +28,7 @@ log "Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-	build-essential make libc6-dev cmake ninja-build git ca-certificates \
+	build-essential g++-14 make libc6-dev cmake ninja-build git ca-certificates \
 	python3 python3-pip python3-venv pkg-config \
 	libpng-dev libjpeg-dev libgl1-mesa-dev libsqlite3-dev \
 	libogg-dev libvorbis-dev libopenal-dev libcurl4-openssl-dev \
@@ -51,6 +51,9 @@ sudo luarocks --lua-version=5.1 install busted
 # Python is externally managed (PEP 668), hence --break-system-packages.
 log "Installing Playwright for the WASM browser smoke tests"
 python3 -m pip install --user --break-system-packages "playwright==1.59.0"
+if [[ -x "$HOME/.local/bin/playwright" ]]; then
+	sudo ln -sfn "$HOME/.local/bin/playwright" /usr/local/bin/playwright
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Pinned Emscripten SDK for the WebAssembly build.
@@ -77,7 +80,11 @@ sudo tee "$PROFILE_SNIPPET" >/dev/null <<EOF
 # Installed by .cursor/install.sh. Sourced from /etc/profile and ~/.bashrc.
 if [ -z "\${LUANTI_WASM_ENV:-}" ]; then
 	export LUANTI_WASM_ENV=1
-	export EMSDK_DIR="$EMSDK_DIR"
+	export EMSDK_QUIET=1
+	case ":\$PATH:" in
+		*":\$HOME/.local/bin:"*) ;;
+		*) export PATH="\$HOME/.local/bin:\$PATH" ;;
+	esac
 	if [ -f "$EMSDK_DIR/emsdk_env.sh" ]; then
 		. "$EMSDK_DIR/emsdk_env.sh" >/dev/null
 	fi
