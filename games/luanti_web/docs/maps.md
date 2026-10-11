@@ -118,7 +118,10 @@ lighthouse on it, and a rocky ledge runs down the east side.
 * **The lantern room** is a ring of glass on the gallery deck with a door on
   the seaward side and the lamp in the middle. The beam is one entity
   (`lw_maps:lighthouse_beam`): a long glowing translucent sprite that turns
-  about the lamp, `static_save = false` like the Halloween vane.
+  about the lamp, `static_save = false` like the Halloween vane. Punch that
+  lamp and a short horn plays (`lw_lighthouse.ogg`). It stays silent when
+  sound is off, or when the file is missing. The other lamps on the island
+  are the same node and do not play it.
 * **The jetty** stands on piles one node proud of the lagoon, with two tide
   pools set into its deck: water on glass, so you look straight down into the
   lagoon.

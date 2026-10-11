@@ -129,6 +129,10 @@ core = {
 	register_globalstep = function(fn) globalsteps[#globalsteps + 1] = fn end,
 	register_on_joinplayer = function() end,
 	register_on_leaveplayer = function() end,
+	register_on_punchnode = function(fn)
+		core._punchnode[#core._punchnode + 1] = fn
+	end,
+	_punchnode = {},
 	register_on_placenode = function() end,
 	register_on_dignode = function() end,
 	register_on_generated = function() end,
@@ -730,6 +734,46 @@ for x = reach.min.x, reach.max.x, 3 do
 	end
 end
 assert_true(#stages >= 2, "the atlas registers its dance stages")
+
+--------------------------------------------------------------------------
+-- Lighthouse lamp sting
+--------------------------------------------------------------------------
+
+local function punch(pos, name)
+	local node = {name = name}
+	for _, fn in ipairs(core._punchnode) do
+		fn(pos, node)
+	end
+end
+
+local tide = lw_maps.by_id["lighthouse_tide"]
+local lamp_pos
+for _, entity in ipairs(tide.entities) do
+	if entity.name == "lw_maps:lighthouse_beam" then
+		lamp_pos = vector.offset(entity.pos, 0, -1, 0)
+	end
+end
+assert_true(lamp_pos ~= nil, "the lighthouse beam marks the lamp under it")
+
+local played = {}
+local real_sound = core.sound_play
+core.sound_play = function(name, spec)
+	played[#played + 1] = {name = name, spec = spec}
+	return 1
+end
+punch(lamp_pos, "lw_nodes:lamp")
+assert_eq(#played, 1, "punching the lantern lamp plays one sting")
+assert_eq(played[1].name, "lw_lighthouse", "the sting is the lighthouse horn")
+assert_eq(played[1].spec.pos, lamp_pos, "the horn plays at the lamp")
+punch({x = lamp_pos.x + 4, y = lamp_pos.y, z = lamp_pos.z}, "lw_nodes:lamp")
+assert_eq(#played, 1, "a different lamp on the island stays quiet")
+punch(lamp_pos, "lw_nodes:stone")
+assert_eq(#played, 1, "punching something else at the lamp stays quiet")
+
+core.sound_play = nil
+local ok_silent = pcall(punch, lamp_pos, "lw_nodes:lamp")
+assert_true(ok_silent, "punching the lamp with sound off does not error")
+core.sound_play = real_sound
 
 --------------------------------------------------------------------------
 -- Node list, for the Python half

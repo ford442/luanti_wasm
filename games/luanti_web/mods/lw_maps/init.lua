@@ -664,6 +664,41 @@ core.register_entity("lw_maps:lighthouse_beam", {
 	end,
 })
 
+-- Punching the lantern-room lamp plays a short horn. The beam entity sits one
+-- node above that lamp, so the lamp's place is derived from the registry
+-- rather than a second copy of the coordinate. Other lamps on the jetty and
+-- the promenade are the same node and stay quiet. Sound is optional: a build
+-- without OpenAL has no sound_play, and a missing file stays silent too.
+local LIGHTHOUSE_SOUND = "lw_lighthouse"
+
+local function lighthouse_lamp_pos()
+	local map = lw_maps.by_id["lighthouse_tide"]
+	if not map then
+		return nil
+	end
+	for _, entity in ipairs(map.entities) do
+		if entity.name == "lw_maps:lighthouse_beam" then
+			return vector.offset(entity.pos, 0, -1, 0)
+		end
+	end
+end
+
+core.register_on_punchnode(function(pos, node)
+	if node.name ~= "lw_nodes:lamp" then
+		return
+	end
+	local lamp = lighthouse_lamp_pos()
+	if not lamp or pos.x ~= lamp.x or pos.y ~= lamp.y or pos.z ~= lamp.z then
+		return
+	end
+	if type(core.sound_play) ~= "function" then
+		return
+	end
+	pcall(core.sound_play, LIGHTHOUSE_SOUND, {
+		pos = pos, gain = 0.55, max_hear_distance = 48,
+	}, true)
+end)
+
 local function ensure_entity(name, pos)
 	for _, object in ipairs(core.get_objects_inside_radius(pos, 6)) do
 		local entity = object:get_luaentity()
