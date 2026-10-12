@@ -281,16 +281,29 @@ deck cell has to be paved with head room once the whole atlas is built.
 
 ## Not in this pack
 
-`games/rollercoaster` and `games/log_ride` stay their own games, with their
-own `game.conf` and singlenode worlds, and so do `games/spire_tunnel` and
-`games/flower_island`. None of them is stamped into this atlas and `lw_maps`
-registers no track, cart or flume nodes.
+`games/rollercoaster` and `games/log_ride` stay their own games. Each keeps
+its `game.conf` and its singlenode world. Track segments and a flume stay
+there: this atlas does not stamp them, `lw_world` ships no coaster or flume
+schematic, and `lw_maps` registers no track, cart, or flume nodes.
 
-Carts and flowing water are whole-system demos. As plaza islands they would
-fight all three of the rules the maps are built to: the node budget below, a
-walk of about three minutes, and no new systems on an island. `/maps` does not
-reach them either: travelling into another game is world switching, which is a
-launcher feature, not a teleport.
+Carts and flowing water are whole-system demos. A plaza island made of either
+one would fight the three rules these maps are built to:
+
+* the authored-node budget — about 120,000 cells when this boundary was set;
+  Budget below is the cap that applies now
+* a walk of about three minutes
+* no new system on an island
+
+`games/spire_tunnel` and `games/flower_island` stay separate for the same
+reason. None of the four is an island in this atlas.
+
+`/maps` travels between islands in this atlas. Entering one of those games is
+world switching, and that belongs to the launcher. A later plaza poster may
+name them. It offers no `/maps` trip into another world until that switch
+exists.
+
+`util/content/test_luanti_web_maps.py` refuses a committed schematic, a
+generated map, or an `lw_maps` node from those games.
 
 ## Nodes the pack adds
 
