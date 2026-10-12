@@ -509,6 +509,51 @@ def test_every_node_is_registered() -> None:
 				f"{name} places {node}, which no mod in {GAME.name} registers")
 
 
+# Singlenode demos that stay their own games. See maps.md, "Not in this pack".
+OTHER_GAMES = ("rollercoaster", "log_ride", "spire_tunnel", "flower_island")
+# Ride-system nodes. A decorative name that merely contains "cart" is fine;
+# these are the track, flume, and boat pieces those games are built from.
+RIDE_NODES = (
+	"track_straight", "track_curve", "track_ramp", "track_support",
+	"track_ornament", "flume_floor", "flume_wall", "flume_straight",
+	"flume_curve", "flume_ramp", "channel_water", "log_boat",
+)
+
+
+def test_other_games_stay_out_of_the_pack() -> None:
+	"""Park rides and the other singlenode demos stay out of the plaza pack."""
+	def refuse(label: str, node: str) -> None:
+		for game in OTHER_GAMES:
+			assert_true(not node.startswith(game + ":"),
+				f"{label} places {node}")
+		for ride in RIDE_NODES:
+			assert_true(ride not in node, f"{label} places ride node {node}")
+
+	for path in SCHEM_DIR.glob("*.mts"):
+		for game in OTHER_GAMES:
+			assert_true(game not in path.name,
+				f"{path.name} belongs to {game}; that game stays out of lw_world")
+		for node in read_mts(path.read_bytes()).names:
+			refuse(path.name, node)
+	for name, schem in maps.schematics().items():
+		for game in OTHER_GAMES:
+			assert_true(game not in name,
+				f"{name} is generated as a plaza map")
+		for node in schem.names:
+			refuse(name, node)
+	for spec in maps.SPECS:
+		for game in OTHER_GAMES:
+			assert_true(game not in spec.name and game not in spec.id,
+				f"{spec.name} is registered as a plaza map")
+	registered = set(re.findall(r'register\(\s*"([^"]+)"',
+		(LW_MAPS / "init.lua").read_text(encoding="utf-8")))
+	for ride in RIDE_NODES:
+		assert_true(ride not in registered, f"lw_maps registers {ride}")
+	for game in OTHER_GAMES:
+		assert_true(game not in registered,
+			f"lw_maps registers a node from {game}")
+
+
 def test_param2_survives() -> None:
 	"""Seats are the reason schematic_from_cells learned about param2."""
 	for name, schem in maps.schematics().items():
