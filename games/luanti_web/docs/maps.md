@@ -6,15 +6,17 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Seven authored maps ship with the showcase pack, as islands around the hub
+Eight authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
 
 ```
-  [ smoke caldera ]---.     [ hub tour ]      .---[ crystal bazaar ]
-      northwest       |          |            |        northeast
-        [ Halloween ]-+----[ hub plaza ]------+---[ fruit garden ]
+                                          .---[ Around arena ]
+                                          |     north-northeast
+  [ smoke caldera ]---.     [ hub tour ]  |   .---[ crystal bazaar ]
+      northwest       |          |        |   |        northeast
+        [ Halloween ]-+----[ hub plaza ]--'---+---[ fruit garden ]
              west            |    |     |               east
                              |    |     '----------.
                              |  [ snow mountain ]  |
@@ -37,6 +39,7 @@ tour never needs them.
 | Crystal night bazaar | `crystal_bazaar` | `map_crystal_bazaar.mts` | 36 × 16 × 36 | `(54, 5, 24)` | `(55, 9, 42)` | night (`0.08`, saturated violet sky, no fog of its own) |
 | Smoke caldera | `smoke_caldera` | `map_smoke_caldera.mts` | 38 × 22 × 38 | `(-94, 5, 22)` | `(-57, 9, 41)` | overcast red hour (`0.35`, warm close fog) |
 | Rainbow storm | `rainbow_storm` | `map_rainbow_storm.mts` | 64 × 8 × 24 | `(40, 5, -120)` | `(41, 9, -109)` | thunderstorm (`0.45`, slate sky, fog at 90, rain and lightning) |
+| Around arena | `around_arena` | `map_around_arena.mts` | 25 × 12 × 25 | `(29, 5, 76)` | `(41, 9, 76)` | night (`0.1`, violet sky, light fog at 120) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -227,6 +230,59 @@ nothing stands over the deck.
 The map adds no nodes. The rain is the pack's one texture that is not a node:
 `lw_rain.png`, a thin streak, and the bolts are the same streak brightened.
 
+### Around arena
+
+Lace Waterfall's stage, at night, for their song "Around". It is the smallest
+map in the pack, 25 × 25, and the causeway comes in under a marquee on its
+south side. It is the arena [`amps.md`](amps.md) mentions.
+
+* **The stage** is at the north end, a black deck one node up with a violet
+  lip, facing south down the floor, with a stair at each side of the front.
+  Two `lw_amps:cab`s stand on its front corners, twelve nodes apart, with the
+  audience-left one to the west.
+* **The song starts as you walk in.** Arriving on the arena — by the
+  causeway, by `/maps`, or by joining there — points `lw_amps` at the arena's
+  cabs and plays `around_happy_hard` if nothing is playing anywhere. `lw_dance`
+  hears the song start and puts Rubella and Lillith on the deck between the
+  cabs and the six fans on the floor in front (the band itself is
+  [`amps.md`](amps.md)'s). Punch a cab to stop it, or to start it again;
+  staying on the arena does not undo a stop. When the last visitor walks off,
+  a song still coming out of those cabs stops. A song already playing from
+  someone else's cabs is left alone, and so is one started by hand while
+  nobody is there. The music is the amps' own stereo pair, positioned on the
+  cabs, not a second copy of the song.
+* **The truss** runs round the whole edge of the map, six nodes up on
+  columns, with the backdrop wall as its north side. It carries 32 truss
+  lights (`lw_maps:stage_light`), one every third cell from a corner, and a
+  `chase` controller over each one. 96 cells round, 32 lights, 4 chase
+  periods of 8, so the lit pairs lap the arena with no seam.
+* **The lasers.** Four emitters, glowing cubes in the band's violets and a
+  white, race round the top of the truss the same way the lights chase, a lap
+  every eight bars of "Around" (32 beats at 175 bpm, about 11 s). Each one
+  throws a beam down to a point that circles the dance floor the other way,
+  twice a lap, so the beams sweep across the crowd while the emitters race.
+  A beam is one thin `upright_sprite` that the server stretches and aims ten
+  times a second: its height is laid along the beam with
+  `vector.dir_to_rotation`, face side-on, so the floor sees it broadside. They
+  exist only while someone is on the arena, are spawned on the first
+  arrival and removed with the last visitor, and are never saved
+  (`static_save = false`). A lost one (its block unloaded) is put back.
+* **The banners.** The backdrop is black cloth with the band's banners set
+  into it, facing the floor: "AROUND!" across the top, full-length portraits
+  of Rubella (audience left) and Lillith (audience right) either side of the
+  stage, and three violet-and-black Lace Waterfall banners — one behind
+  the middle of the band. The same "AROUND!" sign is the marquee over the
+  entrance, facing the causeway, and four more Lace Waterfall banners hang
+  from the side trusses, facing in.
+* **The floor** is a two-node checker of black and violet wool, lit by four
+  hidden lamps under the truss so the crowd is seen between the chasing
+  lights.
+
+The portraits are drawn from the dancers' own skins: the front of every box of
+the character, as she stands. A still exported from the band's footage can
+replace either one, under the same name, at any size twice as tall as it is
+wide, because `lw_maps` cuts it 2 × 4.
+
 ## Getting there
 
 * Walk. A causeway leaves the plaza for every map, each with a gate whose
@@ -293,8 +349,10 @@ has to learn about it. In order:
    — `day_night_ratio` plus a `sky = lw_maps.sky({...})` built from a handful
    of colours and a fog distance. Moving props go in `entities` with map-local
    positions. Weather is `storm = {rods = {...}}`: rain while someone is on
-   the map, and lightning onto those map-local rods (see Rainbow storm). The
-   schematic defaults to `map_<id>`.
+   the map, and lightning onto those map-local rods (see Rainbow storm). A
+   stage is `amps = {left, right, song}`, the two sound sources one node above
+   its cabs, and racing lights are `lasers = {track, target, colors, ...}`
+   (see Around arena). The schematic defaults to `map_<id>`.
 4. **Causeway.** A `maps.causeways()` entry in `mods/lw_world/maps.lua`: a list
    of legs from the plaza's edge to the map's, a gate inside the plaza, a post
    and a poster. The north side of the plaza is the hub tour, so a map that is
@@ -343,7 +401,7 @@ generated map, or an `lw_maps` node from those games.
 
 ## Nodes the pack adds
 
-`lw_maps` registers twenty-six nodes. They are deliberately **not** in the
+`lw_maps` registers fifty-two nodes. They are deliberately **not** in the
 `lw_palette` group — that group builds the material library's pedestals and the
 room is full — so they appear in the palette inventory (`i`) but not in the
 library. Everything else the maps are built from is a `lw_nodes` tile.
@@ -365,10 +423,20 @@ library. Everything else the maps are built from is a `lw_nodes` tile.
 | `lantern`, `lantern_off` | the bazaar's chasing stall lanterns and its lamp posts |
 | `basalt`, `packed_basalt` | the caldera's cone, its trail and its tube |
 | `lava`, `lava_crust` | the caldera's lava lake and the gate posts that point at it |
+| `stage_light`, `stage_light_off` | the arena's chasing truss lights and its gate posts |
+| `around_sign_1` … `_5` | "AROUND!", over the arena's stage and its entrance |
+| `lace_banner_1` … `_3` | the Lace Waterfall banners on the backdrop and the side trusses |
+| `portrait_rubella_1` … `_8`, `portrait_lillith_1` … `_8` | the band's portraits on the backdrop |
+
+The banner cells are cut from one image each by `lw_maps.register_banner`
+with `[sheet`, in reading order from the top left, and are not in the
+inventory: a single cell of a portrait is not something anyone builds with.
 
 Ten new textures cover all of it: the rest are the existing tiles re-tinted
 with `[multiply`, the same trick the sixteen wool cubes use. An eleventh,
 `lw_rain.png`, is the rainbow storm's rain and lightning, and no node uses it.
+Four more are the arena's banners: `lw_around_sign.png`, `lw_lace_banner.png`
+and the two portraits.
 They are regenerated by `util/content/generate_luanti_web_textures.py` along with
 everything else.
 
@@ -378,8 +446,8 @@ Both controllers are airlike nodes that drive the lamp one node below them,
 from a node timer, which only runs while the block is loaded — a map nobody is
 on costs nothing. They switch a lamp for its twin from a registered pair
 (`lw_maps.register_lamp_pair(lit, unlit)`); the jack-o'-lantern and the
-pumpkin are the first pair, the bazaar's lantern and the caldera's lava the
-others, and a map that wants its own kind of lamp registers two nodes and
+pumpkin are the first pair, the bazaar's lantern, the caldera's lava and the
+arena's truss light the others, and a map that wants its own kind of lamp registers two nodes and
 reuses both controllers. Neither will grow a lamp where a visitor dug one
 out.
 
@@ -397,8 +465,9 @@ keeps them in the WASM heap for the session. Lua sizes an array to a power of
 two, so a map keeps **1 MiB up to 32,768 cells and 2 MiB up to 65,536**:
 halloween (25,920 cells), the fruit garden (32,000), the lighthouse (31,104),
 the bazaar (20,736) and the caldera (31,768) cost 1 MiB each, the snow
-mountain (44,800) costs 2 MiB, and the rainbow storm (12,288) is under 16,384
-cells and so costs half of one — 7.5 MiB for the seven. While a map loads, the
+mountain (44,800) costs 2 MiB, the rainbow storm (12,288) is under 16,384
+cells and so costs half of one, and the Around arena (7,500) is under 8,192
+and costs a quarter — 7.75 MiB for the eight. While a map loads, the
 engine's `read_schematic` table exists alongside it — one small table per cell,
 about 290 bytes each — and that peaks at 12.6 MiB for the mountain before the
 collector takes it back.
@@ -410,15 +479,17 @@ x86-64, so the arrays weigh the same in the browser). It fails when:
 
 * the maps keep more than **8 MiB** between them, or loading one peaks past
   **16 MiB**;
-* the pack's total box volume passes **200,000** cells;
+* the pack's total box volume passes **210,000** cells;
 * more than one map is over 32,768 cells. The snow mountain is the pack's one
   dense map; a new map fits in 32,768 or it costs what two do.
 
 The cap used to be 120,000 cells of volume, set before the cost was measured.
 It is now set from the measurement: eight maps' worth of 1 MiB against a
-256 MiB initial heap. The pack is at 7.5 MiB and 198,616 cells, so an eighth
-map of any size is a budget decision: 1,384 cells is all the volume left.
-Raise the caps on purpose, with a new measurement in `wasm_porting.md`, rather
-than squeeze a map to fit. The schematics themselves are 14.0 KiB on disk and
-the eleven textures under 6 KiB.
+256 MiB initial heap. The arena was a budget decision: it was sized under
+8,192 cells to keep a quarter of a MiB, and the volume cap was raised from
+200,000 to 210,000 for it; the heap caps were not. The pack is at 7.75 MiB and
+206,116 cells, so one more quarter-MiB map fits and anything bigger needs the
+caps raised. Raise them on purpose, with a new measurement in
+`wasm_porting.md`, rather than squeeze a map to fit. The schematics themselves
+are 15.4 KiB on disk and the fifteen textures under 8 KiB.
 See the content budget in `wasm_porting.md`.

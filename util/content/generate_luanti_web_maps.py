@@ -29,7 +29,8 @@ Layout, in the atlas the hub plaza sits in the middle of::
                          |
     [ lighthouse ]  [ snow mountain ]   [ rainbow storm ]
 
-The diagonal four are reached by causeways that turn in the open water;
+and the Around arena north-east of the hub, beyond the gallery. The diagonal
+four and the arena are reached by causeways that turn in the open water;
 lw_world/maps.lua has the legs, and games/luanti_web/docs/maps.md the recipe
 for adding a map.
 
@@ -1769,6 +1770,150 @@ def build_rainbow_storm() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 8. Around arena
+# --------------------------------------------------------------------------
+
+# Lace Waterfall's stage for "Around". Small on purpose: 25 x 12 x 25 is 7,500
+# cells, under 8,192, so lw_world keeps it in a quarter of what the other maps
+# cost (see Budget in docs/maps.md). Odd on both sides so the truss round the
+# edge is 96 cells, which takes 32 lights three apart — a whole number of
+# chase periods, so the loop has no seam.
+ARENA_SIZE = (25, 12, 25)
+# The causeway lands on the south face, under the marquee, in the middle.
+ARENA_SPAWN = (12, FLOOR, 0)
+
+# The truss: one row of cells all round the map's edge, on columns, with the
+# lights in it and the chase controllers on top. The emitters lw_maps sends
+# racing round the arena ride along the top of it.
+TRUSS_Y = FLOOR + 6
+TRUSS_EDGE = ARENA_SIZE[0] - 1
+TRUSS_LIGHT_SPACING = 3
+TRUSS_COLUMN_SPACING = 6
+
+# The stage, at the north end, facing south down the dance floor. The deck is
+# one node up: stand on it at FLOOR + 1. Its back is the backdrop wall, which
+# is the truss's north side.
+ARENA_STAGE = dict(x0=4, x1=20, z0=16, z1=TRUSS_EDGE - 1)
+BACKDROP_Z = TRUSS_EDGE
+BACKDROP_TOP = TRUSS_Y - 1
+STAGE_STAIRS = ((4, 5), (19, 20))   # x, either side of the stage front
+# Amp cabs on the deck's front corners, audience-left (west) first: lw_maps
+# points lw_amps at one node above each, and lw_dance puts the band between
+# them, one node back.
+ARENA_CABS = ((6, ARENA_STAGE["z0"]), (18, ARENA_STAGE["z0"]))
+STAGE_UPLIGHTS = (8, 10, 14, 16)
+
+DANCE_FLOOR = dict(x0=3, x1=21, z0=2, z1=14)
+
+# Banners. Full cubes with the art on the face that looks south at facedir 0,
+# cut from one image each (lw_maps.register_banner); `(name, cols, rows)`.
+AROUND_SIGN = ("lw_maps:around_sign", 5, 1)
+LACE_BANNER = ("lw_maps:lace_banner", 1, 3)
+PORTRAIT_RUBELLA = ("lw_maps:portrait_rubella", 2, 4)
+PORTRAIT_LILLITH = ("lw_maps:portrait_lillith", 2, 4)
+
+STAGE_LIGHT = "lw_maps:stage_light"
+STAGE_LIGHT_OFF = "lw_maps:stage_light_off"
+AMP_CAB = "lw_amps:cab"
+BRICK_STAIR_NODE = "lw_nodes:stair_stone_brick"
+TRUSS = wool("dark_grey")
+
+
+def truss_ring() -> list[tuple[int, int]]:
+	"""The truss's cells in loop order: east along the south edge, north up
+	the east, west along the north, south down the west. lw_maps.track_point
+	walks the same loop the same way, so the emitters race the way the
+	lights chase."""
+	e = TRUSS_EDGE
+	ring = [(x, 0) for x in range(e)]
+	ring += [(e, z) for z in range(e)]
+	ring += [(x, e) for x in range(e, 0, -1)]
+	ring += [(0, z) for z in range(e, 0, -1)]
+	return ring
+
+
+def place_banner(build: Build, banner, x0: int, top: int, z: int,
+		facing: int = NORTH, step: tuple[int, int] = (1, 0)) -> None:
+	"""Lay out a banner's cells, reading order, from its top-left corner.
+
+	``step`` is the direction its columns run in, as seen from in front of
+	it: (+1, 0) for a banner that faces south, (0, +1) for one that faces
+	west, (0, -1) for one that faces east.
+	"""
+	name, cols, rows = banner
+	for row in range(rows):
+		for col in range(cols):
+			build.set(x0 + step[0] * col, top - row, z + step[1] * col,
+				f"{name}_{row * cols + col + 1}", facing)
+
+
+def build_arena() -> Build:
+	sx, sy, sz = ARENA_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(POLISHED)
+
+	# The dance floor: a two-node checker of black and violet.
+	f = DANCE_FLOOR
+	for x in range(f["x0"], f["x1"] + 1):
+		for z in range(f["z0"], f["z1"] + 1):
+			dark = (x // 2 + z // 2) % 2 == 0
+			build.set(x, SURFACE, z, wool("black") if dark else wool("violet"))
+
+	# The truss and its lights. A light every third cell, starting at a
+	# corner, and its chase controller on top of it carrying its place.
+	for index, (x, z) in enumerate(truss_ring()):
+		if index % TRUSS_LIGHT_SPACING == 0:
+			build.set(x, TRUSS_Y, z, STAGE_LIGHT_OFF)
+			build.set(x, TRUSS_Y + 1, z, CHASE, (index // TRUSS_LIGHT_SPACING) % 8)
+		else:
+			build.set(x, TRUSS_Y, z, TRUSS)
+	# Columns under it, except over the entrance.
+	e = TRUSS_EDGE
+	for a in range(0, e + 1, TRUSS_COLUMN_SPACING):
+		for x, z in ((a, 0), (e, a), (0, a)):
+			if (x, z) == (ARENA_SPAWN[0], 0):
+				continue
+			build.box(x, FLOOR, z, x, TRUSS_Y - 1, z, COLUMN)
+
+	# Backdrop: the truss's north side is a wall of black cloth, with the
+	# band's banners in it facing the floor.
+	build.box(1, FLOOR, BACKDROP_Z, e - 1, BACKDROP_TOP, BACKDROP_Z, wool("black"))
+	place_banner(build, AROUND_SIGN, 10, BACKDROP_TOP, BACKDROP_Z)
+	place_banner(build, PORTRAIT_RUBELLA, 7, FLOOR + 4, BACKDROP_Z)
+	place_banner(build, PORTRAIT_LILLITH, 16, FLOOR + 4, BACKDROP_Z)
+	for x in (3, 12, 21):
+		place_banner(build, LACE_BANNER, x, FLOOR + 4, BACKDROP_Z)
+
+	# The marquee over the entrance faces the causeway, and cloth hangs from
+	# the side trusses between the columns, facing in.
+	place_banner(build, AROUND_SIGN, 10, TRUSS_Y - 1, 0)
+	for z in (3, 9):
+		place_banner(build, LACE_BANNER, 0, TRUSS_Y - 1, z, facing=WEST)
+		place_banner(build, LACE_BANNER, e, TRUSS_Y - 1, z, facing=EAST)
+
+	# The stage: a black deck with a violet lip, a stair up each side of the
+	# front, uplights along the lip and the two cabs on its front corners.
+	s = ARENA_STAGE
+	build.box(s["x0"], FLOOR, s["z0"], s["x1"], FLOOR, s["z1"], wool("black"))
+	build.box(s["x0"], FLOOR, s["z0"], s["x1"], FLOOR, s["z0"], wool("violet"))
+	for pair in STAGE_STAIRS:
+		for x in pair:
+			build.set(x, FLOOR, s["z0"] - 1, BRICK_STAIR_NODE, NORTH)
+	for x in STAGE_UPLIGHTS:
+		build.set(x, FLOOR + 1, s["z0"], UPLIGHT)
+	for x, z in ARENA_CABS:
+		# facedir 0 puts the cab's grille on its south face, at the floor.
+		build.set(x, FLOOR + 1, z, AMP_CAB, NORTH)
+
+	# House lights: four hidden lamps over the floor, so the crowd is seen
+	# between the chasing lights. They are airlike; nothing to walk into.
+	for x in (f["x0"] + 2, f["x1"] - 2):
+		for z in (f["z0"] + 3, f["z1"] - 2):
+			build.set(x, TRUSS_Y - 1, z, HIDDEN_LIGHT)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -1804,6 +1949,7 @@ SPECS = [
 	MapSpec("map_crystal_bazaar", BAZAAR_SIZE, BAZAAR_SPAWN, build_crystal_bazaar),
 	MapSpec("map_smoke_caldera", CALDERA_SIZE, CALDERA_SPAWN, build_smoke_caldera),
 	MapSpec("map_rainbow_storm", RAINBOW_SIZE, RAINBOW_SPAWN, build_rainbow_storm),
+	MapSpec("map_around_arena", ARENA_SIZE, ARENA_SPAWN, build_arena),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}
@@ -1821,7 +1967,11 @@ SPAWNS = {spec.name: spec.spawn for spec in SPECS}
 # count, is what makes a 36x24x36 map cheap and a 40x24x40 one twice the
 # price. The numbers and the reasoning are in wasm_porting.md ("Content
 # Budget") and games/luanti_web/docs/maps.md ("Budget").
-NODE_BUDGET = 200_000
+#
+# Raised from 200,000 for the Around arena: it is 7,500 cells, under 8,192, so
+# it keeps 0.25 MiB and the pack 7.75 of its 8 MiB. The heap measurement is
+# the cap that bites; this one only stops the volume creeping up unnoticed.
+NODE_BUDGET = 210_000
 CHEAP_VOLUME = 32_768
 
 

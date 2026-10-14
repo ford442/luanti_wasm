@@ -276,6 +276,76 @@ register("lava_crust", {
 })
 
 --------------------------------------------------------------------------
+-- Around arena
+--------------------------------------------------------------------------
+
+-- Truss lights: the palette's lamp tile in the band's violet, lit and dark,
+-- for the chase controller to race round the arena's truss.
+register("stage_light", {
+	description = "Truss Light",
+	tiles = {"lw_lamp.png^[multiply:#c890ff"},
+	paramtype = "light",
+	light_source = 13,
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+register("stage_light_off", {
+	description = "Truss Light (dark)",
+	tiles = {"lw_lamp.png^[multiply:#3a2450"},
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+-- A banner is one image cut into `cols` x `rows` full cubes with `[sheet`,
+-- numbered in reading order from the top left: `lw_maps:<name>_1` and on.
+-- The art is on the face that looks south at facedir 0 (tile 6, as on
+-- lw_nodes:poster); the other five faces are black cloth. They glow a little,
+-- because the arena is at night and a banner nobody can see is not one.
+--
+-- The cut cells are not in the inventory: a single cell of a portrait is not
+-- something anyone would build with.
+local BANNER_BACK = "lw_wool.png^[multiply:#1c1c1a"
+
+function lw_maps.register_banner(name, def)
+	local count = def.cols * def.rows
+	for row = 0, def.rows - 1 do
+		for col = 0, def.cols - 1 do
+			local index = row * def.cols + col + 1
+			local art = ("%s^[sheet:%dx%d:%d,%d"):format(def.texture,
+				def.cols, def.rows, col, row)
+			register(("%s_%d"):format(name, index), {
+				description = count > 1
+					and ("%s (%d of %d)"):format(def.description, index, count)
+					or def.description,
+				tiles = {BANNER_BACK, BANNER_BACK, BANNER_BACK, BANNER_BACK,
+					BANNER_BACK, art},
+				paramtype2 = "facedir",
+				on_place = core.rotate_node,
+				light_source = def.light,
+				groups = {snappy = 2, oddly_breakable_by_hand = 3,
+					not_in_creative_inventory = 1},
+			})
+		end
+	end
+end
+
+lw_maps.register_banner("around_sign", {
+	description = "\"Around!\" Sign", texture = "lw_around_sign.png",
+	cols = 5, rows = 1, light = 9,
+})
+lw_maps.register_banner("lace_banner", {
+	description = "Lace Waterfall Banner", texture = "lw_lace_banner.png",
+	cols = 1, rows = 3, light = 4,
+})
+lw_maps.register_banner("portrait_rubella", {
+	description = "Rubella Banner", texture = "lw_portrait_rubella.png",
+	cols = 2, rows = 4, light = 5,
+})
+lw_maps.register_banner("portrait_lillith", {
+	description = "Lillith Banner", texture = "lw_portrait_lillith.png",
+	cols = 2, rows = 4, light = 5,
+})
+
+--------------------------------------------------------------------------
 -- Lamp controllers
 --------------------------------------------------------------------------
 
@@ -298,6 +368,7 @@ end
 lw_maps.register_lamp_pair("lw_maps:jack_o_lantern", "lw_maps:pumpkin")
 lw_maps.register_lamp_pair("lw_maps:lantern", "lw_maps:lantern_off")
 lw_maps.register_lamp_pair("lw_maps:lava", "lw_maps:lava_crust")
+lw_maps.register_lamp_pair("lw_maps:stage_light", "lw_maps:stage_light_off")
 
 -- Light or dim whatever lamp is one node below `pos`. Only ever swaps a lamp
 -- for its own twin: if a visitor dug the lamp out, or built something else in
@@ -403,6 +474,10 @@ lw_maps.by_id = {}
 -- `storm = {rods = {<map-local position>, ...}}` gives a map rain and
 -- lightning while someone is on it; each rod is a node the bolts land on top
 -- of. See "Storms" below.
+--
+-- `amps = {left = <local>, right = <local>, song = <name>}` plays a song out
+-- of the map's own amp cabs when someone walks onto it, and `lasers = {...}`
+-- races lights and lasers round a track while anyone is there. See "Shows".
 function lw_maps.register(def)
 	assert(def.id and def.origin and def.size and def.spawn,
 		"lw_maps.register needs id, origin, size and spawn")
@@ -598,6 +673,43 @@ lw_maps.register({
 	storm = {rods = {{x = 20, y = 7, z = 7}, {x = 45, y = 7, z = 15}}},
 })
 
+lw_maps.register({
+	id = "around_arena",
+	title = "Around arena",
+	blurb = "Lace Waterfall's stage at night: \"Around\" out of the stage amps, " ..
+		"the band on the deck, lights racing round the truss and lasers " ..
+		"sweeping the floor.",
+	size = {x = 25, y = 12, z = 25},
+	origin = {x = 29, y = BASE, z = 76},
+	spawn = {x = 41, y = BASE + 4, z = 76},
+	-- Night with a violet cast and a little fog, so the truss lights and the
+	-- lasers are the brightest things there and the sea fades out behind.
+	day_night_ratio = 0.1,
+	sky = lw_maps.sky({
+		sky = "#1a0a2e", horizon = "#4a1a6a",
+		night_sky = "#0e0618", night_horizon = "#2e0f44", indoors = "#140a22",
+		sun_tint = "#b060ff", moon_tint = "#6a3cc0",
+		fog = 120, fog_start = 0.6,
+	}),
+	-- The sound sources, one node above the cabs on the stage's front
+	-- corners, audience-left first. lw_dance puts the band between them.
+	amps = {
+		left = {x = 6, y = 6, z = 16},
+		right = {x = 18, y = 6, z = 16},
+		song = "around_happy_hard",
+	},
+	-- Four emitters ride the top of the truss round the arena's edge, a lap
+	-- every eight bars of "Around", each with a laser down to a point that
+	-- circles the dance floor the other way.
+	lasers = {
+		track = {x0 = 0, z0 = 0, x1 = 24, z1 = 24, y = 10},
+		target = {x = 12, y = 4, z = 9, radius = 4},
+		colors = {"#c070ff", "#ff40c8", "#f0e0ff", "#8f50ff"},
+		lap_beats = 32,
+		bpm = 175,
+	},
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------
@@ -772,21 +884,267 @@ local function storm_step()
 	end
 end
 
+--------------------------------------------------------------------------
+-- Shows
+--------------------------------------------------------------------------
+
+-- A map with `amps` is a stage. When someone walks onto it and nothing is
+-- playing anywhere, lw_amps is pointed at its two cabs and the song starts;
+-- lw_dance hears that and puts the band on the deck between them. When the
+-- last visitor walks off, a song still coming out of those cabs stops. In
+-- between, punching a cab stops and restarts it, as with any other pair.
+--
+-- lw_amps is optional, and so is sound: without the mod the stage is quiet,
+-- and without OpenAL the song still "plays" and the band still dances.
+local function amps_mod()
+	return rawget(_G, "lw_amps")
+end
+
+local function same_pos(a, b)
+	return a ~= nil and b ~= nil and a.x == b.x and a.y == b.y and a.z == b.z
+end
+
+local function stage_sources(map)
+	return lw_maps.to_world(map, map.amps.left), lw_maps.to_world(map, map.amps.right)
+end
+
+local function playing_here(map)
+	local amps = amps_mod()
+	if not (amps and amps.now_playing and amps.now_playing()) then
+		return false
+	end
+	local left, right = amps.get_amps()
+	local want_left, want_right = stage_sources(map)
+	return same_pos(left, want_left) and same_pos(right, want_right)
+end
+
+local function start_song(map)
+	local amps = amps_mod()
+	if not (amps and amps.play) or amps.now_playing() then
+		return
+	end
+	amps.set_amps(stage_sources(map))
+	amps.play(map.amps.song)
+end
+
+local function stop_song(map)
+	if playing_here(map) then
+		amps_mod().stop()
+	end
+end
+
+-- `lasers` races emitters round a rectangle in map-local coordinates — the
+-- arena's truss — one per colour, evenly spaced, a lap every `lap_beats` at
+-- `bpm`. Each one throws a beam down to a point that circles `target` on the
+-- floor the other way, twice a lap, so the beams sweep the crowd while the
+-- lights race round them.
+--
+-- They exist only while someone is on the map: spawned when the first visitor
+-- arrives, removed when the last one leaves, never saved. The clock is server
+-- time, so every visitor sees the same beams.
+lw_maps.SHOW_INTERVAL = 0.1
+-- How far above the truss row's own centre an emitter rides: on top of it.
+local EMITTER_RISE = 0.8
+local BEAM_WIDTH = 0.08
+
+function lw_maps.track_length(track)
+	return 2 * ((track.x1 - track.x0) + (track.z1 - track.z0))
+end
+
+-- The point `s` nodes round `track` from its (x0, z0) corner, going east
+-- along the south side first — the order the generator numbers the truss
+-- lights in, so emitters and the chase run the same way.
+function lw_maps.track_point(track, s)
+	local w, d = track.x1 - track.x0, track.z1 - track.z0
+	s = s % lw_maps.track_length(track)
+	if s < w then
+		return track.x0 + s, track.z0
+	end
+	s = s - w
+	if s < d then
+		return track.x1, track.z0 + s
+	end
+	s = s - d
+	if s < w then
+		return track.x1 - s, track.z1
+	end
+	return track.x0, track.z1 - (s - w)
+end
+
+-- Emitter `index` at show time `t`: where it is and where its beam lands.
+function lw_maps.laser_frame(map, t, index)
+	local lasers = map.lasers
+	local lap = lasers.lap_beats * 60 / lasers.bpm
+	local phase = (index - 1) / #lasers.colors
+	local x, z = lw_maps.track_point(lasers.track,
+		(t / lap + phase) * lw_maps.track_length(lasers.track))
+	local from = lw_maps.to_world(map, {x = x, y = lasers.track.y + EMITTER_RISE, z = z})
+	local target = lasers.target
+	local angle = (phase - 2 * t / lap) * 2 * math.pi
+	-- On the floor's top face, a hair above it so it does not z-fight.
+	local to = lw_maps.to_world(map, {
+		x = target.x + target.radius * math.cos(angle),
+		y = target.y - 0.48,
+		z = target.z + target.radius * math.sin(angle),
+	})
+	return from, to
+end
+
+local shows = {}        -- map id -> {{emitter, beam, color, length}, ...}
+local occupied = {}     -- map id -> true while someone is on a stage map
+local show_time = 0
+local show_elapsed = 0
+
+local function alive(object)
+	return object ~= nil and object:get_pos() ~= nil
+end
+
+local function spawn_emitter(pos, color)
+	local object = core.add_entity(pos, "lw_maps:laser_emitter")
+	if object then
+		local face = "lw_lamp.png^[multiply:" .. color
+		object:set_properties({textures = {face, face, face, face, face, face}})
+	end
+	return object
+end
+
+local function spawn_beam(pos, color)
+	local object = core.add_entity(pos, "lw_maps:laser_beam")
+	if object then
+		local face = "lw_lamp.png^[multiply:" .. color
+		object:set_properties({textures = {face, face}})
+	end
+	return object
+end
+
+-- A beam is a sprite whose height runs along its local +Y. That is pointed
+-- along the beam, and its face turned side-on to the beam's heading, so the
+-- floor sees it broadside rather than edge on.
+local function pose_beam(slot, from, to)
+	local dx, dy, dz = to.x - from.x, to.y - from.y, to.z - from.z
+	local length = math.sqrt(dx * dx + dy * dy + dz * dz)
+	local flat = math.sqrt(dx * dx + dz * dz)
+	if length < 1e-3 or flat < 1e-3 then
+		return
+	end
+	local dir = vector.new(dx / length, dy / length, dz / length)
+	local side = vector.new(dz / flat, 0, -dx / flat)
+	slot.beam:move_to(vector.new((from.x + to.x) / 2, (from.y + to.y) / 2,
+		(from.z + to.z) / 2), true)
+	slot.beam:set_rotation(vector.dir_to_rotation(side, dir))
+	-- Properties are a whole packet; only resend them when the length has
+	-- moved enough to see.
+	if not slot.length or math.abs(slot.length - length) > 0.2 then
+		slot.length = length
+		slot.beam:set_properties({visual_size = {x = BEAM_WIDTH, y = length}})
+	end
+end
+
+local function update_show(map)
+	for index, slot in ipairs(shows[map.id]) do
+		local from, to = lw_maps.laser_frame(map, show_time, index)
+		if alive(slot.emitter) then
+			slot.emitter:move_to(from, true)
+		else
+			slot.emitter = spawn_emitter(from, slot.color)
+		end
+		if not alive(slot.beam) then
+			slot.beam, slot.length = spawn_beam(from, slot.color), nil
+		end
+		if slot.beam then
+			pose_beam(slot, from, to)
+		end
+	end
+end
+
+local function start_show(map)
+	local slots = {}
+	for index, color in ipairs(map.lasers.colors) do
+		slots[index] = {color = color}
+	end
+	shows[map.id] = slots
+	update_show(map)
+end
+
+local function stop_show(id)
+	for _, slot in ipairs(shows[id] or {}) do
+		-- Either may be missing (an add_entity that failed), so not ipairs.
+		if alive(slot.emitter) then
+			slot.emitter:remove()
+		end
+		if alive(slot.beam) then
+			slot.beam:remove()
+		end
+	end
+	shows[id] = nil
+end
+
+function lw_maps.show_objects(id)
+	return shows[id]
+end
+
+local function show_step(dtime)
+	show_time = show_time + dtime
+	show_elapsed = show_elapsed + dtime
+	if show_elapsed < lw_maps.SHOW_INTERVAL then
+		return
+	end
+	show_elapsed = 0
+	for id in pairs(shows) do
+		update_show(lw_maps.by_id[id])
+	end
+end
+
+-- Once per atmosphere tick: `visitors` is map id -> how many are on it.
+local function update_shows(visitors)
+	for _, map in ipairs(lw_maps.maps) do
+		local here = (visitors[map.id] or 0) > 0
+		if map.lasers then
+			if here and not shows[map.id] then
+				start_show(map)
+			elseif not here and shows[map.id] then
+				stop_show(map.id)
+			end
+		end
+		if map.amps then
+			-- Only on the way out, so a song started by hand from elsewhere
+			-- while nobody is on the stage is left alone.
+			if occupied[map.id] and not here then
+				stop_song(map)
+			end
+			occupied[map.id] = here or nil
+		end
+	end
+end
+
 local ATMOSPHERE_INTERVAL = 0.5
 local elapsed = 0
 
 core.register_globalstep(function(dtime)
 	storm_step()
+	show_step(dtime)
 	elapsed = elapsed + dtime
 	if elapsed < ATMOSPHERE_INTERVAL then
 		return
 	end
 	elapsed = 0
+	local visitors = {}
 	for _, player in ipairs(core.get_connected_players()) do
+		local was = current[player:get_player_name()]
 		local map = lw_maps.at(player:get_pos())
 		apply(player, map)
 		update_rain(player, map)
+		if map then
+			visitors[map.id] = (visitors[map.id] or 0) + 1
+			-- Arriving, by causeway, by /maps or by joining there, is what
+			-- starts a stage's song: staying does not restart one a visitor
+			-- stopped by punching a cab.
+			if map.amps and map.id ~= was then
+				start_song(map)
+			end
+		end
 	end
+	update_shows(visitors)
 end)
 
 core.register_on_leaveplayer(function(player)
@@ -846,6 +1204,38 @@ core.register_entity("lw_maps:lighthouse_beam", {
 		self.age = self.age + dtime
 		self.object:set_yaw(self.age * 0.7)
 	end,
+})
+
+-- The Around arena's racing lights and their lasers (see "Shows"). The
+-- emitter is a small glowing cube; the beam a thin sprite the show driver
+-- stretches and aims every tenth of a second. Both are spawned while someone
+-- is on the arena and never saved.
+core.register_entity("lw_maps:laser_emitter", {
+	initial_properties = {
+		physical = false,
+		collide_with_objects = false,
+		pointable = false,
+		visual = "cube",
+		visual_size = {x = 0.45, y = 0.45, z = 0.45},
+		textures = {"lw_lamp.png", "lw_lamp.png", "lw_lamp.png",
+			"lw_lamp.png", "lw_lamp.png", "lw_lamp.png"},
+		glow = 14,
+		static_save = false,
+	},
+})
+
+core.register_entity("lw_maps:laser_beam", {
+	initial_properties = {
+		physical = false,
+		collide_with_objects = false,
+		pointable = false,
+		visual = "upright_sprite",
+		visual_size = {x = 0.08, y = 1},
+		textures = {"lw_lamp.png", "lw_lamp.png"},
+		glow = 14,
+		shaded = false,
+		static_save = false,
+	},
 })
 
 -- Punching the lantern-room lamp plays a short horn. The beam entity sits one

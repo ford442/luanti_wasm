@@ -225,6 +225,22 @@ def rainbow_landmarks() -> dict:
 	return marks
 
 
+def arena_landmarks() -> dict:
+	s = maps.ARENA_STAGE
+	mid_x = (s["x0"] + s["x1"]) // 2
+	return {
+		"causeway, under the marquee": maps.ARENA_SPAWN,
+		"dance floor": (mid_x, maps.FLOOR, 9),
+		"front of the stage": (mid_x, maps.FLOOR, s["z0"] - 1),
+		"stage deck, where the band plays": (mid_x, maps.FLOOR + 1, s["z0"] + 1),
+		"back of the stage, by the banners": (mid_x, maps.FLOOR + 1, s["z1"]),
+		"stage, audience-left wing": (s["x0"], maps.FLOOR + 1, s["z1"] - 3),
+		"stage, audience-right wing": (s["x1"], maps.FLOOR + 1, s["z1"] - 3),
+		"under the west truss": (1, maps.FLOOR, 12),
+		"under the east truss": (maps.TRUSS_EDGE - 1, maps.FLOOR, 12),
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -236,6 +252,7 @@ LANDMARKS = {
 	"map_crystal_bazaar": lambda schem: bazaar_landmarks(),
 	"map_smoke_caldera": lambda schem: caldera_landmarks(),
 	"map_rainbow_storm": lambda schem: rainbow_landmarks(),
+	"map_around_arena": lambda schem: arena_landmarks(),
 }
 
 
@@ -526,6 +543,115 @@ def test_caldera_goes_through_and_round() -> None:
 		"the observation lip is not out over the crater")
 
 
+def test_arena_truss_lights_race_round_it() -> None:
+	"""32 truss lights in loop order, a whole number of chase periods, so the
+	lit pair laps the arena with no seam — the way the emitters race."""
+	schem = maps.schematics()["map_around_arena"]
+	world = World(schem)
+	sx, sy = schem.size[0], schem.size[1]
+	chase = schem.names.index(maps.CHASE)
+	controllers = {}
+	for i, content in enumerate(schem.content):
+		if content == chase:
+			controllers[(i % sx, (i // sx) % sy, i // (sx * sy))] = schem.param2[i]
+	ring = maps.truss_ring()
+	assert_true(len(ring) == 96 and len(set(ring)) == 96,
+		f"the truss is {len(ring)} cells round, not 96")
+	lights = [cell for index, cell in enumerate(ring)
+		if index % maps.TRUSS_LIGHT_SPACING == 0]
+	assert_true(len(lights) % 8 == 0,
+		f"{len(lights)} truss lights do not divide into chase periods of 8")
+	assert_true(len(controllers) == len(lights),
+		f"{len(controllers)} chase controllers for {len(lights)} truss lights")
+	for place, (x, z) in enumerate(lights):
+		key = (x, maps.TRUSS_Y + 1, z)
+		assert_true(controllers.get(key) == place % 8,
+			f"the truss light at {(x, z)} is place {controllers.get(key)} in the chase, "
+			f"not {place % 8}")
+		assert_true(world.at(x, maps.TRUSS_Y, z) == maps.STAGE_LIGHT_OFF,
+			f"the chase controller at {key} is over {world.at(x, maps.TRUSS_Y, z)}")
+	for x, z in ring:
+		assert_true(world.solid(x, maps.TRUSS_Y, z), f"the truss has a gap at {(x, z)}")
+
+
+def test_arena_stage_hosts_the_band() -> None:
+	"""The cabs are where lw_maps points the amps, and the band and crowd
+	lw_dance builds from them have somewhere to stand.
+
+	lw_dance.stage_from_amps puts the band one node behind the middle of the
+	line between the sources, at the cabs' own height, and `settle`s the
+	crowd onto the floor five and seven nodes in front of that.
+	"""
+	world = World(maps.schematics()["map_around_arena"])
+	harness = run_lua_harness()
+	sources = harness["amps"]["around_arena"] if harness else tuple(
+		(x, maps.FLOOR + 2, z) for x, z in maps.ARENA_CABS)
+	left, right = sources
+	schem = maps.schematics()["map_around_arena"]
+	for source in sources:
+		x, y, z = source
+		cab = world.at(x, y - 1, z)
+		assert_true(cab == maps.AMP_CAB, f"no amp cab under the sound source {source}: {cab}")
+		index = node_index(world.sx, world.sy, x, y - 1, z)
+		assert_true(schem.param2[index] == maps.NORTH,
+			f"the cab at {(x, y - 1, z)} does not face the floor")
+		assert_true(not world.solid(*source), f"the sound source {source} is inside a node")
+	assert_true(left[0] < right[0] and left[2] == right[2],
+		"the left source is not on the audience's left of a stage facing south")
+	assert_true(abs(right[0] - left[0]) >= 6,
+		"the cabs are too close together for the stereo to survive")
+	# Facing south, `forward` is -z, so the band is one node north of the line.
+	band_z = left[2] + 1
+	band_y = left[1] - 1
+	mid = (left[0] + right[0]) // 2
+	for dx in (-2, -1, 0, 1, 2):
+		assert_true(world.standable(mid + dx, band_y, band_z),
+			f"the band has nowhere to stand at {(mid + dx, band_y, band_z)}")
+	for back in (5, 7):
+		for dx in range(-5, 6):
+			cell = (mid + dx, maps.FLOOR, band_z - back)
+			assert_true(world.standable(*cell), f"the crowd has nowhere to stand at {cell}")
+
+
+def test_arena_banners_are_whole_and_face_the_floor() -> None:
+	world = World(maps.schematics()["map_around_arena"])
+	schem = maps.schematics()["map_around_arena"]
+	# The cell in front of a banner's art, per facedir: the art looks the
+	# opposite way to core.facedir_to_dir.
+	front = {maps.NORTH: (0, -1), maps.EAST: (-1, 0), maps.WEST: (1, 0)}
+	expected = {maps.AROUND_SIGN: 2, maps.LACE_BANNER: 7,
+		maps.PORTRAIT_RUBELLA: 1, maps.PORTRAIT_LILLITH: 1}
+	for (name, cols, rows), placed in expected.items():
+		for index in range(1, cols * rows + 1):
+			node = f"{name}_{index}"
+			cells = [i for i, c in enumerate(schem.content) if schem.names[c] == node] \
+				if node in schem.names else []
+			assert_true(len(cells) == placed,
+				f"{node} is placed {len(cells)} times, expected {placed}")
+			for i in cells:
+				x, y, z = i % world.sx, (i // world.sx) % world.sy, i // (world.sx * world.sy)
+				dx, dz = front[schem.param2[i]]
+				ahead = (x + dx, y, z + dz)
+				assert_true(not world.solid(*ahead),
+					f"{node} at {(x, y, z)} faces into {world.at(*ahead)}")
+
+
+def test_arena_lasers_ride_the_truss() -> None:
+	"""lw_maps' laser track is the generator's truss, and the emitters ride
+	clear of anything on top of it."""
+	harness = run_lua_harness()
+	if harness is None:
+		return
+	x0, z0, x1, z1, y = harness["tracks"]["around_arena"]
+	assert_true((x0, z0, x1, z1) == (0, 0, maps.TRUSS_EDGE, maps.TRUSS_EDGE),
+		f"the laser track {(x0, z0, x1, z1)} is not the truss round the edge")
+	assert_true(y == maps.TRUSS_Y, f"the lasers ride at y {y}, the truss is at {maps.TRUSS_Y}")
+	world = World(maps.schematics()["map_around_arena"])
+	for x, z in maps.truss_ring():
+		assert_true(not world.solid(x, y + 1, z),
+			f"an emitter would ride through {world.at(x, y + 1, z)} at {(x, y + 1, z)}")
+
+
 def test_committed_files_match_the_generator() -> None:
 	"""A regenerated tree must be an empty diff, like every other asset here."""
 	built = maps.schematics()
@@ -665,8 +791,8 @@ def test_budget() -> None:
 	assert_true(total < 64 * 1024,
 		f"the map schematics are {total / 1024:.1f} KiB; budget is 64 KiB")
 	textures = sorted((LW_MAPS / "textures").glob("*.png"))
-	assert_true(len(textures) == 11,
-		f"lw_maps ships {len(textures)} textures, expected 11")
+	assert_true(len(textures) == 15,
+		f"lw_maps ships {len(textures)} textures, expected 15")
 	art = sum(path.stat().st_size for path in textures)
 	assert_true(art < 16 * 1024,
 		f"lw_maps textures are {art / 1024:.1f} KiB; budget is 16 KiB")
@@ -789,7 +915,7 @@ def run_lua_harness():
 			continue
 		if result.returncode != 0:
 			raise SystemExit(result.stdout + result.stderr)
-		report = {"nodes": set(), "maps": [], "entities": []}
+		report = {"nodes": set(), "maps": [], "entities": [], "amps": {}, "tracks": {}}
 		for line in result.stdout.splitlines():
 			fields = line.split()
 			if not fields:
@@ -798,6 +924,11 @@ def run_lua_harness():
 				report["nodes"].add(fields[1])
 			elif fields[0] == "MAP":
 				report["maps"].append(fields[1])
+			elif fields[0] == "AMPS":
+				values = [int(v) for v in fields[2:8]]
+				report["amps"][fields[1]] = (tuple(values[:3]), tuple(values[3:]))
+			elif fields[0] == "TRACK":
+				report["tracks"][fields[1]] = tuple(int(v) for v in fields[2:7])
 			elif fields[0] == "ENTITY":
 				report["entities"].append((fields[1], fields[2],
 					tuple(int(v) for v in fields[3:6])))

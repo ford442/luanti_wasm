@@ -575,11 +575,15 @@ Bundle:
   peaks at about 290 bytes a cell (12.6 MiB for the 44,800-cell snow mountain)
   until the engine's `read_schematic` table is collected.
   `util/content/test_luanti_web_maps.py` repeats that measurement and fails
-  past 8 MiB kept, a 16 MiB load peak, 200,000 cells in total, or a second map
+  past 8 MiB kept, a 16 MiB load peak, 210,000 cells in total, or a second map
   over 32,768 cells. The earlier 120k-cell cap predated the measurement; 8 MiB
   is eight small maps against the 256 MB initial heap. With the rainbow storm
-  (12,288 cells, 0.5 MiB) the seven maps keep 7.5 MiB, peak at 12.6 MiB, and
-  fill 198,616 of the 200,000 cells, so the next map needs the caps raised. See
+  (12,288 cells, 0.5 MiB) the seven maps kept 7.5 MiB and filled 198,616 of
+  the then 200,000 cells. The Around arena is 7,500 cells, under 8,192, so it
+  keeps 0.25 MiB and peaks at 2.0 MiB while it loads (measured). The eight maps
+  keep 7.75 MiB, still peak at 12.6 MiB (the mountain), and fill 206,116 cells.
+  The volume cap was raised to 210,000 for it and the heap caps were not:
+  another 0.25 MiB map fits, and anything bigger needs them raised. See
   `games/luanti_web/docs/maps.md`.
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.

@@ -8,6 +8,8 @@
 -- atmosphere it wants. This file owns where it sits relative to the plaza and
 -- how a visitor walks there:
 --
+--                                                Around arena
+--                                              (north-northeast)
 --          smoke caldera                   crystal bazaar
 --           (northwest)                     (northeast)
 --                   \                         /
@@ -50,6 +52,10 @@ local function footprint(map)
 	return {x0 = map.min.x, z0 = map.min.z, x1 = map.max.x, z1 = map.max.z}
 end
 maps.footprint = footprint
+
+local function inside(box, x, z)
+	return x >= box.x0 and x <= box.x1 and z >= box.z0 and z <= box.z1
+end
 
 -- `box` minus `hole`, as up to four boxes. Used to lay water everywhere the
 -- showcase island is not: a fill wide enough to be convenient would otherwise
@@ -145,14 +151,16 @@ function maps.causeways(api)
 		{
 			-- Out of the plaza's east side north of the garden causeway, north
 			-- up the channel between the showcase island and the garden, then
-			-- east into the bazaar's arcade.
+			-- east into the bazaar's arcade. One row south of the plaza's
+			-- north-east corner, which the Around arena's causeway leaves by;
+			-- the gate stands back from the edge, clear of both decks.
 			map = "crystal_bazaar",
 			legs = {
-				{x0 = PLAZA.x1, z0 = -3, x1 = 47, z1 = -1},
-				{x0 = 45, z0 = -3, x1 = 47, z1 = 43},
+				{x0 = PLAZA.x1, z0 = -4, x1 = 47, z1 = -2},
+				{x0 = 45, z0 = -4, x1 = 47, z1 = 43},
 				{x0 = 45, z0 = 41, x1 = 54, z1 = 43},
 			},
-			gate = {x = PLAZA.x1 - 1, z = 1},
+			gate = {x = PLAZA.x1 - 5, z = -5},
 			post = "lw_maps:lantern",
 			sign = "Northeast: the crystal night bazaar. A glass-vaulted " ..
 				"arcade of stalls whose lanterns chase each other round it, a " ..
@@ -191,6 +199,23 @@ function maps.causeways(api)
 				"to arch, under a thunderstorm; lightning strikes the rods on " ..
 				"the crests. The storm is only over that island.",
 		},
+		{
+			-- Out of the plaza's east face at its north-east corner, along the
+			-- gallery's south wall, then north up the channel east of the hub
+			-- tour — past the gallery and the theater — onto the arena's
+			-- south face, under its marquee.
+			map = "around_arena",
+			legs = {
+				{x0 = PLAZA.x1, z0 = 1, x1 = 42, z1 = 3},
+				{x0 = 40, z0 = 1, x1 = 42, z1 = 75},
+			},
+			gate = {x = PLAZA.x1 - 3, z = 1},
+			post = "lw_maps:stage_light",
+			sign = "North-east: the Around arena. Lace Waterfall's stage at " ..
+				"night: the song starts as you walk in, the band plays on the " ..
+				"deck, lights race round the truss and lasers sweep the floor. " ..
+				"Punch an amp cab to stop or restart it.",
+		},
 	}
 end
 
@@ -205,7 +230,8 @@ maps.along_x = along_x
 function maps.build(api)
 	local fill, put, schem, label = api.fill, api.put, api.schem, api.label
 	local GROUND, FLOOR, WATER = api.GROUND, api.FLOOR, api.WATER
-	local HUB = api.HUB
+	local HUB, PLAZA = api.HUB, api.PLAZA
+	local BUILDINGS = api.BUILDINGS or {}
 
 	local causeways = maps.causeways(api)
 
@@ -272,10 +298,18 @@ function maps.build(api)
 			end
 			return false
 		end
+		-- Nor on the plaza, which has its own lip, nor in a hub building's
+		-- wall: the arena's causeway runs along the gallery's south face.
 		local function rail(x, z)
-			if not on_deck(x, z) then
-				put(x, FLOOR, z, "lw_nodes:fence")
+			if on_deck(x, z) or inside(PLAZA, x, z) then
+				return
 			end
+			for _, building in ipairs(BUILDINGS) do
+				if inside(building, x, z) then
+					return
+				end
+			end
+			put(x, FLOOR, z, "lw_nodes:fence")
 		end
 		for _, deck in ipairs(way.legs) do
 			if along_x(deck) then

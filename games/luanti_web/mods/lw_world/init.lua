@@ -696,6 +696,8 @@ local function build_atlas()
 		fill = fill, put = put, walls = walls, schem = schem, label = label,
 		GROUND = GROUND, FLOOR = FLOOR, WATER = WATER,
 		ISLAND = ISLAND, PLAZA = PLAZA,
+		-- The hub tour's buildings, which no causeway rail may be put into.
+		BUILDINGS = {LIBRARY, GALLERY, COURTYARD, THEATER},
 		-- The showcase island and its moat, which the atlas's sea goes round.
 		HUB = {x0 = BOUNDS.min.x, z0 = BOUNDS.min.z,
 			x1 = BOUNDS.max.x, z1 = BOUNDS.max.z},

@@ -8,8 +8,11 @@ Copyright (C) 2026 The Luanti Contributors
 
 `lw_amps` plays a song out of two amp cabinets. `lw_dance` puts Rubella,
 Lillith and six fans on stage to dance to it. The first song is Lace
-Waterfall's "Around", in seven mixes. The arena itself (stage, lasers,
-banners) is separate work. Two cabs on any floor are enough to try it.
+Waterfall's "Around", in seven mixes. The quickest way to hear it is the
+**Around arena** (`/maps around_arena`, or the causeway north-east of the
+plaza): it has a stage with the two cabs already on it, and the song starts
+when you walk in (see [maps.md](maps.md#around-arena)). Two cabs on any
+other floor work too, as below.
 
 ## Trying it
 
