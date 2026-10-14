@@ -21,16 +21,17 @@ QA sandbox and this game is not a replacement for it.
       |    [ library ]--[ courtyard ]--[ gallery ]   z = 4..32           |
       '----------------.    |    .---------------------------------------'
  Halloween --------------[ plaza ]-------------- fruit garden
-   (west)            |       |                      (east)
-                     |  snow mountain
-                     |    (south)
- lighthouse tide ----'
-  (southwest)
+   (west)            |       |     |                (east)
+                     |       |     '---------.
+                     |  snow mountain        |
+                     |    (south)            |
+ lighthouse tide ----'                       '--- rainbow storm
+  (southwest)                                     (southeast)
 ```
 
-The plaza is the hub. The showcase tour runs north from it; six causeways
+The plaza is the hub. The showcase tour runs north from it; seven causeways
 leave it for the [themed maps](docs/maps.md) — straight out west, south and
-east, and turning in the open water for the three diagonals, so none of them
+east, and turning in the open water for the four diagonals, so none of them
 crosses the tour.
 
 1. **Spawn plaza** — fountain, colonnade, and a gate whose banner spells

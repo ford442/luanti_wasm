@@ -209,6 +209,22 @@ def caldera_landmarks() -> dict:
 	}
 
 
+def rainbow_landmarks() -> dict:
+	mid = (maps.DECK_Z0 + maps.DECK_Z1) // 2
+	sx = maps.RAINBOW_SIZE[0]
+	marks = {
+		"west landing": maps.RAINBOW_SPAWN,
+		"east landing": (sx - 1, maps.FLOOR, mid),
+	}
+	for index, (x, z) in enumerate(maps.RAINBOW_RODS):
+		crest = maps.arch_height(x)
+		marks[f"crest of arch {index + 1}"] = (x, crest, mid)
+		# The deck cell beside the rod: where a visitor stands to watch it hit.
+		beside = maps.DECK_Z0 if z < maps.DECK_Z0 else maps.DECK_Z1
+		marks[f"base of rod {index + 1}"] = (x, crest, beside)
+	return marks
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -219,6 +235,7 @@ LANDMARKS = {
 	"map_lighthouse_tide": lambda schem: lighthouse_landmarks(),
 	"map_crystal_bazaar": lambda schem: bazaar_landmarks(),
 	"map_smoke_caldera": lambda schem: caldera_landmarks(),
+	"map_rainbow_storm": lambda schem: rainbow_landmarks(),
 }
 
 
@@ -319,6 +336,42 @@ def test_lighthouse_tunnel_is_under_water() -> None:
 			assert_true(z0 < t["z0"] or z > t["z1"]
 				or world.at(x, t["floor"] + 2, z) == maps.AIR,
 				f"the pool's glass is not the tunnel's roof at ({x}, {z})")
+
+
+def test_rainbow_arches_are_a_walk_under_open_sky() -> None:
+	"""Seven bands the whole way, no step sooner than four, and sky above."""
+	world = World(maps.schematics()["map_rainbow_storm"])
+	bands = [maps.wool(color) for color in maps.RAINBOW_BANDS]
+	heights = [maps.arch_height(x) for x in range(world.sx)]
+	assert_true(heights[0] == maps.FLOOR and heights[-1] == maps.FLOOR,
+		"the rainbow's landings are not level with the causeway")
+	assert_true(max(heights) == maps.FLOOR + maps.ARCH_RISE,
+		f"the arches crest at {max(heights)}, not FLOOR + {maps.ARCH_RISE}")
+	last_step = None
+	for x, h in enumerate(heights):
+		for z, band in zip(range(maps.DECK_Z0, maps.DECK_Z1 + 1), bands):
+			assert_true(world.at(x, h - 1, z) == band,
+				f"rainbow deck at ({x}, {h - 1}, {z}) is {world.at(x, h - 1, z)!r}, "
+				f"not {band}")
+			for y in range(h, world.sy):
+				assert_true(world.at(x, y, z) == "air",
+					f"something stands on the rainbow deck at ({x}, {y}, {z}); "
+					"the storm is the sky, not a ceiling")
+		if x > 0 and h != heights[x - 1]:
+			assert_true(abs(h - heights[x - 1]) == 1,
+				f"the rainbow climbs {h - heights[x - 1]} at x {x}")
+			assert_true(last_step is None or x - last_step >= maps.ARCH_RUN,
+				f"the rainbow steps at x {last_step} and again at x {x}")
+			last_step = x
+	for x, z in maps.RAINBOW_RODS:
+		crest = maps.arch_height(x)
+		assert_true(heights[x] == crest == maps.FLOOR + maps.ARCH_RISE,
+			f"the rod at x {x} is not on a crest")
+		assert_true(world.solid(x, crest, z) and not world.solid(x, crest + 1, z)
+			if crest + 1 < world.sy else world.solid(x, crest, z),
+			f"the rod at ({x}, {crest}, {z}) is not one node proud of the crest")
+		assert_true(not (maps.DECK_Z0 <= z <= maps.DECK_Z1),
+			f"the rod at ({x}, {z}) stands on the deck")
 
 
 def test_lighthouse_stair_climbs_every_turn() -> None:
@@ -612,8 +665,8 @@ def test_budget() -> None:
 	assert_true(total < 64 * 1024,
 		f"the map schematics are {total / 1024:.1f} KiB; budget is 64 KiB")
 	textures = sorted((LW_MAPS / "textures").glob("*.png"))
-	assert_true(len(textures) == 10,
-		f"lw_maps ships {len(textures)} textures, expected 10")
+	assert_true(len(textures) == 11,
+		f"lw_maps ships {len(textures)} textures, expected 11")
 	art = sum(path.stat().st_size for path in textures)
 	assert_true(art < 16 * 1024,
 		f"lw_maps textures are {art / 1024:.1f} KiB; budget is 16 KiB")

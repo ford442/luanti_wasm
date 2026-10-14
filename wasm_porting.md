@@ -577,7 +577,9 @@ Bundle:
   `util/content/test_luanti_web_maps.py` repeats that measurement and fails
   past 8 MiB kept, a 16 MiB load peak, 200,000 cells in total, or a second map
   over 32,768 cells. The earlier 120k-cell cap predated the measurement; 8 MiB
-  is eight small maps against the 256 MB initial heap. See
+  is eight small maps against the 256 MB initial heap. With the rainbow storm
+  (12,288 cells, 0.5 MiB) the seven maps keep 7.5 MiB, peak at 12.6 MiB, and
+  fill 198,616 of the 200,000 cells, so the next map needs the caps raised. See
   `games/luanti_web/docs/maps.md`.
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.

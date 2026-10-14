@@ -161,6 +161,24 @@ core = {
 	_emerges = {},
 	get_us_time = function() return core._us end,
 	_us = 0,
+	get_gametime = function() return core._gametime end,
+	_gametime = 0,
+	-- Particles are only counted: who they were for, and which spawners are
+	-- still alive.
+	add_particlespawner = function(def)
+		core._next_spawner = core._next_spawner + 1
+		core._spawners[core._next_spawner] = def
+		return core._next_spawner
+	end,
+	delete_particlespawner = function(id)
+		core._spawners[id] = nil
+	end,
+	_next_spawner = 0,
+	_spawners = {},
+	add_particle = function(def)
+		core._particles[#core._particles + 1] = def
+	end,
+	_particles = {},
 	after = function(_, fn) afters[#afters + 1] = fn end,
 	log = function() end,
 	chat_send_player = function() end,
@@ -345,6 +363,129 @@ for _, map in ipairs(lw_maps.maps) do
 		assert_eq(player:_sky(), nil, map.id .. " is seen in the hub's own sky")
 	end
 end
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+
+--------------------------------------------------------------------------
+-- The rainbow storm: rain and lightning only while someone is on the island
+--------------------------------------------------------------------------
+
+local function run_afters()
+	local queue = afters
+	afters = {}
+	for _, fn in ipairs(queue) do
+		fn()
+	end
+end
+
+local function spawners()
+	local count = 0
+	for _ in pairs(core._spawners) do
+		count = count + 1
+	end
+	return count
+end
+
+-- The registry walk above already stood on the storm once; drop whatever
+-- flash that left pending.
+run_afters()
+
+local storm = lw_maps.by_id["rainbow_storm"]
+assert_true(storm ~= nil and storm.storm ~= nil, "the rainbow storm has a storm")
+
+-- The beat: deterministic from gametime, every 6 to 8 seconds, and every rod
+-- gets struck.
+local flashes, struck, previous = 0, {}, nil
+for t = 0, 200 do
+	local k = lw_maps.storm_flash(t)
+	if k then
+		flashes = flashes + 1
+		if previous then
+			assert_true(t - previous >= 6 and t - previous <= 8,
+				("flashes at %d and %d are not 6-8 s apart"):format(previous, t))
+		end
+		previous = t
+		struck[k % #storm.storm.rods + 1] = true
+		assert_eq(lw_maps.storm_flash(t), k, "the same second is the same flash")
+	end
+end
+assert_true(flashes >= 25, "the storm flashes about every seven seconds")
+for index = 1, #storm.storm.rods do
+	assert_true(struck[index], ("rod %d is struck"):format(index))
+end
+
+-- Nobody on the island: no rain, no lightning, whatever the clock says.
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+core._particles = {}
+core._gametime = 0
+step(0.1)
+assert_eq(spawners(), 0, "no rain while nobody is on the storm")
+assert_eq(#core._particles, 0, "no lightning while nobody is on the storm")
+
+-- On the island: one rain spawner attached to the visitor, for the visitor.
+player:set_pos(storm.spawn)
+core._gametime = 3
+step(1.0)
+assert_eq(spawners(), 1, "rain starts when a visitor arrives")
+local spawner = core._spawners[core._next_spawner]
+assert_eq(spawner.attached, player, "the rain follows the visitor")
+assert_eq(spawner.playername, "visitor", "the rain is drawn for the visitor only")
+assert_eq(spawner.texture, "lw_rain.png", "the rain uses the streak texture")
+step(1.0)
+assert_eq(spawners(), 1, "staying on the island keeps one spawner, not a pile")
+
+-- A flash: a white sky, then the storm's own sky back; a bolt onto a rod.
+local storm_sky = player:_sky().sky_color.day_sky
+core._gametime = 21
+core._particles = {}
+step(0.05)
+assert_true(#core._particles > 0, "a flash second draws a bolt")
+assert_true(player:_sky().sky_color.day_sky ~= storm_sky, "the sky flashes")
+assert_eq(player:_ratio(), 1, "the flash lights the island")
+local rod = lw_maps.to_world(storm, storm.storm.rods[
+	lw_maps.storm_flash(21) % #storm.storm.rods + 1])
+local lowest = math.huge
+for _, particle in ipairs(core._particles) do
+	assert_eq(particle.playername, "visitor", "the bolt is drawn for the visitor only")
+	assert_true(math.abs(particle.pos.x - rod.x) < 1 and math.abs(particle.pos.z - rod.z) < 1,
+		"the bolt comes down on the rod")
+	lowest = math.min(lowest, particle.pos.y - particle.size / 20)
+end
+assert_true(lowest >= rod.y + 0.5 - 0.01, "the bolt stops at the top of the rod")
+local drawn = #core._particles
+step(0.05)
+assert_eq(#core._particles, drawn, "one bolt per flash, not one per step")
+run_afters()
+assert_eq(player:_sky().sky_color.day_sky, storm_sky, "the storm's sky comes back")
+assert_eq(player:_ratio(), storm.day_night_ratio, "the storm's dimness comes back")
+assert_eq(player:_sky().fog.fog_distance, storm.sky.fog.fog_distance,
+	"the storm keeps its fog through a flash")
+
+-- Off the island between the flash and its end: the hub's sky stays.
+core._gametime = 27
+step(0.05)
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+run_afters()
+assert_eq(player:_sky(), nil, "a flash does not follow the visitor home")
+assert_eq(player:_ratio(), nil, "the hub is midday again")
+assert_eq(spawners(), 0, "the rain stops when the visitor leaves")
+
+-- /maps from the storm to the lane carries neither rain nor storm along.
+player:set_pos(storm.spawn)
+step(1.0)
+assert_eq(spawners(), 1, "rain starts again on the way back")
+player:set_pos(halloween.spawn)
+step(1.0)
+assert_eq(spawners(), 0, "the lane is dry")
+assert_eq(player:_ratio(), halloween.day_night_ratio, "the lane is still dusk")
+assert_eq(player:_sky().fog.fog_distance, halloween.sky.fog.fog_distance,
+	"the lane has its own fog, not the storm's")
+core._particles = {}
+core._gametime = 42
+step(0.05)
+assert_eq(#core._particles, 0, "no lightning on the lane")
 player:set_pos({x = 0, y = 10, z = -14})
 step(1.0)
 

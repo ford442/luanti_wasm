@@ -27,9 +27,9 @@ Layout, in the atlas the hub plaza sits in the middle of::
     [ smoke caldera ]                    [ crystal bazaar ]
     [ halloween ]------[ hub ]------[ fruit garden ]
                          |
-    [ lighthouse ]  [ snow mountain ]
+    [ lighthouse ]  [ snow mountain ]   [ rainbow storm ]
 
-The diagonal three are reached by causeways that turn in the open water;
+The diagonal four are reached by causeways that turn in the open water;
 lw_world/maps.lua has the legs, and games/luanti_web/docs/maps.md the recipe
 for adding a map.
 
@@ -1701,6 +1701,74 @@ def build_smoke_caldera() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 7. Rainbow storm
+# --------------------------------------------------------------------------
+
+# A long, low box: the arches are a walk, not a climb, and the storm is the
+# sky above them, so nothing in the schematic stands higher than a rod.
+RAINBOW_SIZE = (64, 8, 24)
+# The causeway lands on the west face, on the middle (green) band.
+RAINBOW_SPAWN = (1, FLOOR, 11)
+
+# Outer edge to outer edge across the deck, one band per row of z.
+RAINBOW_BANDS = ("red", "orange", "yellow", "green", "cyan", "blue", "violet")
+DECK_Z0 = 8
+DECK_Z1 = DECK_Z0 + len(RAINBOW_BANDS) - 1
+# Where each arch's feet stand. Neighbouring arches share a foot, and the two
+# ends are the landings: everything west of the first foot and east of the
+# last is solid ground at the causeway's level.
+ARCH_FEET = (8, 33, 58)
+ARCH_RISE = 3
+ARCH_RUN = 4                        # steps per node of rise
+# A lightning rod on each crest: (x of the crest, z of the rod). The rod
+# stands on a plinth just off the deck's edge, alternating sides, so the bolt
+# comes down beside the path rather than on it.
+RAINBOW_RODS = ((20, DECK_Z0 - 1), (45, DECK_Z1 + 1))
+
+
+def arch_height(x: int) -> int:
+	"""Local y of the feet of someone standing on the deck at column ``x``."""
+	if x <= ARCH_FEET[0] or x >= ARCH_FEET[-1]:
+		return FLOOR
+	foot = max(f for f in ARCH_FEET if f <= x)
+	span = ARCH_FEET[ARCH_FEET.index(foot) + 1] - foot
+	d = min(x - foot, foot + span - x)
+	# (d + 1) // RUN rather than d // RUN: with an odd span that makes every
+	# flight a full four, the crest included, and the shared foot five.
+	return FLOOR + min(ARCH_RISE, (d + 1) // ARCH_RUN)
+
+
+def build_rainbow_storm() -> Build:
+	sx, sy, sz = RAINBOW_SIZE
+	build = Build(sx, sy, sz)
+	# Lagoon under the arches, at the atlas sea's own level (local SURFACE - 1),
+	# so the island reads as two landings with open water between them.
+	build.box(0, 0, 0, sx - 1, SURFACE - 1, sz - 1, WATER)
+	for x0, x1 in ((0, ARCH_FEET[0] - 1), (ARCH_FEET[-1] + 1, sx - 1)):
+		build.box(x0, 0, 0, x1, SURFACE - 2, sz - 1, STONE)
+		build.box(x0, SURFACE - 1, 0, x1, SURFACE - 1, sz - 1, DIRT)
+		build.box(x0, SURFACE, 0, x1, SURFACE, sz - 1, GRASS)
+
+	# The deck: one node thick, a band of wool per row, from landing to
+	# landing. Where it is down at the water it stands on a pier of the same
+	# wool, so the bands carry on to the lagoon floor.
+	for x in range(sx):
+		top = arch_height(x) - 1
+		for z, color in zip(range(DECK_Z0, DECK_Z1 + 1), RAINBOW_BANDS):
+			build.set(x, top, z, wool(color))
+			if top == SURFACE and ARCH_FEET[0] <= x <= ARCH_FEET[-1]:
+				build.box(x, 0, z, x, SURFACE - 1, z, wool(color))
+
+	# Lightning rods: a gold plinth level with the crest's deck, a fence post
+	# on it. lw_maps aims the bolts at the top of the post.
+	for x, z in RAINBOW_RODS:
+		crest = arch_height(x)
+		build.set(x, crest - 1, z, GOLD)
+		build.set(x, crest, z, FENCE)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -1735,6 +1803,7 @@ SPECS = [
 		build_lighthouse_tide),
 	MapSpec("map_crystal_bazaar", BAZAAR_SIZE, BAZAAR_SPAWN, build_crystal_bazaar),
 	MapSpec("map_smoke_caldera", CALDERA_SIZE, CALDERA_SPAWN, build_smoke_caldera),
+	MapSpec("map_rainbow_storm", RAINBOW_SIZE, RAINBOW_SPAWN, build_rainbow_storm),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}
