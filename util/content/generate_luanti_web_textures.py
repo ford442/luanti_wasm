@@ -1295,6 +1295,356 @@ def reel_cell_strips(frame_fn: Callable[[int], Image]) -> dict[tuple[int, int], 
 
 
 # --------------------------------------------------------------------------
+# Dance skins (64x32, the character.b3d layout)
+# --------------------------------------------------------------------------
+
+# lw_dance's character mesh is the classic 64x32 player layout: every box is
+# unfolded as top/bottom above, then right/front/left/back in a row. `box_faces`
+# names where each face of each box lands, so the skins below are painted per
+# face and never by raw coordinate. The hat overlay (x >= 32, y < 16) is left
+# transparent; the mesh does not draw it.
+SKIN_W = 64
+SKIN_H = 32
+
+SKIN_BOXES: dict[str, tuple[int, int, int, int, int]] = {
+	# name: (u, v, width, height, depth)
+	"head": (0, 0, 8, 8, 8),
+	"body": (16, 16, 8, 12, 4),
+	"arm": (40, 16, 4, 12, 4),
+	"leg": (0, 16, 4, 12, 4),
+}
+
+
+def box_faces(part: str) -> dict[str, tuple[int, int, int, int]]:
+	"""Face name -> (x0, y0, width, height) for one box of the skin."""
+	u, v, w, h, d = SKIN_BOXES[part]
+	return {
+		"top": (u + d, v, w, d),
+		"bottom": (u + d + w, v, w, d),
+		"right": (u, v + d, d, h),
+		"front": (u + d, v + d, w, h),
+		"left": (u + d + w, v + d, d, h),
+		"back": (u + d + w + d, v + d, w, h),
+	}
+
+
+def paint_face(image: Image, part: str, face: str,
+		fn: Callable[[int, int, int, int], Color]) -> None:
+	"""Fill one face; `fn(x, y, w, h)` gets face-local coordinates."""
+	x0, y0, w, h = box_faces(part)[face]
+	for y in range(h):
+		for x in range(w):
+			put(image, x0 + x, y0 + y, fn(x, y, w, h))
+
+
+def paint_rows(image: Image, part: str, face: str, rows: tuple[str, ...],
+		legend: dict[str, Color]) -> None:
+	"""ASCII art onto one face, one character per pixel."""
+	x0, y0, _, _ = box_faces(part)[face]
+	for y, row in enumerate(rows):
+		for x, char in enumerate(row):
+			put(image, x0 + x, y0 + y, legend[char])
+
+
+# Lace Waterfall: black lace, pale skin, red lips, a thread of purple. Taken
+# from the band's own stills (both members in black lace with sheer sleeves and
+# black tights); the purple is the band's accent colour, kept to a choker and
+# the cuffs so it reads as a detail and not as a costume.
+LW_PURPLE = rgb("7b3fc4")
+LW_PURPLE_HI = rgb("a774e8")
+LACE_BLACK = rgb("121014")
+LACE_THREAD = rgb("2c2632")
+VELVET = rgb("0b0a0d")
+BAND_SKIN = rgb("ecd8cc")
+BAND_SKIN_SHADE = rgb("d4b8ab")
+BAND_HAIR = rgb("0e0c11")
+BAND_HAIR_HI = rgb("2a2533")
+LIPS = rgb("a3121d")
+LINER = rgb("19131a")
+
+
+def lace(noise: Noise, x: int, y: int, under: Color, sheer: float) -> Color:
+	"""One pixel of lace over `under`. `sheer` 0 is solid black, 1 is bare."""
+	# A diamond mesh with a few denser motifs, which is what lace reads as at
+	# four pixels a limb: an even net with flowers caught in it.
+	thread = (x + y) % 4 == 0 or (x - y) % 4 == 0
+	motif = noise.at(x // 2, y // 2) > 0.78
+	if thread or motif:
+		return mix(LACE_BLACK, LACE_THREAD, 0.25 + 0.3 * noise.at(x, y))
+	return mix(LACE_BLACK, under, sheer)
+
+
+def band_member(face_rows: tuple[str, ...], eye: str, seed: int,
+		sideburn_rows: tuple[int, int]) -> Image:
+	image = new_image(SKIN_W, SKIN_H)
+	noise = Noise(seed)
+
+	def hair(x: int, y: int, w: int, h: int) -> Color:
+		return mix(BAND_HAIR, BAND_HAIR_HI, 0.6 * noise.at(x + 3 * w, y))
+
+	legend = {
+		"H": BAND_HAIR, "h": BAND_HAIR_HI,
+		"s": BAND_SKIN, "S": BAND_SKIN_SHADE,
+		"e": LINER, "i": rgb(eye), "l": LIPS,
+	}
+
+	# Head: the face is art, the rest is hair, and long hair covers the sides
+	# down to the jaw except for a strip of cheek next to the face.
+	paint_rows(image, "head", "front", face_rows, legend)
+	paint_face(image, "head", "top", hair)
+	paint_face(image, "head", "back", hair)
+	first, last = sideburn_rows
+
+	def side(edge: int) -> Callable[[int, int, int, int], Color]:
+		def fn(x: int, y: int, w: int, h: int) -> Color:
+			if x == edge and first <= y <= last:
+				return BAND_SKIN_SHADE
+			return hair(x, y, w, h)
+		return fn
+
+	# The right face meets the front at its last column, the left at its first.
+	paint_face(image, "head", "right", side(7))
+	paint_face(image, "head", "left", side(0))
+	paint_face(image, "head", "bottom",
+		lambda x, y, w, h: BAND_SKIN_SHADE if y < 4 else BAND_HAIR)
+
+	# Body: a high lace collar with the purple choker, a sheer yoke, then the
+	# dress. The back is hair to the shoulder blades.
+	def bodice(x: int, y: int, w: int, h: int) -> Color:
+		if y == 0:
+			return LW_PURPLE if 2 <= x <= 5 else LACE_BLACK
+		if y <= 4:
+			return lace(noise, x, y, BAND_SKIN, 0.65)
+		return lace(noise, x + 9, y, LACE_BLACK, 0.0)
+
+	def bodice_back(x: int, y: int, w: int, h: int) -> Color:
+		if y <= 5 and 1 <= x <= w - 2:
+			return hair(x, y, w, h)
+		return lace(noise, x + 17, y, LACE_BLACK, 0.0)
+
+	paint_face(image, "body", "front", bodice)
+	paint_face(image, "body", "back", bodice_back)
+	for face in ("right", "left", "top", "bottom"):
+		paint_face(image, "body", face,
+			lambda x, y, w, h: lace(noise, x + 31, y, LACE_BLACK, 0.0))
+
+	# Arms: puffed velvet shoulders, sheer lace sleeves to a purple cuff, hands.
+	def sleeve(x: int, y: int, w: int, h: int) -> Color:
+		if y <= 2:
+			return mix(VELVET, LACE_THREAD, 0.25 * noise.at(x + 40, y))
+		if y == h - 2:
+			return LW_PURPLE_HI if x % 2 == 0 else LW_PURPLE
+		if y == h - 1:
+			return BAND_SKIN
+		return lace(noise, x + 44, y, BAND_SKIN, 0.4)
+
+	for face in ("right", "front", "left", "back"):
+		paint_face(image, "arm", face, sleeve)
+	paint_face(image, "arm", "top", lambda x, y, w, h: VELVET)
+	# The underside of the arm box is the palm; the nails are the band's red.
+	paint_face(image, "arm", "bottom",
+		lambda x, y, w, h: LIPS if y == 0 else BAND_SKIN)
+
+	# Legs: the dress to the knee with a lace hem, sheer black tights, shoes.
+	def leg(x: int, y: int, w: int, h: int) -> Color:
+		if y <= 4:
+			return lace(noise, x + 50, y, LACE_BLACK, 0.0)
+		if y == 5:
+			return LACE_THREAD if x % 2 == 0 else LACE_BLACK
+		if y == h - 1:
+			return rgb("060507") if x % 3 else rgb("2a2730")
+		return mix(BAND_SKIN, LACE_BLACK, 0.8 + 0.06 * noise.at(x + 60, y))
+
+	for face in ("right", "front", "left", "back"):
+		paint_face(image, "leg", face, leg)
+	paint_face(image, "leg", "top", lambda x, y, w, h: LACE_BLACK)
+	paint_face(image, "leg", "bottom", lambda x, y, w, h: rgb("060507"))
+	return image
+
+
+# Rubella: long straight hair with a centre part.
+RUBELLA_FACE = (
+	"HHHhhHHH",
+	"HHssssHH",
+	"HssssssH",
+	"HeiSSieH",
+	"HssSSssH",
+	"HsssSssH",
+	"HssllssH",
+	"HHssssHH",
+)
+
+# Lillith: the blunt bangs are what tells the two apart at a distance.
+LILLITH_FACE = (
+	"HHHHHHHH",
+	"HhHHHHhH",
+	"HeiSSieH",
+	"HssSSssH",
+	"HssssssH",
+	"HssllssH",
+	"HHssssHH",
+	"HHHssHHH",
+)
+
+
+def tex_rubella() -> Image:
+	return band_member(RUBELLA_FACE, "3a2a28", 611, (2, 6))
+
+
+def tex_lillith() -> Image:
+	return band_member(LILLITH_FACE, "6f7f7b", 613, (2, 6))
+
+
+def crowd_member(skin: str, hair: str, top: str, legs: str, seed: int,
+		long_hair: bool) -> Image:
+	"""A fan: band tee with the purple stripe, plainer than the band."""
+	image = new_image(SKIN_W, SKIN_H)
+	noise = Noise(seed)
+	skin_c, hair_c = rgb(skin), rgb(hair)
+	skin_shade = shade(skin_c, 0.88)
+	top_c, legs_c = rgb(top), rgb(legs)
+
+	face = (
+		"HHHHHHHH",
+		"HssssssH" if long_hair else "ssssssss",
+		"ssssssss",
+		"seissies",
+		"sssSSsss",
+		"ssssssss",
+		"ssseesss",
+		"ssssssss",
+	)
+	legend = {"H": hair_c, "s": skin_c, "S": skin_shade, "e": rgb("3a2422"),
+		"i": rgb("201818")}
+	paint_rows(image, "head", "front", face, legend)
+
+	def hair_fn(x: int, y: int, w: int, h: int) -> Color:
+		return shade(hair_c, 0.85 + 0.3 * noise.at(x, y))
+
+	paint_face(image, "head", "top", hair_fn)
+
+	def head_side(x: int, y: int, w: int, h: int) -> Color:
+		limit = 6 if long_hair else 2
+		return hair_fn(x, y, w, h) if y <= limit else skin_shade
+
+	for face_name in ("right", "left"):
+		paint_face(image, "head", face_name, head_side)
+	paint_face(image, "head", "back",
+		lambda x, y, w, h: hair_fn(x, y, w, h) if (long_hair or y <= 5) else skin_shade)
+	paint_face(image, "head", "bottom", lambda x, y, w, h: skin_shade)
+
+	# The tee: plain colour, the band's purple stripe across the chest.
+	def tee(x: int, y: int, w: int, h: int) -> Color:
+		if 3 <= y <= 4 and w == 8:
+			return LW_PURPLE_HI if (x + y) % 2 else LW_PURPLE
+		return shade(top_c, 0.92 + 0.12 * noise.at(x + 20, y))
+
+	for face_name in ("front", "back", "right", "left", "top", "bottom"):
+		paint_face(image, "body", face_name, tee)
+
+	def arm(x: int, y: int, w: int, h: int) -> Color:
+		return shade(top_c, 0.9) if y <= 3 else skin_c
+
+	for face_name in ("right", "front", "left", "back"):
+		paint_face(image, "arm", face_name, arm)
+	paint_face(image, "arm", "top", lambda x, y, w, h: shade(top_c, 0.9))
+	paint_face(image, "arm", "bottom", lambda x, y, w, h: skin_c)
+
+	def leg(x: int, y: int, w: int, h: int) -> Color:
+		if y >= h - 2:
+			return rgb("e6e3dc") if y == h - 2 else rgb("2b2b2b")
+		return shade(legs_c, 0.88 + 0.16 * noise.at(x + 50, y))
+
+	for face_name in ("right", "front", "left", "back"):
+		paint_face(image, "leg", face_name, leg)
+	paint_face(image, "leg", "top", lambda x, y, w, h: legs_c)
+	paint_face(image, "leg", "bottom", lambda x, y, w, h: rgb("2b2b2b"))
+	return image
+
+
+def tex_crowd_a() -> Image:
+	return crowd_member("c99a74", "4a3020", "141216", "3b5a8a", 701, False)
+
+
+def tex_crowd_b() -> Image:
+	return crowd_member("6b4630", "120f0e", "3d1f63", "1a1a1e", 703, True)
+
+
+def tex_crowd_c() -> Image:
+	return crowd_member("efd2bf", "d77fb8", "6c6a70", "202024", 705, True)
+
+
+DANCE_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_dance_rubella.png": tex_rubella,
+	"lw_dance_lillith.png": tex_lillith,
+	"lw_dance_crowd_a.png": tex_crowd_a,
+	"lw_dance_crowd_b.png": tex_crowd_b,
+	"lw_dance_crowd_c.png": tex_crowd_c,
+}
+
+
+# --------------------------------------------------------------------------
+# Amp cabinets (lw_amps)
+# --------------------------------------------------------------------------
+
+TOLEX = rgb("16151a")
+
+
+def tolex(noise: Noise, x: int, y: int) -> Color:
+	return shade(TOLEX, 0.85 + 0.35 * noise.at(x, y))
+
+
+def tex_amp_front() -> Image:
+	# Tolex frame, purple grille cloth, a little silver badge up top.
+	noise = Noise(801)
+	image = new_image(S, S, TOLEX)
+	for y in range(S):
+		for x in range(S):
+			if 2 <= x <= S - 3 and 3 <= y <= S - 3:
+				weave = 1.0 if (x + y) % 2 == 0 else 0.78
+				image[y][x] = shade(rgb("4a2479"), weave * (0.9 + 0.2 * noise.at(x, y)))
+			else:
+				image[y][x] = tolex(noise, x, y)
+	fill_rect(image, 6, 1, 9, 1, rgb("c9c6d2"))
+	# Two speaker cones behind the cloth, just darker rings in the weave.
+	for cy in (6.5, 11.5):
+		for y in range(S):
+			for x in range(2, S - 2):
+				r = math.hypot(x - 7.5, y - cy)
+				if 1.5 <= r <= 2.4 and 3 <= y <= S - 3:
+					image[y][x] = shade(image[y][x], 0.6)
+	return image
+
+
+def tex_amp_side() -> Image:
+	noise = Noise(803)
+	image = new_image(S, S, TOLEX)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = tolex(noise, x, y)
+	# Corner protectors.
+	for cx, cy in ((0, 0), (S - 2, 0), (0, S - 2), (S - 2, S - 2)):
+		fill_rect(image, cx, cy, cx + 1, cy + 1, rgb("8d8a96"))
+	return image
+
+
+def tex_amp_top() -> Image:
+	image = tex_amp_side()
+	# The carry handle.
+	fill_rect(image, 4, 7, 11, 8, rgb("050406"))
+	fill_rect(image, 4, 6, 4, 9, rgb("8d8a96"))
+	fill_rect(image, 11, 6, 11, 9, rgb("8d8a96"))
+	return image
+
+
+AMP_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_amps_cab_front.png": tex_amp_front,
+	"lw_amps_cab_side.png": tex_amp_side,
+	"lw_amps_cab_top.png": tex_amp_top,
+}
+
+
+# --------------------------------------------------------------------------
 # Menu art
 # --------------------------------------------------------------------------
 
@@ -1427,6 +1777,14 @@ def generate(root: pathlib.Path) -> list[pathlib.Path]:
 	for reel, frame_fn in REELS.items():
 		for (row, col), strip in reel_cell_strips(frame_fn).items():
 			emit(theater / "lw_screen_{}_{}_{}.png".format(reel, row, col), strip)
+
+	dance = game / "mods" / "lw_dance" / "textures"
+	for name, factory in DANCE_TEXTURES.items():
+		emit(dance / name, factory())
+
+	amps = game / "mods" / "lw_amps" / "textures"
+	for name, factory in AMP_TEXTURES.items():
+		emit(amps / name, factory())
 
 	font_path = game / "mods" / "lw_world" / "font.lua"
 	font_path.parent.mkdir(parents=True, exist_ok=True)

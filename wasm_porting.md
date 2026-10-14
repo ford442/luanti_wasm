@@ -549,7 +549,7 @@ first frame, so growing it is a deliberate decision, not a side effect.
 
 | Budget | Limit | Why |
 |--------|-------|-----|
-| `luanti.data` | keep under ~16 MB (currently ~11 MB) | first-visit download on a phone |
+| `luanti.data` | keep under ~40 MB (currently ~38 MB: ~11 MB of engine and game data plus ~26 MB of `lw_amps` songs) | first-visit download on a phone |
 | Heap | 256 MB initial, 1 GB maximum | `-sINITIAL_MEMORY` / `-sMAXIMUM_MEMORY` |
 | Texture size | 16 or 32 px tiles; no single texture over 2048 px | GLES2 limits and atlas pressure |
 | Runtime media | unbounded, but fetched on demand | `client/web/media/`, never preloaded |
@@ -583,6 +583,20 @@ Bundle:
   `games/luanti_web/docs/maps.md`.
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.
+* The Lace Waterfall songs for the stage amps
+  (`games/luanti_web/mods/lw_amps/sounds/`). That is seven mixes of "Around",
+  each a pair of mono Vorbis files (~26 MiB in all). This is the one deliberate
+  exception to "small": the budget above was raised from ~16 MB to ~40 MB for
+  them. The amps can only place the song on the stage if it is ordinary game
+  media, so it cannot be a runtime fetch from `client/web/media/`. Long sounds
+  are streamed, not decoded whole (`SOUND_DURATION_MAX_SINGLE` is 3 s in
+  `src/client/sound/sound_constants.h`). The cost is the download, plus a
+  second copy: the client caches received media under `path_cache`, which on
+  the web is inside the IDBFS-backed `path_user`, so the songs are also
+  written to IndexedDB on the first world load. Skipping the media cache for
+  simple singleplayer under `__EMSCRIPTEN__` would remove that copy; it is
+  not done yet. `util/content/test_luanti_web_amps.py` fails past 30 MiB of
+  songs.
 * An optional tiny authoring mod (e.g. a clone-stick tool) — not a full
   modpack zoo.
 
@@ -598,7 +612,11 @@ Do not bundle yet:
   bounded (`games/luanti_web/mods/lw_world/init.lua`).
 * Content that assumes OpenAL is production-ready. Phase 5 shipped OpenAL as
   a playable MVP (see below and #8), but it hasn't been hardened for heavy or
-  long-running audio — don't bundle content that leans on that.
+  long-running audio. Don't bundle content that leans on that. The stage amps
+  are the one exception, and they keep it light: one song at a time, two
+  sources per listener, and a listener's sources are released once they walk
+  out of earshot. A missing or failing `sound_play` leaves the band dancing in
+  silence instead of erroring.
 * Large MP4s inside `--preload-file` / `luanti.data`. Theater clips are
   runtime fetches precisely so the download cost falls only on visitors who
   walk into the theater.

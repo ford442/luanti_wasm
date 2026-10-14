@@ -62,6 +62,10 @@ register("groove", {
 	description = "Groove — the idle bounce",
 	anim = "stand",
 	loop = true,
+	-- One full sway (two bounces) every bar: the bounce lands on every
+	-- other beat, which is the feel a fast song wants from a groove.
+	cycle = 2 * pi / 2.6,
+	cycle_beats = 4,
 	track = "dance_groove",
 	pose = function(t)
 		local beat = t * 2.6
@@ -93,6 +97,9 @@ register("spin", {
 	description = "Spin — body turns, arms out",
 	anim = "stand",
 	loop = true,
+	-- A full turn per bar.
+	cycle = 360 / 400,
+	cycle_beats = 4,
 	track = "dance_spin",
 	pose = function(t)
 		local turn = (t * 400) % 360
@@ -116,6 +123,8 @@ register("wave", {
 	description = "Wave — both arms up, hands swaying",
 	anim = "stand",
 	loop = true,
+	cycle = 2 * pi / 4.2,
+	cycle_beats = 4,
 	track = "dance_wave",
 	pose = function(t)
 		local sway = sin(t * 4.2)
@@ -143,6 +152,9 @@ register("stomp", {
 	anim = "mine",
 	speed = 20,
 	loop = true,
+	-- One kick from each leg per bar.
+	cycle = 2 * pi / 3.4,
+	cycle_beats = 4,
 	track = "dance_stomp",
 	pose = function(t)
 		local beat = t * 3.4
@@ -199,6 +211,9 @@ register("robot", {
 	anim = "stand",
 	loop = true,
 	snap = true,
+	-- Four held poses, one per beat.
+	cycle = 0.34 * #ROBOT,
+	cycle_beats = 4,
 	track = "dance_robot",
 	pose = function(t)
 		return ROBOT[floor(t / 0.34) % #ROBOT + 1]
@@ -242,6 +257,112 @@ register("bow", {
 			Arm_Left = {rot = {x = 25 * depth, z = 30 * depth}},
 			Leg_Right = {rot = {x = -14 * depth}},
 			Leg_Left = {rot = {x = 10 * depth}},
+		}
+	end,
+})
+
+--------------------------------------------------------------------------
+-- Concert moves
+--------------------------------------------------------------------------
+
+-- Four more for a band and the floor in front of it (the Lace Waterfall
+-- routine, games/luanti_web/routines/lace_waterfall_around.lua). They are in
+-- the shared catalog like the rest, so `/dance pogo` works for a visitor too,
+-- but they are not on the number keys or in the random key's pool: the six
+-- pad moves are the ones a visitor learns, and these are the crowd's.
+--
+-- Every bounce here is a *dip* (a negative Body offset), never a lift. The
+-- groove proves which way a dip goes on this skeleton; a lift would be a guess
+-- about a flipped axis, and a guess wrong by a sign puts the crowd's feet
+-- through the floor.
+
+-- A slow sway with both arms overhead: the bridge, the last chorus, the
+-- lighters-up moment.
+register("sway", {
+	in_random_pool = false,
+	label = "Sway",
+	description = "Sway — arms up, side to side",
+	anim = "stand",
+	loop = true,
+	cycle = 2,
+	cycle_beats = 8,
+	pose = function(t)
+		local side = sin(t * pi)
+		return {
+			Body = {rot = {y = side * 6, z = side * 8}},
+			Head = {rot = {x = -14, z = side * 10}},
+			Arm_Right = {rot = {z = -140 + side * 15, x = -10}},
+			Arm_Left = {rot = {z = 140 + side * 15, x = -10}},
+			Leg_Right = {rot = {x = side * 4}},
+			Leg_Left = {rot = {x = -side * 4}},
+		}
+	end,
+})
+
+-- Down into a crouch and back up to standing, fists up: what a pogo looks
+-- like from the stage when the floor is only allowed to dip.
+register("pogo", {
+	in_random_pool = false,
+	label = "Pogo",
+	description = "Pogo — bounce on the beat, fists up",
+	anim = "stand",
+	loop = true,
+	cycle = 1,
+	cycle_beats = 2,
+	pose = function(t)
+		local phase = t % 1
+		local crouch = 1 - sin(phase * pi)
+		local pump = sin(phase * pi)
+		return {
+			Body = {rot = {x = crouch * 8}, pos = {y = -crouch * 1.6}},
+			Head = {rot = {x = -10 + crouch * 10}},
+			Arm_Right = {rot = {z = -150 + pump * 20, x = -10}},
+			Arm_Left = {rot = {z = 150 - pump * 20, x = -10}},
+			Leg_Right = {rot = {x = -crouch * 22}},
+			Leg_Left = {rot = {x = -crouch * 22}},
+		}
+	end,
+})
+
+-- Hands meet overhead once a cycle, on the backbeat when danced to a song.
+register("clap", {
+	in_random_pool = false,
+	label = "Clap",
+	description = "Clap — hands together overhead",
+	anim = "stand",
+	loop = true,
+	cycle = 1,
+	cycle_beats = 2,
+	pose = function(t)
+		-- 1 when the hands meet, 0 when they are furthest apart.
+		local meet = abs(cos((t % 1) * pi))
+		return {
+			Body = {pos = {y = -meet * 0.5}},
+			Head = {rot = {x = -18}},
+			Arm_Right = {rot = {z = -(130 + 40 * meet), x = -15}},
+			Arm_Left = {rot = {z = 130 + 40 * meet, x = -15}},
+		}
+	end,
+})
+
+-- The band's own move: a hard nod from the neck with the shoulders following.
+register("headbang", {
+	in_random_pool = false,
+	label = "Headbang",
+	description = "Headbang — nod hard on the beat",
+	anim = "stand",
+	loop = true,
+	cycle = 1,
+	cycle_beats = 2,
+	pose = function(t)
+		local nod = abs(sin(t * pi))
+		return {
+			Body = {rot = {x = nod * 12}, pos = {y = -nod * 0.4}},
+			Head = {rot = {x = 10 + nod * 35}},
+			Arm_Right = {rot = {x = -20 - nod * 10, z = -15}},
+			Arm_Left = {rot = {x = -20 - nod * 10, z = 15}},
+			Leg_Right = {rot = {x = -4}},
+			Leg_Left = {rot = {x = 4}},
 		}
 	end,
 })

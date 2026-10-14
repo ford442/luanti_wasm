@@ -162,7 +162,31 @@ function lw_dance.new_clip(model)
 		acc = 0,
 		sent = {},
 		walking = false,
+		-- How fast the pose clock runs against real time. A clip with no
+		-- `bpm` (every player's) stays at 1; the director gives its dancers'
+		-- clips the routine's bpm, and play_move then picks the rate that
+		-- lands each move's cycle on the beat (see `lw_dance.cycle_rate`).
+		bpm = nil,
+		rate = 1,
 	}
+end
+
+-- The rate that makes one cycle of `def` take `beats` beats at `bpm`.
+--
+-- Every looping move in moves.lua records `cycle`, the seconds one full cycle
+-- of its pose takes at rate 1, and `cycle_beats`, how many beats that cycle
+-- should span when it is danced to a song. A move with no cycle (a one-shot
+-- like the bow) or a routine with no bpm keeps rate 1: its timing is in
+-- seconds, and stretching a one-shot would also stretch its `duration`.
+function lw_dance.cycle_rate(def, bpm, beats)
+	if not (def and def.cycle and bpm and bpm > 0) then
+		return 1
+	end
+	beats = beats or def.cycle_beats or 4
+	if beats <= 0 then
+		return 1
+	end
+	return def.cycle / (beats * 60 / bpm)
 end
 
 -- Start `name` on `obj`. This is the entry point an NPC uses:
@@ -183,6 +207,9 @@ function lw_dance.play_move(obj, name, opts)
 	if opts.walking ~= nil then
 		clip.walking = opts.walking
 	end
+	if opts.bpm ~= nil then
+		clip.bpm = opts.bpm
+	end
 
 	local def = name and lw_dance.get_move(name) or nil
 	if name and not def then
@@ -194,6 +221,10 @@ function lw_dance.play_move(obj, name, opts)
 	clip.t = 0
 	clip.acc = 0
 	clip.sent = {}
+	-- `opts.beats` is a routine step's `cycle_beats`; without one the move's
+	-- own default applies. A one-shot's `next` comes back through here too,
+	-- so the groove after a bow is back on the beat.
+	clip.rate = lw_dance.cycle_rate(def, clip.bpm, opts.beats)
 
 	lw_dance.apply_base_animation(obj, clip.model, def, clip.walking)
 	if clip.model and clip.model.boned == false then
@@ -216,7 +247,7 @@ end
 -- stance and a dancer drops to whatever the routine says next.
 function lw_dance.step_move(obj, clip, dtime)
 	local def = clip.def
-	clip.t = clip.t + dtime
+	clip.t = clip.t + dtime * (clip.rate or 1)
 
 	local pose = nil
 	if def and def.pose then

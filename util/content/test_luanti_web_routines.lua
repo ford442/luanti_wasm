@@ -78,6 +78,7 @@ function vector.new(x, y, z)
 	return {x = x or 0, y = y or 0, z = z or 0}
 end
 function vector.copy(v) return vector.new(v) end
+function vector.multiply(v, k) return vector.new(v.x * k, v.y * k, v.z * k) end
 function vector.zero() return vector.new(0, 0, 0) end
 local function scalar(v)
 	return type(v) == "number" and {x = v, y = v, z = v} or v
@@ -293,6 +294,27 @@ core = {
 	get_player_window_information = function() return nil end,
 }
 
+-- The stage amps load first, as they do in the game (lw_dance optionally
+-- depends on lw_amps): the director hooks their song events at load time. The
+-- sound calls are recorded, never played.
+local amp_storage = {}
+local sounds_played = {}
+core.get_mod_storage = function()
+	return {
+		get_string = function(_, k) return amp_storage[k] or "" end,
+		set_string = function(_, k, v) amp_storage[k] = v end,
+	}
+end
+core.string_to_pos = function() return nil end
+core.check_player_privs = function() return true end
+core.raycast = function() return function() return nil end end
+core.sound_play = function(spec, params)
+	sounds_played[#sounds_played + 1] = {spec = spec, params = params}
+	return #sounds_played
+end
+core.sound_stop = function() end
+dofile(ROOT .. "/games/luanti_web/mods/lw_amps/init.lua")
+
 -- lw_dance uses lw_nodes.wool_texture for the mascot's cube.
 lw_nodes = {
 	wool_texture = function(hex) return "lw_wool.png^[multiply:" .. hex end,
@@ -356,14 +378,16 @@ assert_eq(lw_dance.MAX_DANCERS, 8, "dancer cap")
 -- The shipped routine files load
 --------------------------------------------------------------------------
 
-for _, id in ipairs({"chorus_line_v1", "porch_haunt", "fruit_stomp"}) do
+for _, id in ipairs({"chorus_line_v1", "porch_haunt", "fruit_stomp",
+		"lace_waterfall_around"}) do
 	local routine = lw_dance.get_routine(id)
 	assert_true(routine ~= nil, id .. " is registered")
 	if routine then
 		for _, step_def in ipairs(routine.steps) do
 			assert_true(step_def.move == nil or lw_dance.get_move(step_def.move) ~= nil,
 				id .. " step move " .. tostring(step_def.move) .. " exists")
-			assert_true(step_def.role == "*" or routine.roles[step_def.role] ~= nil,
+			assert_true(step_def.role == "*" or routine.roles[step_def.role] ~= nil
+					or routine.groups[step_def.role] ~= nil,
 				id .. " step role " .. tostring(step_def.role) .. " has a dancer")
 			assert_true(step_def.t <= routine.length,
 				id .. " step at " .. step_def.t .. "s is inside the routine")
@@ -614,6 +638,186 @@ for _, entity in ipairs(entities) do
 end
 assert_true(keys_after > keys_before, "the rider keeps playing its clip aboard")
 lw_dance.stop_routine("test_ride")
+
+--------------------------------------------------------------------------
+-- Lace Waterfall: a dance map that follows the song
+--------------------------------------------------------------------------
+
+local around = lw_dance.get_routine("lace_waterfall_around")
+assert_true(around ~= nil, "the Around routine is registered")
+assert_eq(around.bpm, 175, "Around is 175 bpm")
+assert_eq(#around.dancers, lw_dance.MAX_DANCERS, "two band members and six fans fill the cap")
+assert_eq(#around.groups.band, 2, "the band is a group of two")
+assert_eq(#around.groups.crowd, 6, "the crowd is a group of six")
+assert_true(around.song_set.around_happy_hard, "it dances to the main mix")
+assert_true(around.song_set.around_happy_hard_6, "and to the alternate takes")
+for _, rig in ipairs({"rubella", "lillith", "crowd_1", "crowd_2", "crowd_3",
+		"crowd_4", "crowd_5", "crowd_6"}) do
+	assert_true(lw_dance.models[rig] ~= nil and lw_dance.models[rig].boned,
+		rig .. " is a rigged character")
+end
+assert_eq(lw_dance.models.rubella.textures[1], "lw_dance_rubella.png", "Rubella's skin")
+assert_eq(lw_dance.models.lillith.textures[1], "lw_dance_lillith.png", "Lillith's skin")
+for _, move in ipairs({"sway", "pogo", "clap", "headbang"}) do
+	assert_true(lw_dance.get_move(move) ~= nil, move .. " is in the catalog")
+	assert_eq(lw_dance.get_move(move).in_random_pool, false,
+		move .. " stays off the random key")
+end
+
+-- A stage the amps describe: cabs on the front corners of a deck at y = 9,
+-- left cab at x = 200 and right at x = 206. Left on the audience's left puts
+-- the audience to the south (-z), on a floor two nodes below the deck.
+core.register_node("test:deck", {})
+for x = 194, 212 do
+	for z = -1, 4 do
+		core.set_node({x = x, y = 9, z = z}, {name = "test:deck"})
+	end
+	for z = -14, -2 do
+		core.set_node({x = x, y = 7, z = z}, {name = "test:deck"})
+	end
+end
+lw_amps.set_amps({x = 200, y = 11, z = 0}, {x = 206, y = 11, z = 0})
+local floor_fan = FakePlayer("floor_fan", {x = 203, y = 8, z = -8})
+
+local stage = lw_dance.stage_from_amps({x = 200, y = 11, z = 0}, {x = 206, y = 11, z = 0})
+assert_eq(stage.pos.y, 10, "the band stands in the cabs' own node")
+assert_eq(stage.pos.z, 1, "one node back from the line of the cabs")
+local to_audience = core.yaw_to_dir(stage.yaw)
+assert_near(to_audience.z, -1, 1e-6, "the audience is in front of the cabs")
+
+local ok_play = lw_amps.play("around_happy_hard")
+assert_true(ok_play, "the song plays")
+local show = lw_dance.running["lace_waterfall_around"]
+assert_true(show ~= nil, "the song starting puts the band on stage")
+assert_eq(show.song, "around_happy_hard", "the director follows the song")
+assert_near(show.length, 159.021474, 1e-6, "and runs as long as it")
+local on = 0
+for _ in pairs(show.cast) do
+	on = on + 1
+end
+assert_eq(on, 8, "everybody is on")
+
+local rubella, lillith = show.cast[1], show.cast[2]
+assert_near(rubella.home.x, 201.5, 1e-6, "Rubella stands by the audience-left cab")
+assert_near(lillith.home.x, 204.5, 1e-6, "Lillith by the audience-right one")
+assert_near(rubella.home.y, 9.5, 1e-6, "the band's feet are on the deck")
+for index = 3, 8 do
+	local fan = show.cast[index]
+	assert_true(fan.home.z < -2, "fan " .. index .. " is off the front of the stage")
+	assert_near(fan.home.y, 7.5, 1e-6, "fan " .. index .. " settles onto the floor below")
+	assert_near(fan.obj:get_yaw(), stage.yaw + math.pi, 1e-6,
+		"fan " .. index .. " faces the band")
+end
+assert_near(rubella.obj:get_yaw(), stage.yaw, 1e-6, "the band faces the audience")
+
+-- The clock is the song's. Twelve seconds in is past beat 32 (10.97 s), where
+-- the intro's sway turns into the verse's groove.
+for _ = 1, 120 do
+	step(0.1)
+end
+local _, song_t = lw_amps.now_playing()
+assert_near(show.t, song_t, 1e-6, "the routine reads the song's clock")
+assert_eq(rubella.clip.move, "groove", "the band grooves through the verse")
+assert_eq(show.cast[3].clip.move, "groove", "and so does the crowd")
+-- The groove's sway is stretched onto a bar at 175 bpm.
+local groove = lw_dance.get_move("groove")
+assert_near(rubella.clip.rate, groove.cycle / (4 * 60 / 175), 1e-6,
+	"the move runs at the song's tempo")
+assert_true(rubella.clip.rate > 1.5, "which is faster than the pad's own groove")
+
+-- Chorus one, beat 96 (32.9 s): the band headbangs and the floor pogos.
+for _ = 1, 220 do
+	step(0.1)
+end
+assert_eq(rubella.clip.move, "headbang", "the band headbangs in the chorus")
+assert_eq(show.cast[5].clip.move, "pogo", "the crowd pogos")
+assert_true(not lw_dance.seek_routine("lace_waterfall_around", 3),
+	"a routine that follows a song cannot be seeked away from it")
+assert_true(not lw_dance.set_routine_bpm("lace_waterfall_around", 120),
+	"nor given another tempo")
+
+-- The song stops: the cast stays, in the stance, clock held.
+lw_amps.stop()
+assert_true(lw_dance.running["lace_waterfall_around"] == show, "the band stays on stage")
+assert_true(show.paused, "idle")
+assert_eq(rubella.clip.move, nil, "in the stance")
+local held = show.t
+for _ = 1, 20 do
+	step(0.1)
+end
+assert_eq(show.t, held, "the clock holds while the song is stopped")
+assert_true(lw_dance.routine_status("lace_waterfall_around"):find("idle") ~= nil,
+	"/routine status says it is idle")
+
+-- It starts again: picked up from the top, in one burst no bigger than one
+-- key per bone per dancer (and the next step's keys).
+local calls_before = 0
+for _, entity in ipairs(entities) do
+	calls_before = calls_before + entity.bone_calls
+end
+lw_amps.play("around_happy_hard")
+local calls_after = 0
+for _, entity in ipairs(entities) do
+	calls_after = calls_after + entity.bone_calls
+end
+assert_true(not show.paused, "the song starting again wakes the band")
+assert_eq(show.t, 0, "from the top")
+assert_eq(rubella.clip.move, "sway", "on the intro")
+assert_true(calls_after - calls_before <= 8 * 6 * 2,
+	"catching up sends each dancer one move, not the whole map")
+
+-- A late song position (a different take started part-way) lands on the step
+-- the dance map has for it, not on the top.
+lw_dance.attach_song("lace_waterfall_around", "around_happy_hard_1",
+	{length = 199.328413, elapsed = 50, left = {x = 200, y = 11, z = 0},
+		right = {x = 206, y = 11, z = 0}})
+assert_near(show.length, 199.328413, 1e-6, "a longer take is followed for its whole length")
+assert_eq(rubella.clip.move, "headbang", "50 s in is the first chorus")
+lw_dance.attach_song("lace_waterfall_around", "around_happy_hard",
+	{length = 159.021474, elapsed = 0})
+
+-- The song loops; so does the dance.
+for _ = 1, 161 do
+	step(1.0)
+end
+assert_true(show.t < 3, "the dance wraps with the song")
+assert_eq(rubella.clip.move, "sway", "back to the intro")
+
+-- Stopping the routine by hand stops the song it was dancing to.
+lw_dance.stop_routine("lace_waterfall_around")
+assert_eq(lw_amps.now_playing(), nil, "/routine stop on a song's dance stops the song")
+
+-- And starting it by hand starts the song, on the stage the amps describe.
+local manual = lw_dance.start_routine("lace_waterfall_around")
+assert_true(manual ~= nil, "the routine starts by hand with only the amps set up")
+assert_eq(lw_amps.now_playing(), "around_happy_hard", "and starts its song")
+assert_eq(manual.song, "around_happy_hard", "which it then follows")
+lw_dance.stop_routine("lace_waterfall_around")
+assert_eq(lw_amps.now_playing(), nil, "and stops it again")
+floor_fan.set_pos(nil, {x = 0, y = 9, z = 50})
+
+-- A routine on its own clock is untouched by any of this.
+lw_dance.register_routine({
+	id = "test_tempo",
+	title = "Tempo",
+	bpm = 120,
+	dancers = {{role = "lead", model = "person"}},
+	steps = {{beat = 0, move = "groove"}, {beat = 4, move = "bow"}},
+	length_beats = 16,
+})
+local tempo = lw_dance.start_routine("test_tempo", {pos = {x = -40, y = 9, z = -40}})
+FakePlayer("tempo_watcher", {x = -40, y = 9, z = -40})
+step(0.1)
+assert_near(tempo.cast[1].clip.rate, groove.cycle / (4 * 60 / 120), 1e-6,
+	"a routine's own bpm sets the move rate")
+for _ = 1, 25 do
+	step(0.1)
+end
+assert_eq(tempo.cast[1].clip.move, "bow", "the bow comes in on beat 4")
+assert_eq(tempo.cast[1].clip.rate, 1, "a one-shot is not stretched")
+lw_dance.set_routine_bpm("test_tempo", 60)
+assert_eq(tempo.cast[1].clip.bpm, 60, "a bpm change reaches the clips")
+lw_dance.stop_routine("test_tempo")
 
 --------------------------------------------------------------------------
 -- The command surface

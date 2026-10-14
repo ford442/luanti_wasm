@@ -120,6 +120,11 @@ end
 --   priority      glTF track priority, so an arm track wins over the legs
 --   snap          true for stepwise poses: keys are sent with no
 --                 interpolation, which is what makes the Robot read as a robot
+--   cycle         seconds one full cycle of `pose` takes at normal speed;
+--                 what lets the director stretch the move onto a song's beat
+--   cycle_beats   how many beats that cycle spans when danced to a routine
+--                 with a bpm (a routine step's `cycle_beats` overrides it)
+--   in_random_pool  false keeps the move off the random key
 --   pose          function(t) -> {Bone = {rot = {x=,y=,z=}, pos = {...}}}
 --                 called every POSE_STEP with the seconds since the move
 --                 started; degrees in, radians out. This is the placeholder
@@ -501,3 +506,4 @@ dofile(MODPATH .. DIR_DELIM .. "moves.lua")
 dofile(MODPATH .. DIR_DELIM .. "ui.lua")
 dofile(MODPATH .. DIR_DELIM .. "routine.lua")
 dofile(MODPATH .. DIR_DELIM .. "director.lua")
+dofile(MODPATH .. DIR_DELIM .. "band.lua")
