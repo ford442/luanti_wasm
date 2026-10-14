@@ -133,6 +133,9 @@ lw_dance.register_move("shimmy", {
 	next = nil,              -- move to fall into when `duration` runs out
 	interruptible = true,
 	snap = false,            -- true sends keys with no interpolation
+	cycle = 2 * math.pi / 6, -- seconds one cycle of `pose` takes at rate 1
+	cycle_beats = 4,         -- beats that cycle spans in a routine with a bpm
+	in_random_pool = true,   -- false keeps it off the random key
 	pose = function(t)       -- degrees and model units; called every 0.1s
 		return {
 			Body = {rot = {y = math.sin(t * 6) * 18}},
@@ -144,6 +147,16 @@ lw_dance.register_move("shimmy", {
 
 lw_dance.bind_slot(3, "shimmy")   -- optional: put it on a number key
 ```
+
+`cycle` and `cycle_beats` are what let a routine dance the move to a tempo
+(see [routines.md](routines.md#dancing-to-a-song)). Leave them out of a
+one-shot. A visitor's own dance mode always plays at rate 1.
+
+There are four more moves in the catalog besides the six on the pad: `sway`,
+`pogo`, `clap` and `headbang`. They are the concert floor's. `/dance <name>`
+plays them, but they are not on a number key or in the random pool. Every
+bounce in them is a dip (a negative Body offset). The groove proves which way
+a dip goes on this skeleton, and a lift would be a guess about a flipped axis.
 
 Bones available on the shipped character: `Head`, `Body`, `Arm_Left`,
 `Arm_Right`, `Leg_Left`, `Leg_Right`.

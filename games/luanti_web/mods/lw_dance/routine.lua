@@ -32,6 +32,23 @@
 -- names a `bpm`, every time is *also* kept as a beat count, and playback reads
 -- the beats — which is what makes `/routine bpm <id> <n>` a real speed control
 -- instead of a relabelling.
+--
+-- A routine can also be *danced to a song*: `songs` names lw_amps songs, and
+-- when one of them starts on the stage amps the director starts this routine
+-- with its clock slaved to the song's (director.lua). That is what makes a
+-- routine a dance map: the same band and crowd can be given a different file
+-- per song, and several takes of one song can share a single map.
+--
+--   songs = {"around_happy_hard", "around_happy_hard_1"},
+--   on_song_stop = "idle",          -- or "stop": what the cast does after
+--
+-- Dancers can be grouped (`group = "crowd"`), and a step's `role` may name a
+-- group as well as a single dancer, so a step can turn the whole crowd at once
+-- without turning the band. A dancer may also carry its own `at = {right,
+-- back}` stage offset (used where no mark claims it, like a formation slot),
+-- its own starting `facing`, and `settle = true` to stand on whatever floor is
+-- under that offset rather than at the stage's height — a crowd in front of a
+-- raised stage stands on the floor, not level with the band.
 
 --------------------------------------------------------------------------
 -- Limits
@@ -156,9 +173,32 @@ function lw_dance.register_routine(def)
 		def.loop = true
 	end
 
+	-- `song` is shorthand for a one-song list. `song_set` is the lookup the
+	-- director uses when a song starts.
+	if def.song ~= nil then
+		def.songs = def.songs or {def.song}
+	end
+	if def.songs ~= nil then
+		if type(def.songs) ~= "table" or #def.songs == 0 then
+			fail(def.id, "songs has to be a non-empty list of song names")
+		end
+		def.song_set = {}
+		for _, name in ipairs(def.songs) do
+			if type(name) ~= "string" then
+				fail(def.id, "songs has to be a list of song names")
+			end
+			def.song_set[name] = true
+		end
+	end
+	def.on_song_stop = def.on_song_stop or "idle"
+	if def.on_song_stop ~= "idle" and def.on_song_stop ~= "stop" then
+		fail(def.id, "on_song_stop is \"idle\" or \"stop\"")
+	end
+
 	-- Roles are how a step finds its dancer, so they have to be unique. An
 	-- unnamed dancer gets its index, which keeps a quick routine short.
 	def.roles = {}
+	def.groups = {}
 	for index, dancer in ipairs(def.dancers) do
 		dancer.role = dancer.role or tostring(index)
 		dancer.model = dancer.model or "person"
@@ -166,6 +206,21 @@ function lw_dance.register_routine(def)
 			fail(def.id, ("two dancers both named %q"):format(dancer.role))
 		end
 		def.roles[dancer.role] = index
+		if dancer.group ~= nil then
+			local members = def.groups[dancer.group] or {}
+			members[#members + 1] = index
+			def.groups[dancer.group] = members
+		end
+		if dancer.at ~= nil and (type(dancer.at) ~= "table"
+				or type(dancer.at.right or 0) ~= "number"
+				or type(dancer.at.back or 0) ~= "number") then
+			fail(def.id, ("dancer %s: at is {right = n, back = n}"):format(dancer.role))
+		end
+	end
+	for group in pairs(def.groups) do
+		if def.roles[group] or group == "*" then
+			fail(def.id, ("%q is both a dancer and a group"):format(group))
+		end
 	end
 
 	local last = 0
@@ -182,9 +237,9 @@ function lw_dance.register_routine(def)
 					"which is not registered; that step will be skipped")
 					:format(def.id, index, tostring(step.move)))
 		end
-		if step.role ~= "*" and not def.roles[step.role] then
+		if step.role ~= "*" and not def.roles[step.role] and not def.groups[step.role] then
 			core.log("warning", ("lw_dance: routine %s step %d is for role %q, " ..
-					"which no dancer has"):format(def.id, index, tostring(step.role)))
+					"which no dancer or group has"):format(def.id, index, tostring(step.role)))
 		end
 		last = math.max(last, step.t)
 	end

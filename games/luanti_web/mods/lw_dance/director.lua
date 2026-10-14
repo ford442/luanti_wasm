@@ -59,6 +59,9 @@ local function character_rig(texture, extra)
 	return rig
 end
 
+-- band.lua dresses the Lace Waterfall cast through the same helper.
+S.character_rig = character_rig
+
 -- People first: the same mesh, skeleton and frame ranges the visitor wears, so
 -- a dancer and a visitor standing next to each other are visibly the same kind
 -- of thing.
@@ -314,9 +317,40 @@ local function find_marks(pos)
 	return lead, numbered
 end
 
--- Where each dancer stands. Marks win; whatever they do not cover falls back
--- to the routine's formation, so a stage with no marks at all still comes out
--- in a line rather than in a heap on the director's head.
+-- How far `settle` looks for a floor, up and then down from the stage height.
+local SETTLE_UP = 2
+local SETTLE_DOWN = 8
+
+local function walkable(name)
+	local def = core.registered_nodes[name]
+	return def ~= nil and def.walkable ~= false
+end
+
+-- The node a dancer at `pos` should stand in: the first one, scanning down
+-- from a little above the stage, that is open with something solid under it.
+-- An unloaded block ("ignore") stops the scan and keeps the stage height,
+-- because guessing a floor in a block nobody can see is worse than standing
+-- level with the band.
+local function find_floor(pos)
+	local x, z = math.floor(pos.x + 0.5), math.floor(pos.z + 0.5)
+	local top = math.floor(pos.y + 0.5)
+	for y = top + SETTLE_UP, top - SETTLE_DOWN, -1 do
+		local here = core.get_node({x = x, y = y, z = z}).name
+		local below = core.get_node({x = x, y = y - 1, z = z}).name
+		if here == "ignore" or below == "ignore" then
+			return nil
+		end
+		if not walkable(here) and walkable(below) then
+			return y
+		end
+	end
+	return nil
+end
+
+-- Where each dancer stands. Marks win; then the dancer's own `at`; whatever
+-- neither covers falls back to the routine's formation, so a stage with no
+-- marks at all still comes out in a line rather than in a heap on the
+-- director's head.
 local function place_cast(routine, stage)
 	local count = math.min(#routine.dancers, S.MAX_DANCERS)
 	local offsets = S.formation_offsets(routine.formation, count)
@@ -343,13 +377,21 @@ local function place_cast(routine, stage)
 			places[index] = vector.new(mark.x, mark.y - 0.5, mark.z)
 			places[index].mark = vector.new(mark)
 		else
-			local offset = offsets[index] or {right = 0, back = 0}
+			local offset = dancer.at or offsets[index] or {right = 0, back = 0}
+			local along, away = offset.right or 0, offset.back or 0
 			places[index] = vector.new(
-				stage.pos.x + right.x * offset.right - forward.x * offset.back,
+				stage.pos.x + right.x * along - forward.x * away,
 				-- Same convention as a mark: the stage names the node the
 				-- dancers stand in, and their feet are on its bottom face.
 				stage.pos.y - 0.5,
-				stage.pos.z + right.z * offset.right - forward.z * offset.back)
+				stage.pos.z + right.z * along - forward.z * away)
+			if dancer.settle then
+				local floor = find_floor(vector.new(places[index].x, stage.pos.y,
+					places[index].z))
+				if floor then
+					places[index].y = floor - 0.5
+				end
+			end
 		end
 	end
 	return places
@@ -436,6 +478,9 @@ local function spawn_dancer(director, index)
 	dancer.obj = obj
 	dancer.rig = rig
 	dancer.clip = S.new_clip(rig)
+	-- The clip knows the routine's tempo, so every move it plays — including
+	-- the groove a one-shot hands back to — is stretched onto the beat.
+	dancer.clip.bpm = director.bpm
 	-- Stagger the pose keys across the cast so eight dancers never all send on
 	-- the same server step.
 	dancer.clip.acc = (index - 1) / math.max(#director.routine.dancers, 1) * S.POSE_STEP
@@ -464,7 +509,7 @@ local function spawn_dancer(director, index)
 		end
 	end
 
-	S.play_move(obj, dancer.move, {clip = dancer.clip})
+	S.play_move(obj, dancer.move, {clip = dancer.clip, beats = dancer.beats})
 	return true
 end
 
@@ -499,8 +544,9 @@ local function fire_on(director, index, step, offset)
 			return
 		end
 		dancer.move = step.move
+		dancer.beats = step.cycle_beats
 		if dancer.obj and dancer.clip then
-			S.play_move(dancer.obj, step.move, {clip = dancer.clip})
+			S.play_move(dancer.obj, step.move, {clip = dancer.clip, beats = step.cycle_beats})
 			if offset and offset > 0 then
 				-- Wind the clip forward so every dancer is at the same point
 				-- of the same move, whoever was told about it when.
@@ -510,23 +556,58 @@ local function fire_on(director, index, step, offset)
 	end
 end
 
-local function fire_step(director, step, offset)
-	if step.role == "*" then
+-- Which cast slots a step's `role` reaches: everyone, one dancer, or a group.
+local function targets(director, role)
+	local out = {}
+	if role == "*" then
 		for index in pairs(director.cast) do
-			fire_on(director, index, step, offset)
+			out[#out + 1] = index
 		end
-	else
-		local index = director.routine.roles[step.role]
-		if index then
-			fire_on(director, index, step, offset)
+		return out
+	end
+	local routine = director.routine
+	local index = routine.roles[role]
+	if index then
+		if director.cast[index] then
+			out[1] = index
 		end
+	elseif routine.groups and routine.groups[role] then
+		for _, member in ipairs(routine.groups[role]) do
+			if director.cast[member] then
+				out[#out + 1] = member
+			end
+		end
+	end
+	return out
+end
+
+-- Whether a follower dancing as `role` is told about a step for `step_role`.
+local function reaches_follower(director, step_role, role)
+	if step_role == "*" or step_role == role then
+		return true
+	end
+	local index = director.routine.roles[role]
+	local group = director.routine.groups and director.routine.groups[step_role]
+	if index and group then
+		for _, member in ipairs(group) do
+			if member == index then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function fire_step(director, step, offset)
+	for _, index in ipairs(targets(director, step.role)) do
+		fire_on(director, index, step, offset)
 	end
 
 	-- Followers are players who asked to dance along. They are told the step
 	-- and nothing else: the director never moves a player, never turns one,
 	-- and never takes a key away from one.
 	for name, role in pairs(director.followers) do
-		if step.move and (step.role == "*" or step.role == role) then
+		if step.move and reaches_follower(director, step.role, role) then
 			local player = core.get_player_by_name(name)
 			if player and S.is_dancing(player) then
 				S.play(player, step.move)
@@ -537,16 +618,73 @@ local function fire_step(director, step, offset)
 	end
 end
 
--- Replay everything up to `t` so the cast is in the state the clock says it
--- should be. Used by seek, and by a loop wrapping round to the top.
+-- Put the cast in the state the clock says it should be at `t`. Used by seek,
+-- by a loop wrapping round to the top, by a song starting part-way through,
+-- and when a visitor walks back into range.
+--
+-- Only the *last* move and the last facing that reach each dancer are sent.
+-- Replaying every step in order would land in the same place, but a song-long
+-- dance map has dozens of steps, and replaying all of them for eight dancers
+-- is a burst of a few thousand bone keys in one server step — exactly the
+-- stall the WASM worker cannot absorb.
 local function apply_from_start(director, t)
 	director.cursor = 1
 	local steps = director.routine.steps
+	local last_move, last_facing = {}, {}
 	while director.cursor <= #steps and steps[director.cursor].t <= t do
 		local step = steps[director.cursor]
-		fire_step(director, step, t - step.t)
+		for _, index in ipairs(targets(director, step.role)) do
+			if step.move then
+				last_move[index] = step
+			end
+			if step.facing ~= nil then
+				last_facing[index] = step
+			end
+		end
 		director.cursor = director.cursor + 1
 	end
+
+	for index in pairs(director.cast) do
+		local facing = last_facing[index]
+		if facing then
+			fire_on(director, index, {facing = facing.facing}, nil)
+		end
+		local step = last_move[index]
+		if step then
+			fire_on(director, index, {move = step.move, cycle_beats = step.cycle_beats},
+				t - step.t)
+		end
+	end
+
+	-- Followers get the latest step meant for them, and only that one.
+	for name, role in pairs(director.followers) do
+		local latest = nil
+		for cursor = 1, director.cursor - 1 do
+			local step = steps[cursor]
+			if step.move and reaches_follower(director, step.role, role) then
+				latest = step
+			end
+		end
+		local player = core.get_player_by_name(name)
+		if not (player and S.is_dancing(player)) then
+			director.followers[name] = nil
+		elseif latest then
+			S.play(player, latest.move)
+		end
+	end
+end
+
+-- A director that follows a song runs as long as the song, whatever length
+-- the routine file gives for silent playback.
+local function length_of(director)
+	return director.length or director.routine.length
+end
+
+-- lw_amps is optional: a routine with `songs` still runs on its own clock in a
+-- game without the amps. rawget keeps the lookup quiet when the global is not
+-- there at all.
+local function amps()
+	return rawget(_G, "lw_amps")
 end
 
 function S.start_routine(id, opts)
@@ -561,13 +699,19 @@ function S.start_routine(id, opts)
 		S.stop_routine(id)
 	end
 
+	local lw_amps = amps()
 	local stage = opts.stage or S.stage_for(id)
-	if not stage then
-		if not opts.pos then
-			return nil, ("%s has no stage in the world. Stand where it should " ..
-					"happen and use /routine start %s here."):format(id, id)
-		end
+	if not stage and opts.pos then
 		stage = {pos = vector.new(opts.pos), yaw = opts.yaw or 0, routine = id}
+	end
+	if not stage and routine.songs and lw_amps then
+		-- A song's dance with no stage of its own goes where the song does.
+		local left, right = lw_amps.get_amps()
+		stage = S.stage_from_amps(left, right, id)
+	end
+	if not stage then
+		return nil, ("%s has no stage in the world. Stand where it should " ..
+				"happen and use /routine start %s here."):format(id, id)
 	end
 
 	local director = {
@@ -582,6 +726,12 @@ function S.start_routine(id, opts)
 		followers = {},
 		sweep = 0,
 		active = true,
+		-- Set while a song drives the clock (see `attach_song`).
+		song = nil,
+		length = nil,
+		-- Set when the song stopped and the cast is standing idle, waiting
+		-- for it to start again.
+		paused = false,
 	}
 	if routine.bpm and director.bpm then
 		director.rate = director.bpm / routine.bpm
@@ -605,6 +755,16 @@ function S.start_routine(id, opts)
 			move = nil,
 		}
 	end
+	-- A dancer's own facing is where it starts; the steps can still turn it.
+	-- Resolved once the whole cast has a home, because "partner" and
+	-- "director" are about where everybody else stands.
+	for index = 1, count do
+		local facing = routine.dancers[index].facing
+		if facing ~= nil then
+			director.cast[index].yaw = resolve_facing(director, index, facing)
+					or director.cast[index].yaw
+		end
+	end
 
 	S.running[id] = director
 	for index = 1, count do
@@ -617,17 +777,44 @@ function S.start_routine(id, opts)
 		return nil, ("%s could not put anybody on stage."):format(id)
 	end
 
-	apply_from_start(director, 0)
+	if opts.song then
+		director.song = opts.song
+		director.length = opts.length
+	end
+	director.t = opts.t and (opts.t % length_of(director)) or 0
+	apply_from_start(director, director.t)
+
+	-- Started by hand (the director node, /routine start): if the routine is
+	-- danced to a song and the stage amps are set up, start the song as well.
+	-- The amps then announce it and `attach_song` slaves this clock to it.
+	-- Started *by* the song, there is nothing to do: it is already playing.
+	if routine.songs and not opts.from_song and lw_amps then
+		local left, right = lw_amps.get_amps()
+		if left and right then
+			lw_amps.play(routine.songs[1])
+		end
+	end
+
 	return director, ("%s is running: %d dancer(s) at %s."):format(routine.title,
 			count, core.pos_to_string(vector.round(stage.pos)))
 end
 
-function S.stop_routine(id)
+function S.stop_routine(id, opts)
+	opts = opts or {}
 	local director = S.running[id]
 	if not director then
 		return false, ("%s is not running."):format(tostring(id))
 	end
 	S.running[id] = nil
+	-- Stopping a dance by hand stops the song it was dancing to. The director
+	-- is already off the running list, so the amps' stop event finds nothing
+	-- left to idle.
+	local lw_amps = amps()
+	if director.song and not opts.from_song and lw_amps then
+		if lw_amps.now_playing() == director.song then
+			lw_amps.stop()
+		end
+	end
 	for _, dancer in pairs(director.cast) do
 		clear_dancer(dancer)
 	end
@@ -646,10 +833,14 @@ function S.seek_routine(id, seconds)
 	if not director then
 		return false, ("%s is not running."):format(tostring(id))
 	end
-	director.t = math.max(0, math.min(seconds, director.routine.length))
+	if director.song then
+		return false, ("%s follows %s; the song sets where it is."):format(
+				director.routine.title, director.song)
+	end
+	director.t = math.max(0, math.min(seconds, length_of(director)))
 	apply_from_start(director, director.t)
 	return true, ("%s is at %.1fs of %.1fs."):format(director.routine.title,
-			director.t, director.routine.length)
+			director.t, length_of(director))
 end
 
 function S.set_routine_bpm(id, bpm)
@@ -661,11 +852,22 @@ function S.set_routine_bpm(id, bpm)
 		return false, ("%s is written in seconds, not beats, so it has no bpm " ..
 				"to change."):format(director.routine.title)
 	end
+	if director.song then
+		return false, ("%s follows %s, which sets the tempo."):format(
+				director.routine.title, director.song)
+	end
 	if type(bpm) ~= "number" or bpm <= 0 then
 		return false, "The bpm has to be a positive number."
 	end
 	director.bpm = bpm
 	director.rate = bpm / director.routine.bpm
+	-- The moves follow the new tempo as well as the steps do.
+	for _, dancer in pairs(director.cast) do
+		if dancer.clip then
+			dancer.clip.bpm = bpm
+			dancer.clip.rate = S.cycle_rate(dancer.clip.def, bpm, dancer.beats)
+		end
+	end
 	return true, ("%s is now at %d bpm."):format(director.routine.title, bpm)
 end
 
@@ -678,10 +880,16 @@ function S.routine_status(id)
 	for _ in pairs(director.cast) do
 		cast = cast + 1
 	end
-	return ("%s: %.1fs of %.1fs, %d dancer(s)%s%s."):format(
-		director.routine.title, director.t, director.routine.length, cast,
+	local state = ""
+	if director.paused then
+		state = ", idle until the song starts again"
+	elseif not director.active then
+		state = ", idle (nobody is watching)"
+	end
+	return ("%s: %.1fs of %.1fs, %d dancer(s)%s%s%s."):format(
+		director.routine.title, director.t, length_of(director), cast,
 		director.bpm and (", " .. math.floor(director.bpm + 0.5) .. " bpm") or "",
-		director.active and "" or ", idle (nobody is watching)")
+		director.song and (", to " .. director.song) or "", state)
 end
 
 --------------------------------------------------------------------------
@@ -701,10 +909,9 @@ function S.join_routine(player, id)
 
 	local director = id and S.running[id] or nil
 	if not director then
-		for _, running in pairs(S.running) do
-			director = running
-			break
-		end
+		-- No id: whichever routine is running.
+		local _, running = next(S.running)
+		director = running
 	end
 	if not director then
 		return false, "No routine is running. /routine start <id> first."
@@ -751,6 +958,121 @@ function S.leave_routine(player, by_key)
 end
 
 --------------------------------------------------------------------------
+-- Dancing to a song
+--------------------------------------------------------------------------
+
+-- A stage built from the two amp positions, for a routine that has no stage
+-- registered in the world. The cabs stand on the stage's front corners with
+-- the left channel on the audience's left. A formation's `right` is *stage*
+-- right — the performers' right as they face the audience, which is the
+-- audience's left (see `stage_frame`) — so it runs from the right cab to the
+-- left one, and the audience is in front of the line between them. The sources
+-- are one node above the cabs, so the floor the band stands in is the cabs'
+-- own node.
+function S.stage_from_amps(left, right, routine_id)
+	if not (left and right) then
+		return nil
+	end
+	local across = vector.new(left.x - right.x, 0, left.z - right.z)
+	local span = math.sqrt(across.x * across.x + across.z * across.z)
+	if span < 1e-3 then
+		return nil
+	end
+	across = vector.new(across.x / span, 0, across.z / span)
+	local forward = vector.new(-across.z, 0, across.x)
+	-- The middle of the stage, one node back from the line of the cabs so
+	-- the band is not standing between the speakers' fronts.
+	local pos = vector.round(vector.new(
+		(left.x + right.x) / 2 - forward.x,
+		math.min(left.y, right.y) - 1,
+		(left.z + right.z) / 2 - forward.z))
+	return {
+		pos = pos,
+		node = pos,
+		yaw = core.dir_to_yaw(forward),
+		routine = routine_id,
+		from_amps = true,
+	}
+end
+
+-- A song began (or began again): put every routine danced to it on the song's
+-- clock. A routine already on stage — idle since the song last stopped, or
+-- started by hand a moment before the song it asked for — is picked up where
+-- it stands; anything else is started on the song's stage.
+function S.attach_song(id, song, info)
+	local routine = S.get_routine(id)
+	if not (routine and routine.song_set and routine.song_set[song]) then
+		return nil
+	end
+	local length = info.length or (info.song and info.song.length)
+	local elapsed = info.elapsed or 0
+
+	local director = S.running[id]
+	if director then
+		director.song = song
+		director.length = length
+		director.paused = false
+		director.t = elapsed % length_of(director)
+		apply_from_start(director, director.t)
+		return director
+	end
+
+	local stage = S.stage_for(id) or S.stage_from_amps(info.left, info.right, id)
+	if not stage then
+		core.log("warning", ("lw_dance: %s is danced to %s, but there is no " ..
+				"stage for it and the amps did not say where they are"):format(id, song))
+		return nil
+	end
+	return S.start_routine(id, {
+		stage = stage,
+		song = song,
+		length = length,
+		t = elapsed,
+		from_song = true,
+	})
+end
+
+-- The song stopped. `idle` keeps the cast on stage in the stance, clock held,
+-- until the song starts again; `stop` takes them off.
+function S.detach_song(id, song)
+	local director = S.running[id]
+	if not director or director.song ~= song then
+		return false
+	end
+	if director.routine.on_song_stop == "stop" then
+		S.stop_routine(id, {from_song = true})
+		return true
+	end
+	director.song, director.length = nil, nil
+	director.paused = true
+	for _, dancer in pairs(director.cast) do
+		dancer.move = nil
+		if dancer.obj and dancer.clip and dancer.obj:get_pos() then
+			S.play_move(dancer.obj, nil, {clip = dancer.clip})
+		end
+	end
+	return true
+end
+
+do
+	local lw_amps = amps()
+	if lw_amps and lw_amps.register_on_song then
+		lw_amps.register_on_song(function(event, song, info)
+			for _, id in ipairs(S.routine_order) do
+				local routine = S.routines[id]
+				if routine.song_set and routine.song_set[song] then
+					if event == "start" then
+						S.attach_song(id, song, info)
+					elseif event == "stop" then
+						S.detach_song(id, song)
+					end
+				end
+			end
+		end)
+	end
+end
+
+--------------------------------------------------------------------------
 -- The clock
 --------------------------------------------------------------------------
 
@@ -780,7 +1102,40 @@ end
 core.register_globalstep(function(dtime)
 	for id, director in pairs(S.running) do
 		local routine = director.routine
-		director.t = director.t + dtime * director.rate
+		local length = length_of(director)
+		local slaved = false
+		if director.paused then
+			-- The song stopped and the cast is standing in the stance: the
+			-- clock holds where it was, nothing fires.
+			slaved = true
+		elseif director.song then
+			-- The song's clock is the only clock. Reading it every step (rather
+			-- than counting our own dtime) is what keeps the band from drifting
+			-- off the music over a three-minute song.
+			local lw_amps = amps()
+			local name, elapsed = nil, nil
+			if lw_amps then
+				name, elapsed = lw_amps.now_playing()
+			end
+			if name == director.song then
+				slaved = true
+				local t = elapsed % length
+				if t + 1e-6 < director.t then
+					-- The song looped: back to the top of the dance map.
+					director.t = t
+					apply_from_start(director, t)
+				else
+					director.t = t
+				end
+			else
+				-- The song went away without saying so. Carry on alone.
+				director.song, director.length = nil, nil
+				length = length_of(director)
+			end
+		end
+		if not slaved then
+			director.t = director.t + dtime * director.rate
+		end
 
 		director.sweep = director.sweep + dtime
 		local was_active = director.active
@@ -789,21 +1144,22 @@ core.register_globalstep(function(dtime)
 			director.sweep = 0
 			sweep(director)
 		end
-		if director.active and not was_active then
+		if director.active and not was_active and not director.paused then
 			-- Back in the room: put the cast where the clock has got to rather
 			-- than where it was when everyone left.
-			apply_from_start(director, director.t % routine.length)
+			apply_from_start(director, director.t % length)
 		end
 
 		local steps = routine.steps
-		while director.cursor <= #steps and steps[director.cursor].t <= director.t do
+		while not director.paused and director.cursor <= #steps
+				and steps[director.cursor].t <= director.t do
 			fire_step(director, steps[director.cursor], 0)
 			director.cursor = director.cursor + 1
 		end
 
-		if director.t >= routine.length then
+		if not director.song and not director.paused and director.t >= length then
 			if routine.loop then
-				director.t = director.t - routine.length
+				director.t = director.t - length
 				apply_from_start(director, director.t)
 			else
 				S.stop_routine(id)

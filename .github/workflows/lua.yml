@@ -7,6 +7,7 @@ on:
       - 'builtin/**.lua'
       - 'games/devtest/**.lua'
       - 'games/luanti_web/**.lua'
+      - 'games/luanti_web/mods/lw_amps/**'
       - 'util/content/**'
       - 'util/ci/**'
       - '.github/workflows/lua.yml'
@@ -15,6 +16,7 @@ on:
       - 'builtin/**.lua'
       - 'games/devtest/**.lua'
       - 'games/luanti_web/**.lua'
+      - 'games/luanti_web/mods/lw_amps/**'
       - 'util/content/**'
       - 'util/ci/**'
       - '.github/workflows/lua.yml'
@@ -88,3 +90,4 @@ jobs:
         python3 util/content/test_luanti_web_theater.py
         python3 util/content/test_luanti_web_maps.py
         python3 util/content/test_luanti_web_routines.py
+        python3 util/content/test_luanti_web_amps.py

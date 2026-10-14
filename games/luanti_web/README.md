@@ -59,7 +59,8 @@ crosses the tour.
 |-----|--------------|
 | `lw_nodes` | the 45-node core palette (the theater adds 6 more) and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
-| `lw_dance` | the player character mesh, dance mode, the six-move dance pad, the stage hint, and the routine director that dances NPCs to the same catalog |
+| `lw_dance` | the player character mesh, dance mode, the six-move dance pad, the stage hint, the routine director that dances NPCs to the same catalog, and the Lace Waterfall band and crowd rigs |
+| `lw_amps` | stage amp cabs that play a song as a left/right pair of positional mono sources, `/amp`, and the song events the director dances to (see `docs/amps.md`) |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
 | `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere, `/maps` |
 | `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
@@ -133,6 +134,10 @@ Every texture, the menu art and the shared pixel font are generated:
 ```sh
 python3 util/content/generate_luanti_web_textures.py
 ```
+
+That covers the Lace Waterfall band and crowd skins as well (64×32, in the
+character mesh's layout) and the amp cabs. The one texture it does not generate
+is the player skin `lw_dance_character.png`, which is devtest's Sam.
 
 It uses only the Python standard library and is deterministic — running it on an
 unchanged tree produces an empty diff. Sizes, cell counts and frame counts are

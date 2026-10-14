@@ -36,7 +36,20 @@ return {
 * `facing` is `"audience"`, `"away"`, `"partner"`, `"director"`, or a yaw in
   degrees.
 * `model` is a rig registered with `lw_dance.register_model`: `person`,
-  `ghost`, `scarecrow`, `berry`, `mascot_melon`.
+  `ghost`, `scarecrow`, `berry`, `mascot_melon`, `rubella`, `lillith`,
+  `crowd_1` … `crowd_6`.
+* `group` on a dancer puts it in a named group, and a step's `role` may name
+  that group.
+* `at = {right = n, back = n}` places one dancer (marks still win). `right` is
+  stage right, the audience's left. A negative `back` is toward the audience.
+  `settle = true` stands it on the floor under that spot. `facing` on a dancer
+  is where it starts.
+* `songs = {"<lw_amps song>", ...}` makes the routine a dance map for those
+  songs. It starts when one of them starts on the amps, and follows that song's
+  clock. `on_song_stop = "idle"` (the default) or `"stop"` says what happens
+  when the song ends. See `lace_waterfall_around.lua`.
+* `cycle_beats` on a step says how many beats one cycle of its move spans.
+  The default comes from the move.
 * `ride` attaches the dancer to an entity that moves on its own; `path` gives
   that carrier a from/to, relative to the stage.
 

@@ -105,10 +105,20 @@ In order of preference:
    director scans 12 nodes around itself every time a routine starts, so marks
    moved in game take effect without a restart. A dancer's feet land on the
    bottom face of the mark's node.
-2. **The routine's `formation`**, for whatever the marks do not cover:
-   `line`, `wedge` or `circle`, with a `spacing`. Offsets are in the stage's
-   own frame — along the front of the stage and away from the audience — so a
-   formation never has to know which way north is.
+2. **The dancer's own `at = {right = n, back = n}`**, an offset in the
+   stage's frame for one dancer. The Lace Waterfall crowd uses it to stand
+   off the front of the stage, facing the band.
+3. **The routine's `formation`**, for whatever the marks and `at` do not
+   cover: `line`, `wedge` or `circle`, with a `spacing`. Offsets are in the
+   stage's own frame — `right` is *stage* right (the performers' right as they
+   face out, so the audience's left), and `back` runs away from the audience —
+   so a formation never has to know which way north is.
+
+A dancer placed by `at` or a formation can also say `settle = true`. It then
+stands on the first floor under its spot, from two nodes above the stage down
+to eight below, instead of level with the stage. That is how a crowd in front
+of a raised stage stands on the floor and not in the air. An unloaded block
+stops the search, and the dancer keeps the stage height.
 
 Marks are nodes rather than coordinates in a Lua file on purpose: `/lw_schem
 save` keeps node names and param2, so the choreography travels with the map.
@@ -120,6 +130,16 @@ save` keeps node names and param2, so the choreography travels with the map.
 degrees. A routine written for the theater says "face the seats" and plays
 unchanged on a porch where the seats are east.
 
+A dancer can carry a `facing` of its own, which is where it starts. The crowd
+in front of a band says `facing = "away"`, which turns them toward the stage.
+
+### Groups
+
+A dancer can belong to a `group` (`group = "band"`, `group = "crowd"`). A
+step's `role` can then name the group as well as a single dancer or `"*"`. One
+step can turn the whole band to face each other without turning the crowd as
+well. A group name cannot also be a dancer's role.
+
 ### Riding something
 
 A dancer with `ride = "<entity name>"` is attached to a carrier that moves on
@@ -128,6 +148,39 @@ clip the whole way: the carrier owns where the dancer is, the routine owns
 what it is doing, and neither has to know about the other. `lw_dance:float` is
 the raft the fruit garden's berry rides, with a `path` given relative to the
 stage.
+
+## Dancing to a song
+
+A routine with `songs = {...}` is a **dance map** for those songs. The songs
+are `lw_amps` pairs (see [amps.md](amps.md)). When one of them starts on the
+stage amps (a cab punched, or `/amp play`), the director:
+
+1. **Starts the routine**, or wakes it if it is already on stage. It goes on
+   the routine's registered stage if there is one. Otherwise the stage is built
+   from the two cabs: the band stands between them, one node back, and the
+   audience is in front.
+2. **Slaves the clock to the song.** Every server step the routine's time is
+   the song's elapsed time, wrapped on the song's own length. The band cannot
+   drift off the music over a three-minute track. A song that loops sends the
+   dance back to the top. A visitor who arrives part-way through hears the song
+   from the same point the band is dancing.
+3. **Stretches the moves onto the beat.** Every looping move records its
+   `cycle` (seconds per cycle at normal speed) and `cycle_beats` (how many
+   beats that cycle should span). A clip on a routine with a `bpm` runs at
+   `cycle / (cycle_beats × 60 / bpm)`. The groove's sway takes one bar at
+   175 bpm, the Robot holds one pose per beat, and so on. A step can override
+   it with `cycle_beats`. One-shots like the bow are never stretched. This
+   applies to every routine with a `bpm`, song or not.
+
+When the song stops, `on_song_stop` decides what happens. With `"idle"` (the
+default) the cast stays on stage in the stance, with the clock held, until the
+song starts again. With `"stop"` the cast is taken off. `/routine stop` on a
+song's dance stops the song too. `/routine start` on one starts its song if
+the cabs are set up. A routine that follows a song cannot be `seek`ed or given
+another `bpm`, because the song decides both.
+
+Several songs can share one map (the seven mixes of "Around" do), and any song
+can have its own map with the same cast. The cast is just rigs named in a file.
 
 ## Stages
 
@@ -162,6 +215,12 @@ and `/routine start <id>` still goes to the first stage registered for it.
 | `scarecrow` | The same rig, straw-coloured and a little bigger |
 | `berry` | The same rig, small and magenta; the one that rides |
 | `mascot_melon` | A cube of garden wool, with **no skeleton at all** |
+| `rubella`, `lillith` | Lace Waterfall: the character rig in black lace, sheer sleeves and tights, purple choker and cuffs. Rubella has a centre part, Lillith blunt bangs |
+| `crowd_1` … `crowd_6` | Fans in band tees: three generated skins, each also used a second time with a tint and a different height |
+
+The band and crowd skins are painted by
+`util/content/generate_luanti_web_textures.py`, from the band's own stills.
+The first pass is a picture that dances: there are no mouths and no lipsync.
 
 Recolouring one texture rather than shipping four meshes is a content-budget
 decision (see `docs/` on the web pack): a ghost is a silhouette and a colour.
@@ -194,6 +253,11 @@ What keeps eight affordable:
   the routine where it should be rather than restarted.
 
 ## Not done here
+
+* **The "Around" sections are a placeholder.** `lace_waterfall_around.lua`
+  splits the song on eight-bar lines (intro, verses, choruses, bridge, outro)
+  before anyone timed it against the track. Retiming is changing each
+  section's `beat`.
 
 * **The snow mountain has no routine.** The cast would be recoloured people on
   an overlook, which is a worse demo than an empty overlook. It waits for a
