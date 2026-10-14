@@ -6,7 +6,7 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Six authored maps ship with the showcase pack, as islands around the hub
+Seven authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
@@ -15,11 +15,12 @@ in about three minutes.
   [ smoke caldera ]---.     [ hub tour ]      .---[ crystal bazaar ]
       northwest       |          |            |        northeast
         [ Halloween ]-+----[ hub plaza ]------+---[ fruit garden ]
-             west            |    |                     east
-                             |  [ snow mountain ]
-                             |       south
-       [ lighthouse ]--------'
-         southwest
+             west            |    |     |               east
+                             |    |     '----------.
+                             |  [ snow mountain ]  |
+                             |       south         |
+       [ lighthouse ]--------'                     '--[ rainbow storm ]
+         southwest                                       southeast
 ```
 
 Every causeway is walkable. Fly, fast and noclip are on for everyone, but the
@@ -35,6 +36,7 @@ tour never needs them.
 | Lighthouse tide | `lighthouse_tide` | `map_lighthouse_tide.mts` | 36 × 24 × 36 | `(-66, 5, -80)` | `(-39, 9, -46)` | late blue hour (`0.28`, dark water sky, light fog) |
 | Crystal night bazaar | `crystal_bazaar` | `map_crystal_bazaar.mts` | 36 × 16 × 36 | `(54, 5, 24)` | `(55, 9, 42)` | night (`0.08`, saturated violet sky, no fog of its own) |
 | Smoke caldera | `smoke_caldera` | `map_smoke_caldera.mts` | 38 × 22 × 38 | `(-94, 5, 22)` | `(-57, 9, 41)` | overcast red hour (`0.35`, warm close fog) |
+| Rainbow storm | `rainbow_storm` | `map_rainbow_storm.mts` | 64 × 8 × 24 | `(40, 5, -120)` | `(41, 9, -109)` | thunderstorm (`0.45`, slate sky, fog at 90, rain and lightning) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -193,6 +195,38 @@ A volcano in the snow mountain's grammar — up *and* through — built as a she
   checks both, and that no visitor can see into it. No particles: the smoke is
   the fog.
 
+### Rainbow storm
+
+A walk over rainbows, under a thunderstorm. The storm is the sky, not the
+schematic: the map is two landings, a lagoon and the arches between them, and
+nothing stands over the deck.
+
+* **The arches** are two, low and long, sharing a foot in the middle of the
+  lagoon. Their feet are level with the causeway, so the landing is not a step,
+  and they rise three nodes to the crest one node every four steps, so the
+  whole walk is level ground and single steps. The deck is one node thick,
+  seven wide, and a band of wool per row: red, orange, yellow, green, cyan,
+  blue, violet. Where it comes down to the water it stands on piers of the same
+  bands.
+* **Lightning rods** stand on a gold plinth beside each crest, one node proud
+  of the deck, on alternating sides. Every bolt lands on a rod, so the path is
+  never the target.
+* **The storm** runs only for someone on the island. Rain is one particle
+  spawner attached to the visitor — a few dozen streaks in a box over their
+  head, not over the island — and it is deleted when they leave. Every 6, 8
+  and 7 seconds in turn the sky flashes white for about a tenth of a second,
+  the day/night ratio jumps to full daylight with it, and a zigzag bolt comes
+  down onto the next rod. The beat is `core.get_gametime()`, so everyone on the
+  island sees the same flash on the same rod, and a reload needs nothing saved.
+* The flash calls `set_sky` directly and then puts the storm's own sky back.
+  It does not go through the atmosphere helper: that does nothing when the map
+  has not changed, and its reset would drop the storm's fog. A flash that is
+  still in the air when the visitor leaves does not put the storm back on them.
+* No thunder: there is no short sample in the pack, and the flash is the beat.
+
+The map adds no nodes. The rain is the pack's one texture that is not a node:
+`lw_rain.png`, a thin streak, and the bolts are the same streak brightened.
+
 ## Getting there
 
 * Walk. A causeway leaves the plaza for every map, each with a gate whose
@@ -225,8 +259,8 @@ Geometry is why: the maps are cones, ellipsoids and a helical ramp, and doing
 that arithmetic once at build time keeps it off the browser's application
 worker, where chunk generation competes with the compositor. `.mts` is the
 committed form because it keeps `param2` (a theater seat still faces the stage,
-a chase controller knows its place in the loop) and compresses all six maps to
-about 13 KiB.
+a chase controller knows its place in the loop) and compresses all seven maps
+to about 14 KiB.
 
 Once they are stamped into a world, `/lw_schem place map_halloween` puts the
 committed file back over an existing world, the same as any other piece.
@@ -258,7 +292,9 @@ has to learn about it. In order:
    corner, at `y = BASE`) and `spawn` are all it needs. Atmosphere is optional
    — `day_night_ratio` plus a `sky = lw_maps.sky({...})` built from a handful
    of colours and a fog distance. Moving props go in `entities` with map-local
-   positions. The schematic defaults to `map_<id>`.
+   positions. Weather is `storm = {rods = {...}}`: rain while someone is on
+   the map, and lightning onto those map-local rods (see Rainbow storm). The
+   schematic defaults to `map_<id>`.
 4. **Causeway.** A `maps.causeways()` entry in `mods/lw_world/maps.lua`: a list
    of legs from the plaza's edge to the map's, a gate inside the plaza, a post
    and a poster. The north side of the plaza is the hub tour, so a map that is
@@ -331,8 +367,9 @@ library. Everything else the maps are built from is a `lw_nodes` tile.
 | `lava`, `lava_crust` | the caldera's lava lake and the gate posts that point at it |
 
 Ten new textures cover all of it: the rest are the existing tiles re-tinted
-with `[multiply`, the same trick the sixteen wool cubes use. They are
-regenerated by `util/content/generate_luanti_web_textures.py` along with
+with `[multiply`, the same trick the sixteen wool cubes use. An eleventh,
+`lw_rain.png`, is the rainbow storm's rain and lightning, and no node uses it.
+They are regenerated by `util/content/generate_luanti_web_textures.py` along with
 everything else.
 
 ### Lamp controllers
@@ -359,8 +396,9 @@ Lua arrays — node and `param2` — with a slot for every cell, air included, a
 keeps them in the WASM heap for the session. Lua sizes an array to a power of
 two, so a map keeps **1 MiB up to 32,768 cells and 2 MiB up to 65,536**:
 halloween (25,920 cells), the fruit garden (32,000), the lighthouse (31,104),
-the bazaar (20,736) and the caldera (31,768) cost 1 MiB each, and the snow
-mountain (44,800) costs 2 MiB — 7 MiB for the six. While a map loads, the
+the bazaar (20,736) and the caldera (31,768) cost 1 MiB each, the snow
+mountain (44,800) costs 2 MiB, and the rainbow storm (12,288) is under 16,384
+cells and so costs half of one — 7.5 MiB for the seven. While a map loads, the
 engine's `read_schematic` table exists alongside it — one small table per cell,
 about 290 bytes each — and that peaks at 12.6 MiB for the mountain before the
 collector takes it back.
@@ -378,8 +416,9 @@ x86-64, so the arrays weigh the same in the browser). It fails when:
 
 The cap used to be 120,000 cells of volume, set before the cost was measured.
 It is now set from the measurement: eight maps' worth of 1 MiB against a
-256 MiB initial heap. The pack is at 7 MiB and 186,328 cells, so a seventh map
-of any real size is a budget decision: raise the caps on purpose, with a new
-measurement in `wasm_porting.md`, rather than squeeze a map to fit. The
-schematics themselves are 13.2 KiB on disk and the ten textures under 6 KiB.
+256 MiB initial heap. The pack is at 7.5 MiB and 198,616 cells, so an eighth
+map of any size is a budget decision: 1,384 cells is all the volume left.
+Raise the caps on purpose, with a new measurement in `wasm_porting.md`, rather
+than squeeze a map to fit. The schematics themselves are 14.0 KiB on disk and
+the eleven textures under 6 KiB.
 See the content budget in `wasm_porting.md`.

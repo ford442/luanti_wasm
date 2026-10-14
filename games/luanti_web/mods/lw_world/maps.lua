@@ -16,8 +16,9 @@
 --         Halloween lane /  snow    giant fruit
 --              (west)   / mountain     garden
 --                      /  (south)     (east)
---          lighthouse tide
---            (southwest)
+--          lighthouse tide                 \
+--            (southwest)                 rainbow storm
+--                                        (southeast)
 --
 -- Each map is one island with its own beach, in one sea, joined to the plaza
 -- by a paved causeway with a themed gate at the hub end. Fly is on for
@@ -79,7 +80,7 @@ maps.subtract = subtract
 -- which is what makes the corner. The first leg starts on the plaza's edge
 -- and crosses the showcase island's open lawn; the last one ends on the map's
 -- own edge, level with its spawn. The north side of the plaza is the hub tour
--- (library, courtyard, gallery, theater), so the three diagonal maps leave by
+-- (library, courtyard, gallery, theater), so the diagonal maps leave by
 -- the plaza's sides and turn in the open water instead.
 --
 -- `gate` is where the themed posts and the poster stand, beside the first leg
@@ -116,7 +117,9 @@ function maps.causeways(api)
 			legs = {
 				{x0 = 5, z0 = -34, x1 = 8, z1 = PLAZA.z0},
 			},
-			gate = {x = 10, z = PLAZA.z0 + 1},
+			-- West of the deck, not east: the rainbow storm's causeway leaves
+			-- the plaza's east face two rows north of here.
+			gate = {x = 3, z = PLAZA.z0 + 1},
 			post = "lw_maps:packed_snow",
 			sign = "South: the snowy mountain. A switchback trail to the " ..
 				"overlook, an ice cave, a timbered mineshaft, and a tunnel " ..
@@ -171,6 +174,22 @@ function maps.causeways(api)
 			sign = "Northwest: the smoke caldera. A ring trail up the cone, a " ..
 				"glass lip over the glowing crater, a switchback down into it, " ..
 				"and a basalt tube out the far side. It is red hour over there.",
+		},
+		{
+			-- Out of the plaza's east face south of the garden causeway, across
+			-- the lawn, south down the channel between the snow mountain and
+			-- the garden, then east onto the first arch's landing.
+			map = "rainbow_storm",
+			legs = {
+				{x0 = PLAZA.x1, z0 = -16, x1 = 36, z1 = -14},
+				{x0 = 34, z0 = -110, x1 = 36, z1 = -14},
+				{x0 = 34, z0 = -110, x1 = 39, z1 = -108},
+			},
+			gate = {x = PLAZA.x1 - 2, z = -12},
+			post = "lw_nodes:wool_yellow",
+			sign = "Southeast: the rainbow storm. Walk over the rainbows, arch " ..
+				"to arch, under a thunderstorm; lightning strikes the rods on " ..
+				"the crests. The storm is only over that island.",
 		},
 	}
 end

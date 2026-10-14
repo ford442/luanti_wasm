@@ -956,6 +956,17 @@ def tex_vine() -> Image:
 	return image
 
 
+def tex_rain() -> Image:
+	"""A thin streak, brightest at its head. The rainbow storm's rain, and
+	(brightened) its lightning bolts: particles, not a node."""
+	image = new_image(S, S)
+	for y in range(2, S - 1):
+		alpha = int(60 + 150 * (y - 2) / (S - 4))
+		put(image, 7, y, rgb("c8d4e4", alpha))
+		put(image, 8, y, rgb("e8eef8", min(255, alpha + 40)))
+	return image
+
+
 MAP_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 	"lw_pumpkin_side.png": tex_pumpkin_side,
 	"lw_pumpkin_top.png": tex_pumpkin_top,
@@ -967,6 +978,7 @@ MAP_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 	"lw_torch.png": tex_torch,
 	"lw_leaves.png": tex_leaves,
 	"lw_vine.png": tex_vine,
+	"lw_rain.png": tex_rain,
 }
 
 

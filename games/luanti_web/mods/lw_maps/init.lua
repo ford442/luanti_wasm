@@ -399,6 +399,10 @@ lw_maps.by_id = {}
 -- `{name = <entity>, at = <map-local position>}`, respawned near whoever
 -- joins, and must be registered with `static_save = false` so they do not
 -- pile up in the map file.
+--
+-- `storm = {rods = {<map-local position>, ...}}` gives a map rain and
+-- lightning while someone is on it; each rod is a node the bolts land on top
+-- of. See "Storms" below.
 function lw_maps.register(def)
 	assert(def.id and def.origin and def.size and def.spawn,
 		"lw_maps.register needs id, origin, size and spawn")
@@ -571,6 +575,29 @@ lw_maps.register({
 	}),
 })
 
+lw_maps.register({
+	id = "rainbow_storm",
+	title = "Rainbow storm",
+	blurb = "A walk over low rainbow arches under a thunderstorm: rain on " ..
+		"the deck and lightning striking the rods on the crests.",
+	size = {x = 64, y = 8, z = 24},
+	origin = {x = 40, y = BASE, z = -120},
+	spawn = {x = 41, y = BASE + 4, z = -109},
+	-- Dim, not night: the wool has to still read as a rainbow. A little fog
+	-- lets the sea fade while the arches stay in view.
+	day_night_ratio = 0.45,
+	sky = lw_maps.sky({
+		sky = "#2a3344", horizon = "#6a7080",
+		night_sky = "#1a2030", night_horizon = "#3a4050", indoors = "#2a3040",
+		sun_tint = "#8a90a0", moon_tint = "#5a6070",
+		fog = 90, fog_start = 0.5,
+	}),
+	-- Rain and lightning, run only while someone is on the island (see
+	-- "Storms" below). The rods are the fence posts the generator puts on
+	-- each crest, in map-local coordinates.
+	storm = {rods = {{x = 20, y = 7, z = 7}, {x = 45, y = 7, z = 15}}},
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------
@@ -597,22 +624,179 @@ local function apply(player, map)
 	player:override_day_night_ratio(map and map.day_night_ratio or nil)
 end
 
+--------------------------------------------------------------------------
+-- Storms
+--------------------------------------------------------------------------
+
+-- A map with a `storm` gets rain and lightning, per player, only while that
+-- player is on it: one particle spawner attached to them for the rain, and
+-- on a fixed beat a flash of the sky and a bolt down onto one of the map's
+-- rods. Nothing is saved and nothing ticks while nobody is there.
+--
+-- The beat comes from core.get_gametime(), so every visitor sees the same
+-- flash on the same rod and a reload needs no saved state. Gaps of 6, 8 and
+-- 7 seconds, so it is regular enough to wait for and not a metronome.
+lw_maps.STORM_GAPS = {6, 8, 7}
+local STORM_CYCLE = 0
+local STORM_OFFSETS = {}
+for _, gap in ipairs(lw_maps.STORM_GAPS) do
+	STORM_OFFSETS[STORM_CYCLE] = #STORM_OFFSETS + 1
+	STORM_CYCLE = STORM_CYCLE + gap
+end
+-- How long the sky stays white, and the bolt with it.
+local FLASH_TIME = 0.12
+-- The bolt: this many two-node particles stacked up from the rod's top.
+local BOLT_SEGMENTS = 9
+
+-- The number of the flash that happens at whole second `t`, or nil if no
+-- flash happens then. Flash k strikes rod (k % #rods) + 1.
+function lw_maps.storm_flash(t)
+	local index = STORM_OFFSETS[t % STORM_CYCLE]
+	if not index then
+		return nil
+	end
+	return math.floor(t / STORM_CYCLE) * #lw_maps.STORM_GAPS + index - 1
+end
+
+local FLASH_SKY = (function()
+	local white = {
+		day_sky = "#e8ecff", day_horizon = "#ffffff",
+		dawn_sky = "#e8ecff", dawn_horizon = "#ffffff",
+		night_sky = "#e8ecff", night_horizon = "#ffffff",
+		indoors = "#c8d0e0",
+	}
+	return {type = "regular", sky_color = white}
+end)()
+
+local rain = {}          -- player name -> {map = id, id = spawner id}
+local last_flash = {}    -- player name -> gametime of the last flash they saw
+
+local function start_rain(player, map)
+	return core.add_particlespawner({
+		amount = 40,
+		time = 0,
+		attached = player,
+		-- A box over the visitor's head, not over the island: the worker
+		-- only ever draws the rain one person can see.
+		minpos = {x = -7, y = 5, z = -7},
+		maxpos = {x = 7, y = 8, z = 7},
+		minvel = {x = -0.6, y = -14, z = -0.3},
+		maxvel = {x = 0.6, y = -12, z = 0.3},
+		minexptime = 0.5,
+		maxexptime = 0.75,
+		minsize = 6,
+		maxsize = 8,
+		collisiondetection = true,
+		collision_removal = true,
+		vertical = true,
+		texture = "lw_rain.png",
+		playername = player:get_player_name(),
+	})
+end
+
+local function update_rain(player, map)
+	local name = player:get_player_name()
+	local want = map and map.storm and map.id or nil
+	local have = rain[name]
+	if have and have.map == want then
+		return
+	end
+	if have then
+		core.delete_particlespawner(have.id)
+		rain[name] = nil
+	end
+	if want then
+		rain[name] = {map = want, id = start_rain(player, map)}
+	end
+end
+
+-- A bolt from the sky down onto `top`, the top face of a rod, seen by one
+-- player. Its zigzag comes from the flash number, so it is the same for
+-- everyone watching.
+local function bolt(name, top, k)
+	local x, z = top.x, top.z
+	for segment = 0, BOLT_SEGMENTS - 1 do
+		if segment > 0 then
+			x = top.x + ((k * 7 + segment * 5) % 5 - 2) * 0.15
+			z = top.z + ((k * 3 + segment * 7) % 5 - 2) * 0.15
+		end
+		core.add_particle({
+			pos = {x = x, y = top.y + 1 + segment * 2, z = z},
+			expirationtime = FLASH_TIME + 0.05,
+			size = 20,
+			vertical = true,
+			glow = 14,
+			texture = "lw_rain.png^[brighten^[brighten",
+			playername = name,
+		})
+	end
+end
+
+local function flash(player, map, k)
+	local name = player:get_player_name()
+	local rods = map.storm.rods
+	local rod = rods[k % #rods + 1]
+	bolt(name, vector.offset(lw_maps.to_world(map, rod), 0, 0.5, 0), k)
+	-- Straight at the player, not through apply(): apply() does nothing when
+	-- the map has not changed, and its reset would drop the storm's own sky.
+	player:set_sky(FLASH_SKY)
+	player:override_day_night_ratio(1)
+	core.after(FLASH_TIME, function()
+		local still = core.get_player_by_name(name)
+		-- If they left in the last tenth of a second, apply() has already
+		-- given them the hub's sky; putting the storm back would undo that.
+		if still and current[name] == map.id then
+			still:set_sky(map.sky)
+			still:override_day_night_ratio(map.day_night_ratio)
+		end
+	end)
+end
+
+local function storm_step()
+	local now = core.get_gametime and core.get_gametime()
+	if not now then
+		return
+	end
+	now = math.floor(now)
+	local k = lw_maps.storm_flash(now)
+	if not k then
+		return
+	end
+	for _, player in ipairs(core.get_connected_players()) do
+		local name = player:get_player_name()
+		local map = lw_maps.by_id[current[name] or ""]
+		if map and map.storm and last_flash[name] ~= now then
+			last_flash[name] = now
+			flash(player, map, k)
+		end
+	end
+end
+
 local ATMOSPHERE_INTERVAL = 0.5
 local elapsed = 0
 
 core.register_globalstep(function(dtime)
+	storm_step()
 	elapsed = elapsed + dtime
 	if elapsed < ATMOSPHERE_INTERVAL then
 		return
 	end
 	elapsed = 0
 	for _, player in ipairs(core.get_connected_players()) do
-		apply(player, lw_maps.at(player:get_pos()))
+		local map = lw_maps.at(player:get_pos())
+		apply(player, map)
+		update_rain(player, map)
 	end
 end)
 
 core.register_on_leaveplayer(function(player)
-	current[player:get_player_name()] = nil
+	local name = player:get_player_name()
+	current[name] = nil
+	if rain[name] then
+		core.delete_particlespawner(rain[name].id)
+		rain[name] = nil
+	end
+	last_flash[name] = nil
 end)
 
 --------------------------------------------------------------------------
