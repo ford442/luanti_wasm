@@ -1645,6 +1645,123 @@ AMP_TEXTURES: dict[str, Callable[[], Image]] = {
 
 
 # --------------------------------------------------------------------------
+# The Around arena's banners (lw_maps)
+# --------------------------------------------------------------------------
+
+# Lace Waterfall's cloth: storm violet and black. Each banner is one image
+# that lw_maps slices across several nodes with `[sheet`, so a banner two
+# nodes wide and four tall is still one small file.
+STORM_VIOLET = rgb("4a2470")
+STORM_DEEP = rgb("2a1446")
+
+
+def tex_around_sign() -> Image:
+	""""AROUND!" in the pack's own pixel font, five nodes wide."""
+	image = new_image(80, 16, VELVET)
+	stroke_rect(image, 0, 0, 79, 15, LW_PURPLE)
+	stroke_rect(image, 1, 1, 78, 14, STORM_DEEP)
+	text = "AROUND!"
+	x = (80 - text_width(text, scale=2)) // 2
+	draw_text(image, x + 1, 4, text, STORM_VIOLET, scale=2)
+	draw_text(image, x, 3, text, rgb("efe2ff"), scale=2)
+	# A lace diamond in each end panel, the band's mark in miniature.
+	for cx in (5, 74):
+		for y in range(16):
+			for px in range(cx - 4, cx + 5):
+				d = abs(px - cx) + abs(y - 7.5)
+				if d <= 1.5:
+					put(image, px, y, LW_PURPLE_HI)
+				elif d <= 3.5:
+					put(image, px, y, LW_PURPLE)
+	return image
+
+
+def tex_lace_banner() -> Image:
+	"""A hanging cloth, one node wide and three tall: a lace diamond for a
+	sigil on storm violet, black lace selvedges, threads falling below it
+	like the water in the band's name, and a fringe."""
+	noise = Noise(907)
+	image = new_image(16, 48)
+	for y in range(48):
+		for x in range(16):
+			image[y][x] = mix(STORM_DEEP, STORM_VIOLET, 0.35 + 0.4 * noise.at(x, y))
+	for y in range(48):
+		for x in (0, 1, 14, 15):
+			image[y][x] = lace(noise, x, y, STORM_VIOLET, 0.0)
+	fill_rect(image, 0, 0, 15, 1, LACE_BLACK)
+	for y in range(4, 21):
+		for x in range(16):
+			d = abs(x - 7.5) + abs(y - 12)
+			if d <= 1:
+				put(image, x, y, LW_PURPLE_HI)
+			elif d <= 2.5:
+				put(image, x, y, LACE_BLACK)
+			elif d <= 4.5:
+				put(image, x, y, LW_PURPLE)
+			elif d <= 6.5:
+				put(image, x, y, lace(noise, x, y, STORM_VIOLET, 0.0))
+	for y in range(22, 45):
+		for x in range(3, 13):
+			if (x * 3 + y // 2) % 5 == 0:
+				put(image, x, y, mix(LACE_BLACK, LACE_THREAD, noise.at(x, y)))
+	for x in range(16):
+		put(image, x, 46, LACE_BLACK)
+		put(image, x, 47, LW_PURPLE_HI if x % 2 else LACE_BLACK)
+	return image
+
+
+def band_portrait(skin: Image, seed: int) -> Image:
+	"""A full-length banner of one band member, two nodes wide and four tall.
+
+	Drawn from her own skin — the front of every box, as she stands — so the
+	banner and the dancer on stage are the same picture. A still exported from
+	the band's footage can replace it: same name, any size that is twice as
+	tall as it is wide (lw_maps cuts it 2 x 4).
+	"""
+	noise = Noise(seed)
+	image = new_image(18, 36)
+	for y in range(36):
+		for x in range(18):
+			image[y][x] = mix(STORM_DEEP, STORM_VIOLET, 0.3 + 0.5 * noise.at(x, y))
+
+	def blit(part: str, face: str, dx: int, dy: int, mirror: bool = False) -> None:
+		x0, y0, w, h = box_faces(part)[face]
+		for y in range(h):
+			for x in range(w):
+				put(image, dx + x, dy + y, skin[y0 + y][x0 + (w - 1 - x if mirror else x)])
+
+	blit("head", "front", 5, 2)
+	blit("arm", "front", 1, 10)
+	blit("body", "front", 5, 10)
+	blit("arm", "front", 13, 10, mirror=True)
+	blit("leg", "front", 5, 22)
+	blit("leg", "front", 9, 22, mirror=True)
+	for y in range(36):
+		put(image, 0, y, LACE_BLACK)
+		put(image, 17, y, LACE_BLACK)
+	for x in range(18):
+		put(image, x, 0, LACE_BLACK)
+		put(image, x, 35, LW_PURPLE_HI if x % 2 else LACE_BLACK)
+	return image
+
+
+def tex_portrait_rubella() -> Image:
+	return band_portrait(tex_rubella(), 911)
+
+
+def tex_portrait_lillith() -> Image:
+	return band_portrait(tex_lillith(), 913)
+
+
+ARENA_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_around_sign.png": tex_around_sign,
+	"lw_lace_banner.png": tex_lace_banner,
+	"lw_portrait_rubella.png": tex_portrait_rubella,
+	"lw_portrait_lillith.png": tex_portrait_lillith,
+}
+
+
+# --------------------------------------------------------------------------
 # Menu art
 # --------------------------------------------------------------------------
 
@@ -1764,6 +1881,8 @@ def generate(root: pathlib.Path) -> list[pathlib.Path]:
 
 	maps = game / "mods" / "lw_maps" / "textures"
 	for name, factory in MAP_NODE_TEXTURES.items():
+		emit(maps / name, factory())
+	for name, factory in ARENA_TEXTURES.items():
 		emit(maps / name, factory())
 
 	tools = game / "mods" / "lw_tools" / "textures"

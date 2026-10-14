@@ -60,6 +60,33 @@ function vector.offset(v, x, y, z)
 	return {x = v.x + x, y = v.y + y, z = v.z + z}
 end
 
+-- Everything else from the engine's own vector library (distance, copy,
+-- dir_to_rotation, rotate ...), so the laser beams are aimed with the same
+-- arithmetic the server uses. The two stubs above stay: plain tables are what
+-- the rest of this harness compares against.
+do
+	local stub = vector
+	dofile(ROOT .. "/builtin/common/vector.lua")
+	local engine = vector
+	vector = stub
+	for name, fn in pairs(engine) do
+		if stub[name] == nil then
+			stub[name] = fn
+		end
+	end
+end
+
+function table.copy(t)
+	if type(t) ~= "table" then
+		return t
+	end
+	local out = {}
+	for k, v in pairs(t) do
+		out[table.copy(k)] = table.copy(v)
+	end
+	return out
+end
+
 local world = {}
 local metas = {}
 local timers = {}
@@ -71,6 +98,41 @@ local afters = {}
 
 local function key(pos)
 	return pos.x .. "," .. pos.y .. "," .. pos.z
+end
+
+-- An entity, reduced to what the map props do to one: where it is, how it is
+-- turned and dressed, and whether it has been removed.
+local function FakeObject(pos, name)
+	local object = {_pos = {x = pos.x, y = pos.y, z = pos.z}, _name = name,
+		_props = {}, _removed = false, _moves = 0}
+	function object:get_pos()
+		if self._removed then
+			return nil
+		end
+		return {x = self._pos.x, y = self._pos.y, z = self._pos.z}
+	end
+	function object:set_pos(to)
+		self._pos = {x = to.x, y = to.y, z = to.z}
+	end
+	function object:move_to(to)
+		self._moves = self._moves + 1
+		self:set_pos(to)
+	end
+	function object:set_rotation(rot)
+		self._rot = rot
+	end
+	function object:set_properties(props)
+		for k, v in pairs(props) do
+			self._props[k] = v
+		end
+	end
+	function object:remove()
+		self._removed = true
+	end
+	function object:get_luaentity()
+		return {name = name}
+	end
+	return object
 end
 
 core = {
@@ -129,6 +191,7 @@ core = {
 	register_globalstep = function(fn) globalsteps[#globalsteps + 1] = fn end,
 	register_on_joinplayer = function() end,
 	register_on_leaveplayer = function() end,
+	register_on_shutdown = function() end,
 	register_on_punchnode = function(fn)
 		core._punchnode[#core._punchnode + 1] = fn
 	end,
@@ -138,7 +201,11 @@ core = {
 	register_on_generated = function() end,
 	register_privilege = function() end,
 	rotate_node = function() end,
-	add_entity = function(pos, name) spawned[#spawned + 1] = {pos = pos, name = name} end,
+	add_entity = function(pos, name)
+		local object = FakeObject(pos, name)
+		spawned[#spawned + 1] = {pos = pos, name = name, object = object}
+		return object
+	end,
 	get_objects_inside_radius = function() return {} end,
 	get_connected_players = function() return core._players or {} end,
 	get_player_by_name = function(name)
@@ -210,6 +277,7 @@ core = {
 
 dofile(MODS .. "/lw_nodes/init.lua")
 dofile(MODS .. "/lw_theater/init.lua")
+dofile(MODS .. "/lw_amps/init.lua")
 dofile(MODS .. "/lw_maps/init.lua")
 
 --------------------------------------------------------------------------
@@ -490,6 +558,173 @@ player:set_pos({x = 0, y = 10, z = -14})
 step(1.0)
 
 --------------------------------------------------------------------------
+-- The Around arena: its song, and lasers round its truss
+--------------------------------------------------------------------------
+
+local arena = lw_maps.by_id["around_arena"]
+assert_true(arena ~= nil and arena.amps ~= nil and arena.lasers ~= nil,
+	"the arena has a stage and lasers")
+-- For the Python half, which checks there is a cab under each source.
+print(("AMPS %s %d %d %d %d %d %d"):format(arena.id,
+	arena.amps.left.x, arena.amps.left.y, arena.amps.left.z,
+	arena.amps.right.x, arena.amps.right.y, arena.amps.right.z))
+local truss = arena.lasers.track
+print(("TRACK %s %d %d %d %d %d"):format(arena.id, truss.x0, truss.z0,
+	truss.x1, truss.z1, truss.y))
+assert_true(lw_amps.get_song(arena.amps.song) ~= nil, "the arena plays a registered song")
+
+-- The loop: corner to corner, east along the south side first.
+assert_eq(lw_maps.track_length(truss), 96, "the truss is 96 nodes round")
+local function track_at(s)
+	local x, z = lw_maps.track_point(truss, s)
+	return x .. "," .. z
+end
+assert_eq(track_at(0), "0,0", "the loop starts at the south-west corner")
+assert_eq(track_at(24), "24,0", "then runs east")
+assert_eq(track_at(48), "24,24", "then north")
+assert_eq(track_at(72), "0,24", "then west")
+assert_eq(track_at(96), "0,0", "and closes")
+assert_eq(track_at(90), "0,6", "the last side runs south")
+
+local function on_truss(pos)
+	local x, z = pos.x - arena.origin.x, pos.z - arena.origin.z
+	local on_edge = math.abs(x - truss.x0) < 1e-6 or math.abs(x - truss.x1) < 1e-6
+		or math.abs(z - truss.z0) < 1e-6 or math.abs(z - truss.z1) < 1e-6
+	return on_edge and x >= truss.x0 - 1e-6 and x <= truss.x1 + 1e-6
+		and z >= truss.z0 - 1e-6 and z <= truss.z1 + 1e-6
+		and math.abs(pos.y - (arena.origin.y + truss.y + 0.8)) < 1e-6
+end
+
+local function live(slots)
+	local count = 0
+	for _, slot in ipairs(slots or {}) do
+		if slot.emitter and slot.emitter:get_pos() and slot.beam and slot.beam:get_pos() then
+			count = count + 1
+		end
+	end
+	return count
+end
+
+local hub = {x = 0, y = 10, z = -14}
+assert_eq(lw_amps.now_playing(), nil, "nothing plays before anyone arrives")
+assert_eq(lw_maps.show_objects(arena.id), nil, "no lasers before anyone arrives")
+
+-- Walking on starts the song out of the arena's own cabs, and the lasers.
+player:set_pos(arena.spawn)
+step(0.5)
+local left_source, right_source = lw_amps.get_amps()
+assert_eq(lw_amps.now_playing(), arena.amps.song, "arriving starts Around")
+assert_true(left_source ~= nil and vector.equals(left_source,
+	lw_maps.to_world(arena, arena.amps.left)), "the left channel is the arena's left cab")
+assert_true(right_source ~= nil and vector.equals(right_source,
+	lw_maps.to_world(arena, arena.amps.right)), "the right channel is its right cab")
+assert_eq(player:_ratio(), arena.day_night_ratio, "it is night in the arena")
+
+local slots = lw_maps.show_objects(arena.id)
+assert_eq(live(slots), #arena.lasers.colors, "one emitter and beam per colour")
+local before = {}
+for index, slot in ipairs(slots) do
+	assert_true(on_truss(slot.emitter:get_pos()), ("emitter %d rides the truss"):format(index))
+	before[index] = slot.emitter:get_pos()
+	-- The beam runs from the emitter to the floor: centred between them, as
+	-- long as the gap, and its local +Y pointed along it.
+	local beam = slot.beam
+	local from, mid = slot.emitter:get_pos(), beam:get_pos()
+	local to = vector.subtract(vector.multiply(mid, 2), from)
+	local length = vector.distance(from, to)
+	local dir = vector.direction(from, to)
+	local up = vector.rotate({x = 0, y = 1, z = 0}, beam._rot)
+	assert_true(vector.distance(up, dir) < 1e-6, ("beam %d points from emitter to floor"):format(index))
+	assert_true(math.abs(beam._props.visual_size.y - length) < 0.25,
+		("beam %d is as long as the gap"):format(index))
+	assert_true(to.y < from.y - 5, ("beam %d comes down onto the floor"):format(index))
+	assert_true(math.abs(to.y - (arena.origin.y + arena.lasers.target.y - 0.5)) < 0.05,
+		("beam %d lands on the floor's top face"):format(index))
+end
+
+-- They race: each one moves on along the truss, a lap every eight bars.
+step(0.1)
+step(0.1)
+for index, slot in ipairs(slots) do
+	local now = slot.emitter:get_pos()
+	assert_true(on_truss(now), ("emitter %d stays on the truss"):format(index))
+	assert_true(vector.distance(now, before[index]) > 1,
+		("emitter %d is racing"):format(index))
+end
+local lap = arena.lasers.lap_beats * 60 / arena.lasers.bpm
+assert_true(math.abs(lap - 32 * 60 / 175) < 1e-9, "a lap is eight bars of Around")
+
+-- An emitter whose block unloaded is put back, not doubled.
+slots[1].emitter:remove()
+step(0.1)
+assert_eq(live(lw_maps.show_objects(arena.id)), #arena.lasers.colors,
+	"a lost emitter is replaced")
+
+-- One that could not be spawned does not strand its beam when the show ends.
+local orphan = lw_maps.show_objects(arena.id)[2]
+orphan.emitter:remove()
+orphan.emitter = nil
+local orphan_beam = orphan.beam
+player:set_pos(hub)
+step(0.5)
+assert_eq(orphan_beam:get_pos(), nil, "a beam without its emitter is still removed")
+player:set_pos(arena.spawn)
+step(0.5)
+slots = lw_maps.show_objects(arena.id)
+
+-- Stopping it from a cab sticks while the visitor stays.
+lw_amps.stop()
+step(1.0)
+assert_eq(lw_amps.now_playing(), nil, "a cab-punched stop is not undone by staying")
+
+-- Walking off takes the lasers away; walking back on starts both again;
+-- walking off with the song playing stops it.
+player:set_pos(hub)
+step(0.5)
+assert_eq(lw_maps.show_objects(arena.id), nil, "the lasers go when the last visitor does")
+for _, slot in ipairs(slots) do
+	assert_true(slot.emitter:get_pos() == nil and slot.beam:get_pos() == nil,
+		"and are removed, not left behind")
+end
+player:set_pos(arena.spawn)
+step(0.5)
+assert_eq(lw_amps.now_playing(), arena.amps.song, "coming back starts it again")
+player:set_pos(hub)
+step(0.5)
+assert_eq(lw_amps.now_playing(), nil, "leaving stops the arena's song")
+
+-- A song started by hand while nobody is on the stage is left alone, and a
+-- song already coming out of someone else's cabs is not taken over.
+lw_amps.play(arena.amps.song)
+step(1.0)
+assert_eq(lw_amps.now_playing(), arena.amps.song, "a song started from afar plays on")
+lw_amps.stop()
+local own_left, own_right = {x = 200, y = 10, z = 7}, {x = 210, y = 10, z = 7}
+lw_amps.set_amps(own_left, own_right)
+lw_amps.play(arena.amps.song)
+player:set_pos(arena.spawn)
+step(0.5)
+local still_left = lw_amps.get_amps()
+assert_true(vector.equals(still_left, own_left), "arriving does not move cabs already playing")
+player:set_pos(hub)
+step(0.5)
+assert_eq(lw_amps.now_playing(), arena.amps.song, "nor stop a song that is not the arena's")
+lw_amps.stop()
+step(1.0)
+
+-- Without lw_amps at all the arena is quiet, not broken.
+local saved_amps = lw_amps
+lw_amps = nil
+player:set_pos(arena.spawn)
+local quiet_ok = pcall(step, 0.5)
+assert_true(quiet_ok, "the arena works without lw_amps")
+assert_eq(live(lw_maps.show_objects(arena.id)), #arena.lasers.colors,
+	"and still has its lasers")
+player:set_pos(hub)
+step(0.5)
+lw_amps = saved_amps
+
+--------------------------------------------------------------------------
 -- /maps
 --------------------------------------------------------------------------
 
@@ -671,6 +906,8 @@ local api = {
 	label = function() end,
 	GROUND = GROUND, FLOOR = FLOOR, WATER = WATER,
 	ISLAND = ISLAND, PLAZA = PLAZA, HUB = HUB,
+	BUILDINGS = {HUB_BUILDINGS.library, HUB_BUILDINGS.gallery,
+		HUB_BUILDINGS.courtyard, HUB_BUILDINGS.theater},
 }
 api.put = function(x, y, z, name) api.fill(x, y, z, x, y, z, name) end
 api.walls = function() error("maps.lua is not expected to build walls") end
@@ -859,6 +1096,20 @@ for i = 1, #causeways do
 					x1 = leg.x1 + 2, z1 = leg.z1 + 2}, way.gate.x, way.gate.z),
 					way.map .. "'s gate stands on the " .. causeways[j].map .. " causeway")
 			end
+		end
+	end
+end
+
+-- Causeway rails stay off the plaza and out of the hub buildings' walls: the
+-- arena's causeway runs right along the gallery's south face.
+for _, op in ipairs(ops) do
+	if op.name == "lw_nodes:fence" then
+		assert_true(not inside(PLAZA, op.x0, op.z0),
+			("a causeway rail stands on the plaza at (%d, %d)"):format(op.x0, op.z0))
+		for name, box in pairs(HUB_BUILDINGS) do
+			assert_true(not inside(box, op.x0, op.z0),
+				("a causeway rail is put into the %s at (%d, %d)"):format(name,
+					op.x0, op.z0))
 		end
 	end
 end

@@ -16,10 +16,13 @@ QA sandbox and this game is not a replacement for it.
 ## The tour
 
 ```
- smoke caldera         [ theater ]                 z = 34..62     crystal bazaar
-  (northwest)               |                                      (northeast)
-      |    [ library ]--[ courtyard ]--[ gallery ]   z = 4..32           |
-      '----------------.    |    .---------------------------------------'
+                                                                 Around arena
+                                                                (north-northeast)
+ smoke caldera         [ theater ]                 z = 34..62    |    crystal bazaar
+  (northwest)               |                                    |     (northeast)
+      |    [ library ]--[ courtyard ]--[ gallery ]   z = 4..32   |          |
+      '----------------.    |    .-------------------------------'          |
+                       |    |    |  .---------------------------------------'
  Halloween --------------[ plaza ]-------------- fruit garden
    (west)            |       |     |                (east)
                      |       |     '---------.
@@ -29,10 +32,10 @@ QA sandbox and this game is not a replacement for it.
   (southwest)                                     (southeast)
 ```
 
-The plaza is the hub. The showcase tour runs north from it; seven causeways
+The plaza is the hub. The showcase tour runs north from it; eight causeways
 leave it for the [themed maps](docs/maps.md) — straight out west, south and
-east, and turning in the open water for the four diagonals, so none of them
-crosses the tour.
+east, and turning in the open water for the four diagonals and the arena, so
+none of them crosses the tour.
 
 1. **Spawn plaza** — fountain, colonnade, and a gate whose banner spells
    `LUANTI WEB` out of wool. Walk north through the arch.
@@ -48,8 +51,11 @@ crosses the tour.
 6. **Themed maps** (all round the plaza) — a dusk Halloween lane, a snowy
    mountain you can climb and tunnel through, a garden of giant fruit, a
    lighthouse on a blue-hour lagoon with a tunnel under it, a crystal bazaar at
-   night with a dome you walk onto, and a volcano you climb, look into and
-   leave through its far side. Walk a causeway or use `/maps`. Full
+   night with a dome you walk onto, a volcano you climb, look into and
+   leave through its far side, a walk over rainbows in a thunderstorm, and
+   Lace Waterfall's arena, where "Around" starts as you walk in, lights race
+   round the truss and lasers sweep the floor. Walk a causeway or use
+   `/maps`. Full
    footprints, spawns and intended time of day are in
    [`docs/maps.md`](docs/maps.md).
 
