@@ -125,8 +125,6 @@ void *ServerThread::run()
 	auto framemarker = FrameMarker("ServerThread::run()-frame").started();
 	try {
 		m_server->AsyncRunStep(0.0f, true);
-	} catch (con::ConnectionBindFailed &e) {
-		m_server->setAsyncFatalError(e.what());
 	} catch (LuaError &e) {
 		m_server->setAsyncFatalError(e);
 	} catch (ModError &e) {
@@ -171,8 +169,6 @@ void *ServerThread::run()
 			infostream<<"Server: PeerNotFoundException"<<std::endl;
 		} catch (ClientNotFoundException &e) {
 			infostream<<"Server: ClientNotFoundException"<<std::endl;
-		} catch (con::ConnectionBindFailed &e) {
-			m_server->setAsyncFatalError(e.what());
 		} catch (LuaError &e) {
 			m_server->setAsyncFatalError(e);
 		} catch (ModError &e) {
@@ -299,17 +295,17 @@ Server::Server(
 		const std::string &path_world,
 		const SubgameSpec &gamespec,
 		bool simple_singleplayer_mode,
-		Address bind_addr,
+		UDPSocket &&socket,
 		bool dedicated,
 		ChatInterface *iface,
 		std::string *shutdown_errmsg
 	):
-	m_bind_addr(bind_addr),
+	m_bind_addr(socket.GetLocalAddress()),
 	m_path_world(path_world),
 	m_gamespec(gamespec),
 	m_simple_singleplayer_mode(simple_singleplayer_mode),
 	m_dedicated(dedicated),
-	m_con(con::createMTP(CONNECTION_TIMEOUT, m_bind_addr.isIPv6(), this)),
+	m_con(con::createMTP(/*is_server=*/true, std::move(socket), this)),
 	m_itemdef(createItemDefManager()),
 	m_nodedef(createNodeDefManager()),
 	m_craftdef(createCraftDefManager()),
@@ -562,8 +558,7 @@ void Server::init()
 	m_nodedef->updateAliases(m_itemdef);
 
 	// Apply texture overrides from texturepack/override.txt
-	std::vector<std::string> paths;
-	fs::GetRecursiveDirs(paths, g_settings->get("texture_path"));
+	std::vector<std::string> paths = getTexturePathsReversed();
 	fs::GetRecursiveDirs(paths, m_gamespec.path + DIR_DELIM + "textures");
 	for (const std::string &path : paths) {
 		TextureOverrideSource override_source(path + DIR_DELIM + "override.txt");
@@ -628,9 +623,6 @@ void Server::start()
 
 	// Stop thread if already running
 	m_thread->stop();
-
-	// Initialize connection
-	m_con->Serve(m_bind_addr);
 
 	// Start thread
 	m_thread->start();
@@ -3009,7 +3001,7 @@ void Server::stepPendingDynMediaCallbacks(float dtime)
 		const auto &name = state.filename;
 		if (!name.empty()) {
 			auto it = m_media.find(name);
-			assert(it != m_media.end());
+			sanity_check(it != m_media.end());
 			sanity_check(it->second.ephemeral);
 
 			fs::DeleteSingleFileOrEmptyDirectory(it->second.path, true);

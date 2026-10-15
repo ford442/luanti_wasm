@@ -47,7 +47,7 @@ public:
 
 	const std::vector<ModSpec> &getMods() const override
 	{
-		static std::vector<ModSpec> emptymodspec;
+		const static std::vector<ModSpec> emptymodspec;
 		return emptymodspec;
 	}
 	const ModSpec* getModSpec(const std::string &modname) const override { return nullptr; }
@@ -66,18 +66,4 @@ protected:
 	NodeDefManager *m_nodedef = nullptr;
 	ICraftDefManager *m_craftdef = nullptr;
 	ModStorageDatabase *m_mod_storage_database = nullptr;
-
-#if CHECK_CLIENT_BUILD()
-	static std::unique_ptr<NodeVisuals> constructNodeVisuals(ContentFeatures *f)
-	{
-		return std::unique_ptr<NodeVisuals>(new NodeVisuals(f));
-	}
-	static void setNodeVisuals(ContentFeatures &f, std::unique_ptr<NodeVisuals> v = nullptr)
-	{
-		if (v == nullptr)
-			v = constructNodeVisuals(&f);
-		v->f = &f;
-		f.visuals = v.release(); // Destructed by ~ContentFeatures
-	}
-#endif
 };

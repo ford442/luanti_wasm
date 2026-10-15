@@ -30,6 +30,14 @@ configure needs internet access: it populates Emscripten's SDL2, zlib, PNG,
 JPEG, Freetype, SQLite, Ogg, and Vorbis ports. Luanti also builds the SHA-256-pinned zstd
 1.5.7 source archive declared by the repository.
 
+The client also needs libzip, which Emscripten has no port for. Build it once
+into the SDK's sysroot (it lands in `EM_CACHE` if you set one, see below)
+before the first configure:
+
+```bash
+util/wasm/build_libzip.sh
+```
+
 If the SDK is installed somewhere this user cannot modify, choose a writable
 ports and system-library cache before configuring:
 

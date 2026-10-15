@@ -1,5 +1,7 @@
 local S = core.get_translator("__builtin")
 
+local builtin_shared = ...
+
 -- Helper function that implements search and replace without pattern matching
 -- Returns the string and a boolean indicating whether or not the string was modified
 local function safe_gsub(s, replace, with)
@@ -80,13 +82,7 @@ core.register_on_chat_message(function(name, message)
 		local delay = (core.get_us_time() - t_before) / 1000000
 		if success == false and result == nil then
 			core.chat_send_player(name, "-!- "..S("Invalid command usage."))
-			local help_def = core.registered_chatcommands["help"]
-			if help_def then
-				local _, helpmsg = help_def.func(name, cmd)
-				if helpmsg then
-					core.chat_send_player(name, helpmsg)
-				end
-			end
+			core.chat_send_player(name, builtin_shared.chatcommand_help_line(cmd, cmd_def))
 		else
 			if delay > msg_time_threshold then
 				-- Show how much time it took to execute the command
@@ -1237,17 +1233,15 @@ core.register_chatcommand("kick", {
 })
 
 core.register_chatcommand("clearobjects", {
-	params = S("[full | quick]"),
+	params = S("full | quick"),
 	description = S("Clear all objects in world"),
 	privs = {server=true},
 	func = function(name, param)
 		local options = {}
-		if param == "" or param == "quick" then
-			options.mode = "quick"
-		elseif param == "full" then
-			options.mode = "full"
+		if param == "quick" or param == "full" then
+			options.mode = param
 		else
-			return false, S("Invalid usage, see /help clearobjects.")
+			return false
 		end
 
 		core.log("action", name .. " clears objects ("

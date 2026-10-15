@@ -88,6 +88,14 @@ jobs:
       - name: Test deployment tools
         run: python3 util/wasm/test_demo_tools.py
 
+      - name: Build libzip for Emscripten
+        shell: bash
+        run: |
+          source "$EMSDK_DIR/emsdk_env.sh"
+          if [[ ! -f "$(em-config CACHE)/sysroot/lib/libzip.a" ]]; then
+            util/wasm/build_libzip.sh
+          fi
+
       - name: Configure Release build
         shell: bash
         run: |

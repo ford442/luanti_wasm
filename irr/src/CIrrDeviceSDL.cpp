@@ -118,48 +118,6 @@ EM_BOOL CIrrDeviceSDL::MouseUpDownCallback(int eventType, const EmscriptenMouseE
 	// Not exactly certain why, maybe SDL does catch those mouse-events otherwise and not pass them on.
 	return EM_FALSE;
 }
-
-EM_BOOL CIrrDeviceSDL::MouseEnterCallback(int eventType, const EmscriptenMouseEvent *mouseEvent, void *userData)
-{
-	CIrrDeviceSDL *This = static_cast<CIrrDeviceSDL *>(userData);
-
-	SEvent irrevent;
-
-	irrevent.EventType = EET_MOUSE_INPUT_EVENT;
-	irrevent.MouseInput.Event = EMIE_MOUSE_ENTER_CANVAS;
-	This->MouseX = irrevent.MouseInput.X = mouseEvent->canvasX;
-	This->MouseY = irrevent.MouseInput.Y = mouseEvent->canvasY;
-	This->MouseXRel = mouseEvent->movementX; // should be 0 I guess? Or can it enter while pointer is locked()?
-	This->MouseYRel = mouseEvent->movementY;
-	irrevent.MouseInput.ButtonStates = This->MouseButtonStates; // TODO: not correct, but couldn't figure out the bitset of mouseEvent->buttons yet.
-	irrevent.MouseInput.Shift = mouseEvent->shiftKey;
-	irrevent.MouseInput.Control = mouseEvent->ctrlKey;
-
-	This->postEventFromUser(irrevent);
-
-	return EM_FALSE;
-}
-
-EM_BOOL CIrrDeviceSDL::MouseLeaveCallback(int eventType, const EmscriptenMouseEvent *mouseEvent, void *userData)
-{
-	CIrrDeviceSDL *This = static_cast<CIrrDeviceSDL *>(userData);
-
-	SEvent irrevent;
-
-	irrevent.EventType = EET_MOUSE_INPUT_EVENT;
-	irrevent.MouseInput.Event = EMIE_MOUSE_LEAVE_CANVAS;
-	This->MouseX = irrevent.MouseInput.X = mouseEvent->canvasX;
-	This->MouseY = irrevent.MouseInput.Y = mouseEvent->canvasY;
-	This->MouseXRel = mouseEvent->movementX; // should be 0 I guess? Or can it enter while pointer is locked()?
-	This->MouseYRel = mouseEvent->movementY;
-	irrevent.MouseInput.ButtonStates = This->MouseButtonStates; // TODO: not correct, but couldn't figure out the bitset of mouseEvent->buttons yet.
-	irrevent.MouseInput.Shift = mouseEvent->shiftKey;
-	irrevent.MouseInput.Control = mouseEvent->ctrlKey;
-
-	This->postEventFromUser(irrevent);
-
-	return EM_FALSE;
-}
 #endif
 
 bool CIrrDeviceSDL::keyIsKnownSpecial(EKEY_CODE irrlichtKey)
@@ -864,8 +822,6 @@ bool CIrrDeviceSDL::createWindowWithContext()
 	// "#canvas" is for the opengl context
 	emscripten_set_mousedown_callback("#canvas", (void *)this, true, MouseUpDownCallback);
 	emscripten_set_mouseup_callback("#canvas", (void *)this, true, MouseUpDownCallback);
-	emscripten_set_mouseenter_callback("#canvas", (void *)this, false, MouseEnterCallback);
-	emscripten_set_mouseleave_callback("#canvas", (void *)this, false, MouseLeaveCallback);
 
 	return true;
 #else // !_IRR_EMSCRIPTEN_PLATFORM_
@@ -1086,6 +1042,8 @@ bool CIrrDeviceSDL::run()
 #endif
 			irrevent.MouseInput.X = MouseX;
 			irrevent.MouseInput.Y = MouseY;
+			irrevent.MouseInput.XRel = MouseXRel;
+			irrevent.MouseInput.YRel = MouseYRel;
 
 			irrevent.MouseInput.ButtonStates = MouseButtonStates;
 			irrevent.MouseInput.Shift = (keymod & SDL_KMOD_SHIFT) != 0;
