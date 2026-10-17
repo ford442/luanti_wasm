@@ -575,7 +575,7 @@ Bundle:
   peaks at about 290 bytes a cell (12.6 MiB for the 44,800-cell snow mountain)
   until the engine's `read_schematic` table is collected.
   `util/content/test_luanti_web_maps.py` repeats that measurement and fails
-  past 9.5 MiB kept, a 16 MiB load peak, 241,000 cells in total, or a second
+  past 10.5 MiB kept, a 16 MiB load peak, 272,000 cells in total, or a second
   map over 32,768 cells. The earlier 120k-cell cap predated the measurement; 8 MiB
   is eight small maps against the 256 MB initial heap. With the rainbow storm
   (12,288 cells, 0.5 MiB) the seven maps kept 7.5 MiB and filled 198,616 of
@@ -593,6 +593,10 @@ Bundle:
   So the caps were raised again, on purpose: 9 → 9.5 MiB kept and
   235,000 → 241,000 cells. The ten maps still peak at 12.6 MiB (the
   mountain) and fill 240,055 cells. See `games/luanti_web/docs/maps.md`.
+  The concert arena (31,213 cells, 1 MiB, 8.2 MiB load peak, measured) took
+  the songs off every other map; the heap cap went to 10.5 MiB and the volume
+  cap to 272,000 for it. The eleven maps keep 10.0 MiB and fill 271,268
+  cells. See `games/luanti_web/docs/maps.md`.
 * Short sound effects as mono Vorbis under a few KiB each: the lighthouse horn
   and the thunder chapel's three thunder rolls
   (`games/luanti_web/mods/lw_maps/sounds/lw_thunder.{1,2,3}.ogg`, under
@@ -617,18 +621,21 @@ Bundle:
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.
 * The Lace Waterfall songs for the stage amps
-  (`games/luanti_web/mods/lw_amps/sounds/`). That is seven mixes of "Around",
+  (`games/luanti_web/mods/lw_amps/songs/`). That is seven mixes of "Around",
   each a pair of mono Vorbis files (~26 MiB in all). This is the one deliberate
   exception to "small": the budget above was raised from ~16 MB to ~40 MB for
-  them. The amps can only place the song on the stage if it is ordinary game
-  media, so it cannot be a runtime fetch from `client/web/media/`. Long sounds
+  them. The amps can only place the song on the stage if it is game media, so
+  it cannot be a runtime fetch from `client/web/media/`; but it does not have
+  to be *startup* media. The files sit in `songs/`, outside every media
+  folder, so the server no longer hashes ~26 MiB on each start or announces it
+  on join, and `lw_amps` pushes a pair with `core.dynamic_add_media` only when
+  it plays for a listener (only on the concert arena, in the pack). They are
+  still in `luanti.data`, since the whole game folder is preloaded. Long sounds
   are streamed, not decoded whole (`SOUND_DURATION_MAX_SINGLE` is 3 s in
   `src/client/sound/sound_constants.h`). The cost is the download, plus a
   second copy: the client caches received media under `path_cache`, which on
-  the web is inside the IDBFS-backed `path_user`, so the songs are also
-  written to IndexedDB on the first world load. Skipping the media cache for
-  simple singleplayer under `__EMSCRIPTEN__` would remove that copy; it is
-  not done yet. `util/content/test_luanti_web_amps.py` fails past 30 MiB of
+  the web is inside the IDBFS-backed `path_user`. The songs are sent with
+  `client_cache = false`, so they no longer add a copy there. `util/content/test_luanti_web_amps.py` fails past 30 MiB of
   songs.
 * An optional tiny authoring mod (e.g. a clone-stick tool) — not a full
   modpack zoo.

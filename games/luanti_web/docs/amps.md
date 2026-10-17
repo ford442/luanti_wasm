@@ -9,10 +9,12 @@ Copyright (C) 2026 The Luanti Contributors
 `lw_amps` plays a song out of two amp cabinets. `lw_dance` puts Rubella,
 Lillith and six fans on stage to dance to it. The first song is Lace
 Waterfall's "Around", in seven mixes. The quickest way to hear it is the
-**Around arena** (`/maps around_arena`, or the causeway north-east of the
-plaza): it has a stage with the two cabs already on it, and the song starts
-when you walk in (see [maps.md](maps.md#around-arena)). Two cabs on any
-other floor work too, as below. The **cabaret club** (`/maps cabaret`) is a
+**concert arena** (`/maps concert_arena`, or through the Around arena north-east
+of the plaza and out of its east side): it has a stage with the two cabs
+already on it, and the song starts when you walk in (see
+[maps.md](maps.md#concert-arena)). It is the only map that plays "Around"; the
+Around arena next door is lights and lasers only. Two cabs on any other floor
+work too, as below. The **cabaret club** (`/maps cabaret`) is a
 second stage, built and wired the same way, waiting for its own songs (see
 [The cabaret club](#the-cabaret-club)).
 
@@ -50,7 +52,7 @@ starts the song as well. `/routine stop lace_waterfall_around` stops both.
 
 Luanti only places a single-channel Ogg in the world. A stereo file plays with
 no position. So each song is **two mono files**: the original left channel and
-the original right channel (see `mods/lw_amps/sounds/README.md`). They are
+the original right channel (see `mods/lw_amps/songs/README.md`). They are
 routed so that the audience-left cab plays `_l` and the audience-right cab
 plays `_r`.
 
@@ -102,14 +104,14 @@ clock slaved to the song. The details are in
   concert moves `sway`, `pogo`, `clap` and `headbang`.
 
 All seven mixes share this one map. A new song only needs its pair in
-`mods/lw_amps/sounds/`, a `register_song` line with the length measured from
+`mods/lw_amps/songs/` (not `sounds/`: see Cost), a `register_song` line with the length measured from
 the files, and a routine naming it in `songs`. It can reuse the same cast.
 
 ## Map stages
 
 A map with `amps` in its `lw_maps` row registers its two cabs with
 `lw_amps.register_stage`, together with what that stage plays: a `song`
-(the arena: `around_happy_hard`), or a `playlist` (the cabaret: `cabaret`,
+(the concert arena: `around_happy_hard`), or a `playlist` (the cabaret: `cabaret`,
 meaning the first song registered with `playlist = "cabaret"`). Punching one
 of a stage's cabs while nothing is playing points the amps at that stage and
 plays its song, wherever `/amp left` and `/amp right` last pointed. Cabs you
@@ -168,8 +170,8 @@ hand, before any song is added or with one.
 ### Why the songs are not join-time media
 
 A `sounds/` folder is part of the media list. Every client downloads that
-list and checks its hashes before the world loads; the "Around" pairs there
-are already about 26 MiB of it. `cabaret/` is not a media folder. Instead,
+list and checks its hashes before the world loads, which is why the "Around"
+pairs moved out of it into `songs/` (see Cost). `cabaret/` is not a media folder. Instead,
 `lw_amps` sends each cabaret pair with `core.dynamic_add_media`
 (`to_player`, not ephemeral, `client_cache = false`), once per visitor, when
 that visitor first comes within earshot of the cabaret's cabs. Until a
@@ -186,8 +188,19 @@ should play. `mods/lw_amps/cabaret/README.md` has the details.
 
 ## Cost
 
-* **Download:** the 14 files are about 26 MiB in `luanti.data`, and the client
-  also caches them in IndexedDB. See the content budget in `wasm_porting.md`.
+* **Not on the default path.** The songs live in `mods/lw_amps/songs/`, which
+  is not a media folder, so the server does not hash them at start-up and a
+  client joining the showcase is not sent or told about them. Before this,
+  everything under `sounds/` (about 26 MiB) was hashed and announced on every
+  start. `lw_amps` sends a pair with `core.dynamic_add_media` (`to_player`,
+  `client_cache = false`) only when that song is about to play for a listener
+  in range — in the pack, only on the concert arena — and starts their two
+  sources on the next sweep, once the client has the files, at
+  `elapsed % length` like any late arrival.
+* **Download:** the 14 files are still about 26 MiB inside `luanti.data`,
+  because the build preloads the whole game folder. Keeping them out of the
+  preload too would mean fetching them at runtime, which is a separate change.
+  See the content budget in `wasm_porting.md`.
 * **Audio:** one song at a time, and two streamed sources per listener in
   range.
 * **Entities:** eight dancers. The director already holds that to ten pose
