@@ -558,12 +558,34 @@ player:set_pos({x = 0, y = 10, z = -14})
 step(1.0)
 
 --------------------------------------------------------------------------
--- The Around arena: its song, and lasers round its truss
+-- The arenas: the song only in the concert arena, lasers round both trusses
 --------------------------------------------------------------------------
 
-local arena = lw_maps.by_id["around_arena"]
+-- The Around arena is a light show now: no amps, so walking on never starts
+-- the song or sends its files.
+local around = lw_maps.by_id["around_arena"]
+assert_true(around ~= nil and around.amps == nil and around.lasers ~= nil,
+	"the Around arena has lasers and no song")
+for _, map in ipairs(lw_maps.maps) do
+	assert_true(map.amps == nil or map.id == "concert_arena",
+		map.id .. " plays a song; only the concert arena may")
+end
+print(("TRACK %s %d %d %d %d %d"):format(around.id, around.lasers.track.x0,
+	around.lasers.track.z0, around.lasers.track.x1, around.lasers.track.z1,
+	around.lasers.track.y))
+assert_eq(lw_maps.track_length(around.lasers.track), 96, "the Around truss is 96 nodes round")
+player:set_pos(around.spawn)
+step(1.0)
+assert_eq(lw_amps.now_playing(), nil, "walking into the Around arena plays nothing")
+assert_true(lw_maps.show_objects(around.id) ~= nil, "but its lasers run")
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+
+local arena = lw_maps.by_id["concert_arena"]
 assert_true(arena ~= nil and arena.amps ~= nil and arena.lasers ~= nil,
-	"the arena has a stage and lasers")
+	"the concert arena has a stage and lasers")
+assert_true(arena.size.x >= 2 * around.size.x - 1 and arena.size.z >= 2 * around.size.z - 1,
+	"the concert arena is about twice the Around arena on each side")
 -- For the Python half, which checks there is a cab under each source.
 print(("AMPS %s %d %d %d %d %d %d"):format(arena.id,
 	arena.amps.left.x, arena.amps.left.y, arena.amps.left.z,
@@ -574,17 +596,18 @@ print(("TRACK %s %d %d %d %d %d"):format(arena.id, truss.x0, truss.z0,
 assert_true(lw_amps.get_song(arena.amps.song) ~= nil, "the arena plays a registered song")
 
 -- The loop: corner to corner, east along the south side first.
-assert_eq(lw_maps.track_length(truss), 96, "the truss is 96 nodes round")
+local edge = truss.x1 - truss.x0
+assert_eq(lw_maps.track_length(truss), 4 * edge, "the truss runs all round the edge")
 local function track_at(s)
 	local x, z = lw_maps.track_point(truss, s)
 	return x .. "," .. z
 end
 assert_eq(track_at(0), "0,0", "the loop starts at the south-west corner")
-assert_eq(track_at(24), "24,0", "then runs east")
-assert_eq(track_at(48), "24,24", "then north")
-assert_eq(track_at(72), "0,24", "then west")
-assert_eq(track_at(96), "0,0", "and closes")
-assert_eq(track_at(90), "0,6", "the last side runs south")
+assert_eq(track_at(edge), edge .. ",0", "then runs east")
+assert_eq(track_at(2 * edge), edge .. "," .. edge, "then north")
+assert_eq(track_at(3 * edge), "0," .. edge, "then west")
+assert_eq(track_at(4 * edge), "0,0", "and closes")
+assert_eq(track_at(4 * edge - 6), "0,6", "the last side runs south")
 
 local function on_truss(pos)
 	local x, z = pos.x - arena.origin.x, pos.z - arena.origin.z
@@ -652,7 +675,10 @@ for index, slot in ipairs(slots) do
 		("emitter %d is racing"):format(index))
 end
 local lap = arena.lasers.lap_beats * 60 / arena.lasers.bpm
-assert_true(math.abs(lap - 32 * 60 / 175) < 1e-9, "a lap is eight bars of Around")
+assert_true(math.abs(lap - 64 * 60 / 175) < 1e-9, "a lap is sixteen bars of Around")
+assert_true(math.abs(lw_maps.track_length(truss) / arena.lasers.lap_beats
+	- lw_maps.track_length(around.lasers.track) / around.lasers.lap_beats) < 1e-9,
+	"the concert lasers race as fast as the Around arena's")
 
 -- An emitter whose block unloaded is put back, not doubled.
 slots[1].emitter:remove()
@@ -952,9 +978,19 @@ for _, map in ipairs(lw_maps.maps) do
 	if way then
 		local legs = way.legs
 		local first, last = legs[1], legs[#legs]
-		-- Starts on the plaza's edge, ends on the map's.
-		assert_true(overlaps(first, PLAZA), map.id .. ": the first leg does not " ..
-			"start at the plaza")
+		-- Starts on the plaza's edge, or for a spur on the beach of the map
+		-- it leaves, and ends on the map's own edge.
+		local start_box = PLAZA
+		if way.from then
+			local from = lw_maps.by_id[way.from]
+			assert_true(from ~= nil and from.id ~= map.id,
+				map.id .. ": the spur leaves unknown map " .. tostring(way.from))
+			local beach = atlas.footprint(from)
+			start_box = {x0 = beach.x0 - atlas.RIM - 1, z0 = beach.z0 - atlas.RIM - 1,
+				x1 = beach.x1 + atlas.RIM + 1, z1 = beach.z1 + atlas.RIM + 1}
+		end
+		assert_true(overlaps(first, start_box), map.id .. ": the first leg does not " ..
+			"start at the plaza (or the beach it is a spur from)")
 		local fp = atlas.footprint(map)
 		local grown = {x0 = fp.x0 - 1, z0 = fp.z0 - 1, x1 = fp.x1 + 1, z1 = fp.z1 + 1}
 		assert_true(overlaps(last, grown), map.id .. ": the last leg (" ..
@@ -1002,12 +1038,12 @@ for _, map in ipairs(lw_maps.maps) do
 		local start = nil
 		for x = first.x0, first.x1 do
 			for z = first.z0, first.z1 do
-				if inside(PLAZA, x, z) then
+				if inside(start_box, x, z) then
 					start = start or (x .. "," .. z)
 				end
 			end
 		end
-		assert_true(start ~= nil, map.id .. ": no leg cell is on the plaza")
+		assert_true(start ~= nil, map.id .. ": no leg cell is on the plaza (or the beach it leaves)")
 		local seen, queue = {[start] = true}, {start}
 		while #queue > 0 do
 			local cell = table.remove(queue)
@@ -1068,9 +1104,17 @@ for _, map in ipairs(lw_maps.maps) do
 				("%s: a leg (%s) crosses the hub tour north of the plaza"):format(
 					map.id, describe(leg)))
 		end
-		-- The gate stands in the plaza.
-		assert_true(inside(PLAZA, way.gate.x, way.gate.z),
-			map.id .. ": the gate is not in the plaza")
+		-- The gate stands in the plaza, or on the beach a spur leaves.
+		local gate_box = PLAZA
+		if way.from then
+			local beach = atlas.footprint(lw_maps.by_id[way.from])
+			gate_box = {x0 = beach.x0 - atlas.RIM, z0 = beach.z0 - atlas.RIM,
+				x1 = beach.x1 + atlas.RIM, z1 = beach.z1 + atlas.RIM}
+			assert_true(not inside(beach, way.gate.x, way.gate.z),
+				map.id .. ": the gate stands inside " .. way.from)
+		end
+		assert_true(inside(gate_box, way.gate.x, way.gate.z),
+			map.id .. ": the gate is not in the plaza (or on the beach it leaves)")
 	end
 end
 

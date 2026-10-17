@@ -6,13 +6,15 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Eight authored maps ship with the showcase pack, as islands around the hub
+Nine authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
 
 ```
-                                          .---[ Around arena ]
+                                                [ concert arena ]
+                                                        |  (spur from the
+                                          .---[ Around arena ]  arena's east side)
                                           |     north-northeast
   [ smoke caldera ]---.     [ hub tour ]  |   .---[ crystal bazaar ]
       northwest       |          |        |   |        northeast
@@ -40,6 +42,7 @@ tour never needs them.
 | Smoke caldera | `smoke_caldera` | `map_smoke_caldera.mts` | 38 × 22 × 38 | `(-94, 5, 22)` | `(-57, 9, 41)` | overcast red hour (`0.35`, warm close fog) |
 | Rainbow storm | `rainbow_storm` | `map_rainbow_storm.mts` | 64 × 8 × 24 | `(40, 5, -120)` | `(41, 9, -109)` | thunderstorm (`0.45`, slate sky, fog at 90, rain and lightning) |
 | Around arena | `around_arena` | `map_around_arena.mts` | 25 × 12 × 25 | `(29, 5, 76)` | `(41, 9, 76)` | night (`0.1`, violet sky, light fog at 120) |
+| Concert arena | `concert_arena` | `map_concert_arena.mts` | 49 × 13 × 49 | `(35, 5, 120)` | `(59, 9, 120)` | night (`0.08`, magenta sky, light fog at 140) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -232,25 +235,20 @@ The map adds no nodes. The rain is the pack's one texture that is not a node:
 
 ### Around arena
 
-Lace Waterfall's stage, at night, for their song "Around". It is the smallest
-map in the pack, 25 × 25, and the causeway comes in under a marquee on its
-south side. It is the arena [`amps.md`](amps.md) mentions.
+Lace Waterfall's stage, at night: a light show, with no music of its own. It
+is the smallest map in the pack, 25 × 25, and the causeway comes in under a
+marquee on its south side. Out of its east side, between two truss columns, a
+spur causeway runs on to the [concert arena](#concert-arena), which is where
+the song plays.
 
 * **The stage** is at the north end, a black deck one node up with a violet
   lip, facing south down the floor, with a stair at each side of the front.
-  Two `lw_amps:cab`s stand on its front corners, twelve nodes apart, with the
-  audience-left one to the west.
-* **The song starts as you walk in.** Arriving on the arena — by the
-  causeway, by `/maps`, or by joining there — points `lw_amps` at the arena's
-  cabs and plays `around_happy_hard` if nothing is playing anywhere. `lw_dance`
-  hears the song start and puts Rubella and Lillith on the deck between the
-  cabs and the six fans on the floor in front (the band itself is
-  [`amps.md`](amps.md)'s). Punch a cab to stop it, or to start it again;
-  staying on the arena does not undo a stop. When the last visitor walks off,
-  a song still coming out of those cabs stops. A song already playing from
-  someone else's cabs is left alone, and so is one started by hand while
-  nobody is there. The music is the amps' own stereo pair, positioned on the
-  cabs, not a second copy of the song.
+  Two dummy speaker stacks (black wool) stand on its front corners where the
+  amp cabs used to be.
+* **No song.** The arena has no `amps` in its registration and no
+  `lw_amps:cab` in its schematic, so walking in starts nothing and sends no
+  song files. It used to start "Around"; that moved to the concert arena so
+  the heavy audio has one home (see [`amps.md`](amps.md#cost)).
 * **The truss** runs round the whole edge of the map, six nodes up on
   columns, with the backdrop wall as its north side. It carries 32 truss
   lights (`lw_maps:stage_light`), one every third cell from a corner, and a
@@ -282,6 +280,49 @@ The portraits are drawn from the dancers' own skins: the front of every box of
 the character, as she stands. A still exported from the band's footage can
 replace either one, under the same name, at any size twice as tall as it is
 wide, because `lw_maps` cuts it 2 × 4.
+
+### Concert arena
+
+Lace Waterfall live: the one map that plays the songs. It is 49 × 13 × 49
+(31,213 cells), about twice the Around arena on each side, so the stage, the
+floor and the audience each get room. Reach it by walking through the Around
+arena and out of its east side (the gate there points north), or with
+`/maps concert_arena`.
+
+* **The stage** runs across the north end, 33 nodes wide (local x 8–40),
+  a black deck one node up with a violet lip and a stair either side of the
+  front, six uplights along the lip, and the backdrop wall behind it. Two
+  `lw_amps:cab`s stand on its front edge twenty nodes apart, audience-left to
+  the west.
+* **The song starts as you walk in.** Arriving — by the spur, by `/maps`, or
+  by joining there — points `lw_amps` at the arena's cabs and plays
+  `around_happy_hard` if nothing is playing anywhere. `lw_dance` hears the song
+  start and puts Rubella and Lillith on the deck between the cabs and the six
+  fans on the floor in front (the band itself is [`amps.md`](amps.md)'s).
+  Punch a cab to stop it, or to start it again; staying does not undo a stop.
+  When the last visitor walks off, a song still coming out of those cabs
+  stops. A song already playing from someone else's cabs is left alone, and
+  so is one started by hand while nobody is there. `/amp` and
+  `/routine start lace_waterfall_around` work here as anywhere.
+* **Only here are the song files sent.** They are not game media
+  (`lw_amps/songs/`, not `sounds/`), so the showcase never hashes or announces
+  them; `lw_amps` sends the pair being played to a listener when it starts for
+  them. A later lossless or otherwise heavier audio experiment belongs on
+  this map only.
+* **The floor** is a 35 × 24 checker of black and magenta wool, edged violet,
+  with a front-of-house desk (planks, gold trim, a lamp at each end) on its
+  centre line. **Risers** run down both sides, two one-node tiers each, so the
+  back of the crowd sees over the front.
+* **The truss** is the Around arena's, doubled: round the whole edge, seven
+  nodes up on columns every eight, 192 cells and 64 chasing lights (eight
+  whole chase periods, no seam). A second bar across the room in front of the
+  stage carries lit stage lights every fourth cell, the wash on the band.
+* **The lasers.** Six emitters on a truss twice as long, a lap every sixteen
+  bars (64 beats at 175 bpm), so they move as fast as the Around arena's,
+  each throwing a beam to a point circling the floor at radius 8.
+* **The banners** are the Around arena's set, spread across a wider wall: the
+  "AROUND!" sign over the stage and as the marquee, both portraits, and eleven
+  Lace Waterfall banners on the backdrop and the side trusses.
 
 ## Getting there
 
@@ -466,8 +507,9 @@ two, so a map keeps **1 MiB up to 32,768 cells and 2 MiB up to 65,536**:
 halloween (25,920 cells), the fruit garden (32,000), the lighthouse (31,104),
 the bazaar (20,736) and the caldera (31,768) cost 1 MiB each, the snow
 mountain (44,800) costs 2 MiB, the rainbow storm (12,288) is under 16,384
-cells and so costs half of one, and the Around arena (7,500) is under 8,192
-and costs a quarter — 7.75 MiB for the eight. While a map loads, the
+cells and so costs half of one, the Around arena (7,500) is under 8,192
+and costs a quarter, and the concert arena (31,213) costs 1 MiB — 8.8 MiB for
+the nine. While a map loads, the
 engine's `read_schematic` table exists alongside it — one small table per cell,
 about 290 bytes each — and that peaks at 12.6 MiB for the mountain before the
 collector takes it back.
@@ -477,9 +519,9 @@ own loader over every committed map under Lua 5.1
 (`measure_luanti_web_maps_heap.lua`; a TValue is sixteen bytes on wasm32 as on
 x86-64, so the arrays weigh the same in the browser). It fails when:
 
-* the maps keep more than **8 MiB** between them, or loading one peaks past
+* the maps keep more than **9 MiB** between them, or loading one peaks past
   **16 MiB**;
-* the pack's total box volume passes **210,000** cells;
+* the pack's total box volume passes **240,000** cells;
 * more than one map is over 32,768 cells. The snow mountain is the pack's one
   dense map; a new map fits in 32,768 or it costs what two do.
 
@@ -487,9 +529,12 @@ The cap used to be 120,000 cells of volume, set before the cost was measured.
 It is now set from the measurement: eight maps' worth of 1 MiB against a
 256 MiB initial heap. The arena was a budget decision: it was sized under
 8,192 cells to keep a quarter of a MiB, and the volume cap was raised from
-200,000 to 210,000 for it; the heap caps were not. The pack is at 7.75 MiB and
-206,116 cells, so one more quarter-MiB map fits and anything bigger needs the
-caps raised. Raise them on purpose, with a new measurement in
+200,000 to 210,000 for it; the heap caps were not. The concert arena was the
+next one: it takes the songs off every other map, and it was sized under
+32,768 cells so it costs 1 MiB rather than 2. The heap cap went from 8 to
+9 MiB and the volume cap from 210,000 to 240,000 for it. The pack is at
+8.8 MiB and 237,329 cells, so a quarter-MiB map still fits and anything
+bigger needs the caps raised again. Raise them on purpose, with a new measurement in
 `wasm_porting.md`, rather than squeeze a map to fit. The schematics themselves
-are 15.4 KiB on disk and the fifteen textures under 8 KiB.
+are 17.4 KiB on disk and the fifteen textures under 8 KiB.
 See the content budget in `wasm_porting.md`.

@@ -8,6 +8,8 @@
 -- atmosphere it wants. This file owns where it sits relative to the plaza and
 -- how a visitor walks there:
 --
+--                                                concert arena
+--                                                    |
 --                                                Around arena
 --                                              (north-northeast)
 --          smoke caldera                   crystal bazaar
@@ -90,7 +92,8 @@ maps.subtract = subtract
 -- the plaza's sides and turn in the open water instead.
 --
 -- `gate` is where the themed posts and the poster stand, beside the first leg
--- inside the plaza. util/content/test_luanti_web_maps.lua walks every leg and
+-- inside the plaza. A causeway with `from = <map id>` is a spur that leaves
+-- that map's beach instead, with its gate there. util/content/test_luanti_web_maps.lua walks every leg and
 -- checks it reaches the spawn without crossing another island, another
 -- causeway or a hub building.
 function maps.causeways(api)
@@ -212,8 +215,27 @@ function maps.causeways(api)
 			gate = {x = PLAZA.x1 - 3, z = 1},
 			post = "lw_maps:stage_light",
 			sign = "North-east: the Around arena. Lace Waterfall's stage at " ..
-				"night: the song starts as you walk in, the band plays on the " ..
-				"deck, lights race round the truss and lasers sweep the floor. " ..
+				"night: lights race round the truss and lasers sweep the " ..
+				"floor. Walk through it, out of its east side, for the concert.",
+		},
+		{
+			-- A spur, not a causeway from the plaza: the plaza's faces are
+			-- full, so the concert arena is reached through the Around arena.
+			-- Out of its east edge between two truss columns (local 24, 21),
+			-- east over the beach, then north onto the concert arena's south
+			-- face, under its marquee. `from` names the map it leaves, and the
+			-- gate stands on that map's beach instead of in the plaza.
+			map = "concert_arena",
+			from = "around_arena",
+			legs = {
+				{x0 = 56, z0 = 96, x1 = 60, z1 = 98},
+				{x0 = 58, z0 = 96, x1 = 60, z1 = 119},
+			},
+			gate = {x = 55, z = 97},
+			post = "lw_maps:stage_light",
+			sign = "North: the concert arena. Lace Waterfall live: the song " ..
+				"starts as you walk in, the band plays on the stage, and the " ..
+				"lights and lasers run over a floor twice the size of this one. " ..
 				"Punch an amp cab to stop or restart it.",
 		},
 	}

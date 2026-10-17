@@ -36,6 +36,17 @@ are **not** covered by the LGPL that covers the code. The licence for
 redistributing them is still to be confirmed by the rights holder; do not reuse
 them outside this pack until it is.
 
+## Why `songs/` and not `sounds/`
+
+Everything in a mod's `sounds/` is game media: the server hashes it at
+start-up and every client is told about it on join, whether or not a song
+ever plays. These files are kept here instead and sent on demand by
+`lw_amps` with `core.dynamic_add_media` (see the top of `../init.lua`), so
+only a visit to the concert arena pays for them. Do not move them back, and
+put any future song (or a lossless experiment) here too.
+`util/content/test_luanti_web_amps.py` fails if a song file turns up under a
+media folder.
+
 ## Why two mono files per song
 
 Luanti only places a sound in the world if it is a single-channel Ogg Vorbis.
@@ -73,6 +84,7 @@ will not place a stereo file on the amps.
 ## Budget
 
 The 14 files are about 26 MiB, which is most of what the web pack downloads
-before the first frame. See the content budget in `wasm_porting.md` (it was
+before the first frame (the build still preloads the whole game folder into
+`luanti.data`; they are only kept out of the media set). See the content budget in `wasm_porting.md` (it was
 raised for these) and `util/content/test_luanti_web_amps.py`, which fails the
 build past 30 MiB.

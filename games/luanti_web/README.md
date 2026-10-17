@@ -16,6 +16,7 @@ QA sandbox and this game is not a replacement for it.
 ## The tour
 
 ```
+                                                                 concert arena
                                                                  Around arena
                                                                 (north-northeast)
  smoke caldera         [ theater ]                 z = 34..62    |    crystal bazaar
@@ -53,8 +54,9 @@ none of them crosses the tour.
    lighthouse on a blue-hour lagoon with a tunnel under it, a crystal bazaar at
    night with a dome you walk onto, a volcano you climb, look into and
    leave through its far side, a walk over rainbows in a thunderstorm, and
-   Lace Waterfall's arena, where "Around" starts as you walk in, lights race
-   round the truss and lasers sweep the floor. Walk a causeway or use
+   Lace Waterfall's two arenas: the Around arena, where lights race round
+   the truss and lasers sweep the floor, and beyond it the larger concert
+   arena, where "Around" starts as you walk in and the band plays. Walk a causeway or use
    `/maps`. Full
    footprints, spawns and intended time of day are in
    [`docs/maps.md`](docs/maps.md).

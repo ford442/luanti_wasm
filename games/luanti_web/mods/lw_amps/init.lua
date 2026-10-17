@@ -22,6 +22,13 @@
 -- everyone else. That clock is also what the dance director (lw_dance) reads,
 -- which is how the band on stage stays on the beat of the song coming out of
 -- the cabs.
+--
+-- The files live in `songs/`, not `sounds/`, on purpose. Everything under a
+-- mod's `sounds/` is hashed by the server and announced to every client on
+-- join, which for these is about 26 MiB on every start of the showcase, songs
+-- or not. From `songs/` they are sent with core.dynamic_add_media, one pair at
+-- a time, to a player who is actually in earshot of a song that is playing —
+-- in this pack only on the concert arena (lw_maps), so nothing else pays.
 
 lw_amps = {}
 
@@ -247,12 +254,59 @@ local function stop_for(state, name)
 	end
 end
 
+-- Song media, sent per player on first use. delivered[player][file] is
+-- "pending" until that client has the file, then true. A player who is not
+-- ready yet is simply not started; the next sweep tries again and lands them
+-- at `elapsed % length` like any late arrival, so the cabs stay in step.
+local SONG_DIR = core.get_modpath("lw_amps") .. "/songs"
+local delivered = {}
+
+local function media_ready(def, name)
+	if type(core.dynamic_add_media) ~= "function" then
+		-- An engine without it (or a test double): nothing to send, and a
+		-- sound_play for a file the client lacks is just silence.
+		return true
+	end
+	local have = delivered[name] or {}
+	delivered[name] = have
+	local ready = true
+	for _, side in ipairs({"left", "right"}) do
+		local file = def.sounds[side]
+		if have[file] == nil then
+			have[file] = "pending"
+			local ok, accepted = pcall(core.dynamic_add_media, {
+				filepath = SONG_DIR .. "/" .. file .. ".ogg",
+				to_player = name,
+				-- In-process in singleplayer, and a browser's media cache is
+				-- IndexedDB: not worth filling with megabytes per song.
+				client_cache = false,
+			}, function(player_name)
+				if delivered[player_name] then
+					delivered[player_name][file] = true
+				end
+			end)
+			if not (ok and accepted) then
+				-- Do not retry every sweep; play on, silently, like any
+				-- other missing sound.
+				core.log("warning", ("lw_amps: could not send %s to %s: %s")
+						:format(file, name, tostring(accepted)))
+				have[file] = true
+			end
+		end
+		ready = ready and have[file] == true
+	end
+	return ready
+end
+
 -- Both cabs, one player, one step. Silence is a normal outcome — no OpenAL in
 -- this build, a file that is missing, a sound_play that throws — and nothing
 -- else here depends on the sound having started: the clock and the dancers
 -- run either way.
 local function start_for(state, name)
 	if state.listeners[name] or type(core.sound_play) ~= "function" then
+		return false
+	end
+	if not media_ready(state.def, name) then
 		return false
 	end
 	local offset = state.elapsed % state.def.length
@@ -382,6 +436,8 @@ core.register_globalstep(function(dtime)
 end)
 
 core.register_on_leaveplayer(function(player)
+	-- Dynamic media does not outlive the connection.
+	delivered[player:get_player_name()] = nil
 	if playing then
 		-- The client's sounds went with it; only the handles are left to drop.
 		playing.listeners[player:get_player_name()] = nil

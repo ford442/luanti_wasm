@@ -29,8 +29,10 @@ Layout, in the atlas the hub plaza sits in the middle of::
                          |
     [ lighthouse ]  [ snow mountain ]   [ rainbow storm ]
 
-and the Around arena north-east of the hub, beyond the gallery. The diagonal
-four and the arena are reached by causeways that turn in the open water;
+and the Around arena north-east of the hub, beyond the gallery, with the
+larger concert arena north of it, reached from the Around arena's east side.
+The diagonal four and the arenas are reached by causeways that turn in the
+open water;
 lw_world/maps.lua has the legs, and games/luanti_web/docs/maps.md the recipe
 for adding a map.
 
@@ -1773,7 +1775,9 @@ def build_rainbow_storm() -> Build:
 # 8. Around arena
 # --------------------------------------------------------------------------
 
-# Lace Waterfall's stage for "Around". Small on purpose: 25 x 12 x 25 is 7,500
+# Lace Waterfall's stage for "Around". Since the concert arena (9.) took the
+# song, this one is a light show only: no amp cabs, so nothing here pulls the
+# song files in. Small on purpose: 25 x 12 x 25 is 7,500
 # cells, under 8,192, so lw_world keeps it in a quarter of what the other maps
 # cost (see Budget in docs/maps.md). Odd on both sides so the truss round the
 # edge is 96 cells, which takes 32 lights three apart — a whole number of
@@ -1797,10 +1801,13 @@ ARENA_STAGE = dict(x0=4, x1=20, z0=16, z1=TRUSS_EDGE - 1)
 BACKDROP_Z = TRUSS_EDGE
 BACKDROP_TOP = TRUSS_Y - 1
 STAGE_STAIRS = ((4, 5), (19, 20))   # x, either side of the stage front
-# Amp cabs on the deck's front corners, audience-left (west) first: lw_maps
-# points lw_amps at one node above each, and lw_dance puts the band between
-# them, one node back.
-ARENA_CABS = ((6, ARENA_STAGE["z0"]), (18, ARENA_STAGE["z0"]))
+# Dummy speaker stacks on the deck's front corners, where the amp cabs stood
+# before the song moved to the concert arena. Plain wool, so punching one
+# does not start anything.
+ARENA_SPEAKERS = ((6, ARENA_STAGE["z0"]), (18, ARENA_STAGE["z0"]))
+# The Around arena's east edge, clear between two truss columns: where the
+# concert arena's causeway leaves (lw_world/maps.lua).
+ARENA_EAST_EXIT = (TRUSS_EDGE, FLOOR, 21)
 STAGE_UPLIGHTS = (8, 10, 14, 16)
 
 DANCE_FLOOR = dict(x0=3, x1=21, z0=2, z1=14)
@@ -1819,12 +1826,12 @@ BRICK_STAIR_NODE = "lw_nodes:stair_stone_brick"
 TRUSS = wool("dark_grey")
 
 
-def truss_ring() -> list[tuple[int, int]]:
+def truss_ring(edge: int = TRUSS_EDGE) -> list[tuple[int, int]]:
 	"""The truss's cells in loop order: east along the south edge, north up
 	the east, west along the north, south down the west. lw_maps.track_point
 	walks the same loop the same way, so the emitters race the way the
 	lights chase."""
-	e = TRUSS_EDGE
+	e = edge
 	ring = [(x, 0) for x in range(e)]
 	ring += [(e, z) for z in range(e)]
 	ring += [(x, e) for x in range(e, 0, -1)]
@@ -1901,15 +1908,144 @@ def build_arena() -> Build:
 			build.set(x, FLOOR, s["z0"] - 1, BRICK_STAIR_NODE, NORTH)
 	for x in STAGE_UPLIGHTS:
 		build.set(x, FLOOR + 1, s["z0"], UPLIGHT)
-	for x, z in ARENA_CABS:
-		# facedir 0 puts the cab's grille on its south face, at the floor.
-		build.set(x, FLOOR + 1, z, AMP_CAB, NORTH)
+	for x, z in ARENA_SPEAKERS:
+		build.set(x, FLOOR + 1, z, wool("black"))
 
 	# House lights: four hidden lamps over the floor, so the crowd is seen
 	# between the chasing lights. They are airlike; nothing to walk into.
 	for x in (f["x0"] + 2, f["x1"] - 2):
 		for z in (f["z0"] + 3, f["z1"] - 2):
 			build.set(x, TRUSS_Y - 1, z, HIDDEN_LIGHT)
+	return build
+
+
+# --------------------------------------------------------------------------
+# 9. Concert arena
+# --------------------------------------------------------------------------
+
+# The one map that plays the songs. lw_amps keeps the song files out of the
+# media every client is sent on join and pushes a pair only when it plays
+# here (lw_amps/songs/README.md), so the rest of the pack stays light; a
+# later lossless experiment belongs here too, and nowhere else.
+#
+# 49 x 13 x 49 is 31,213 cells: about twice the Around arena on each side and
+# still under 32,768, the step past which lw_world's arrays double (see
+# NODE_BUDGET). Odd on both sides again: a 192-cell truss takes 64 lights
+# three apart, eight whole chase periods.
+CONCERT_SIZE = (49, 13, 49)
+CONCERT_EDGE = CONCERT_SIZE[0] - 1
+# The causeway lands on the south face, under the marquee, in the middle.
+CONCERT_SPAWN = (CONCERT_EDGE // 2, FLOOR, 0)
+
+CONCERT_TRUSS_Y = FLOOR + 7
+CONCERT_COLUMN_SPACING = 8
+# A second truss bar across the room in front of the stage, hung with lit
+# stage lights that do not chase: the wash on the band.
+CONCERT_FRONT_TRUSS_Z = 28
+
+# The stage, across the north end, facing south. One node up, like the Around
+# deck, so lw_dance's band stands on it at FLOOR + 1.
+CONCERT_STAGE = dict(x0=8, x1=40, z0=30, z1=CONCERT_EDGE - 1)
+CONCERT_BACKDROP_TOP = CONCERT_TRUSS_Y - 1
+CONCERT_STAGE_STAIRS = ((8, 9), (39, 40))
+# The two amp cabs, audience-left (west) first: lw_maps points lw_amps one
+# node above each and lw_dance puts the band between them. Twenty apart, so
+# the stereo image has room to open up across the floor.
+CONCERT_CABS = ((14, CONCERT_STAGE["z0"]), (34, CONCERT_STAGE["z0"]))
+CONCERT_UPLIGHTS = (11, 18, 22, 26, 30, 37)
+
+CONCERT_FLOOR = dict(x0=7, x1=41, z0=3, z1=26)
+# Audience risers down both sides: two tiers, each a single step up, so the
+# back of the crowd sees over the front.
+CONCERT_RISERS = ((1, 2, 2), (3, 4, 1), (44, 45, 1), (46, 47, 2))
+CONCERT_RISER_Z = (6, 24)
+# Front-of-house desk, on the floor's centre line near the back.
+CONCERT_DESK = dict(x0=21, x1=27, z=9)
+
+
+def build_concert_arena() -> Build:
+	sx, sy, sz = CONCERT_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(POLISHED)
+	e = CONCERT_EDGE
+	mid = e // 2
+
+	# The dance floor: a two-node checker of black and magenta, edged violet.
+	f = CONCERT_FLOOR
+	for x in range(f["x0"] - 1, f["x1"] + 2):
+		for z in range(f["z0"] - 1, f["z1"] + 2):
+			if not (f["x0"] <= x <= f["x1"] and f["z0"] <= z <= f["z1"]):
+				build.set(x, SURFACE, z, wool("violet"))
+			elif (x // 2 + z // 2) % 2 == 0:
+				build.set(x, SURFACE, z, wool("black"))
+			else:
+				build.set(x, SURFACE, z, wool("magenta"))
+
+	# The edge truss and its chase, exactly as the Around arena's.
+	for index, (x, z) in enumerate(truss_ring(e)):
+		if index % TRUSS_LIGHT_SPACING == 0:
+			build.set(x, CONCERT_TRUSS_Y, z, STAGE_LIGHT_OFF)
+			build.set(x, CONCERT_TRUSS_Y + 1, z, CHASE,
+				(index // TRUSS_LIGHT_SPACING) % 8)
+		else:
+			build.set(x, CONCERT_TRUSS_Y, z, TRUSS)
+	for a in range(0, e + 1, CONCERT_COLUMN_SPACING):
+		for x, z in ((a, 0), (e, a), (0, a)):
+			if (x, z) == (CONCERT_SPAWN[0], 0):
+				continue
+			build.box(x, FLOOR, z, x, CONCERT_TRUSS_Y - 1, z, COLUMN)
+
+	# The front truss: wall to wall at the edge truss's height, a lit light
+	# every fourth cell. Nothing rides on it, so the chase stays the edge's.
+	for x in range(1, e):
+		lit = x % 4 == 0
+		build.set(x, CONCERT_TRUSS_Y, CONCERT_FRONT_TRUSS_Z,
+			STAGE_LIGHT if lit else TRUSS)
+
+	# Backdrop and banners, the Around arena's art spread across a wider wall.
+	build.box(1, FLOOR, e, e - 1, CONCERT_BACKDROP_TOP, e, wool("black"))
+	place_banner(build, AROUND_SIGN, mid - 2, CONCERT_BACKDROP_TOP, e)
+	place_banner(build, PORTRAIT_RUBELLA, 15, FLOOR + 5, e)
+	place_banner(build, PORTRAIT_LILLITH, 32, FLOOR + 5, e)
+	for x in (4, 10, 24, 38, 44):
+		place_banner(build, LACE_BANNER, x, FLOOR + 4, e)
+
+	# The marquee over the entrance, and cloth on the side trusses facing in.
+	place_banner(build, AROUND_SIGN, mid - 2, CONCERT_TRUSS_Y - 1, 0)
+	for z in (4, 12, 20):
+		place_banner(build, LACE_BANNER, 0, CONCERT_TRUSS_Y - 1, z, facing=WEST)
+		place_banner(build, LACE_BANNER, e, CONCERT_TRUSS_Y - 1, z, facing=EAST)
+
+	# The stage: deck, violet lip, stairs either side of the front, uplights
+	# along the lip and the two cabs.
+	s = CONCERT_STAGE
+	build.box(s["x0"], FLOOR, s["z0"], s["x1"], FLOOR, s["z1"], wool("black"))
+	build.box(s["x0"], FLOOR, s["z0"], s["x1"], FLOOR, s["z0"], wool("violet"))
+	for pair in CONCERT_STAGE_STAIRS:
+		for x in pair:
+			build.set(x, FLOOR, s["z0"] - 1, BRICK_STAIR_NODE, NORTH)
+	for x in CONCERT_UPLIGHTS:
+		build.set(x, FLOOR + 1, s["z0"], UPLIGHT)
+	for x, z in CONCERT_CABS:
+		# facedir 0 puts the cab's grille on its south face, at the floor.
+		build.set(x, FLOOR + 1, z, AMP_CAB, NORTH)
+
+	# Risers down both sides of the floor.
+	z0, z1 = CONCERT_RISER_Z
+	for x0, x1, height in CONCERT_RISERS:
+		build.box(x0, FLOOR, z0, x1, FLOOR + height - 1, z1, BRICK)
+
+	# Front-of-house: a planks desk with a gold edge, lamps at either end.
+	d = CONCERT_DESK
+	build.box(d["x0"], FLOOR, d["z"], d["x1"], FLOOR, d["z"], PLANKS)
+	build.box(d["x0"] + 1, FLOOR, d["z"] - 1, d["x1"] - 1, FLOOR, d["z"] - 1, GOLD)
+	build.set(d["x0"], FLOOR + 1, d["z"], LAMP)
+	build.set(d["x1"], FLOOR + 1, d["z"], LAMP)
+
+	# House lights over the floor, every twelve nodes; airlike.
+	for x in range(f["x0"] + 3, f["x1"], 12):
+		for z in range(f["z0"] + 3, f["z1"], 8):
+			build.set(x, CONCERT_TRUSS_Y - 1, z, HIDDEN_LIGHT)
 	return build
 
 
@@ -1950,6 +2086,7 @@ SPECS = [
 	MapSpec("map_smoke_caldera", CALDERA_SIZE, CALDERA_SPAWN, build_smoke_caldera),
 	MapSpec("map_rainbow_storm", RAINBOW_SIZE, RAINBOW_SPAWN, build_rainbow_storm),
 	MapSpec("map_around_arena", ARENA_SIZE, ARENA_SPAWN, build_arena),
+	MapSpec("map_concert_arena", CONCERT_SIZE, CONCERT_SPAWN, build_concert_arena),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}
@@ -1969,9 +2106,13 @@ SPAWNS = {spec.name: spec.spawn for spec in SPECS}
 # Budget") and games/luanti_web/docs/maps.md ("Budget").
 #
 # Raised from 200,000 for the Around arena: it is 7,500 cells, under 8,192, so
-# it keeps 0.25 MiB and the pack 7.75 of its 8 MiB. The heap measurement is
-# the cap that bites; this one only stops the volume creeping up unnoticed.
-NODE_BUDGET = 210_000
+# it keeps 0.25 MiB and the pack 7.75 of its 8 MiB. Raised again, from
+# 210,000, for the concert arena: 31,213 cells, under 32,768, so it keeps
+# 1 MiB and the heap budget in test_luanti_web_maps.py went from 8 to 9 MiB
+# with it. That is the price of moving the songs off the showcase path. The
+# heap measurement is the cap that bites; this one only stops the volume
+# creeping up unnoticed.
+NODE_BUDGET = 240_000
 CHEAP_VOLUME = 32_768
 
 

@@ -430,6 +430,45 @@ step(1.0)
 lw_amps.stop()
 core.sound_play = sound_play
 
+--------------------------------------------------------------------------
+-- Song media is sent on demand, not on join
+--------------------------------------------------------------------------
+
+-- The songs are not in sounds/, so the client only has a pair once lw_amps
+-- has sent it. Nobody is started on a file they do not have; the sweep after
+-- the client confirms it starts them, in time.
+local added, confirm = {}, {}
+core.dynamic_add_media = function(options, callback)
+	added[#added + 1] = options
+	confirm[#confirm + 1] = function() callback(options.to_player) end
+	return true
+end
+lw_amps.set_hear(80)
+local sent_before = #played
+lw_amps.play("around_happy_hard_2")
+local sent = #added
+assert_true(sent > 0 and sent % 2 == 0, "the song's pair is sent to each listener")
+for _, options in ipairs(added) do
+	assert_true(options.filepath:find("/lw_amps/songs/lw_amps_around_happy_hard_2_[lr]%.ogg$") ~= nil,
+		"from lw_amps/songs: " .. tostring(options.filepath))
+	assert_true(options.to_player ~= nil, "to that player only")
+	assert_eq(options.client_cache, false, "and not cached by the browser")
+end
+assert_eq(#played, sent_before, "nothing plays before the client has the files")
+step(1.0)
+assert_eq(#added, sent, "a pending file is not sent twice")
+for _, fn in ipairs(confirm) do
+	fn()
+end
+step(1.0)
+assert_true(#played > sent_before, "the pair starts once it has arrived")
+assert_true(played[#played].params.start_time > 0, "late, but in step with the clock")
+lw_amps.stop()
+lw_amps.play("around_happy_hard_2")
+assert_eq(#added, sent, "a file a client has is not sent again")
+lw_amps.stop()
+core.dynamic_add_media = nil
+
 if failures > 0 then
 	io.stderr:write(("%d check(s) failed\n"):format(failures))
 	os.exit(1)

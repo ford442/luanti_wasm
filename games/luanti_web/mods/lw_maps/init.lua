@@ -676,9 +676,9 @@ lw_maps.register({
 lw_maps.register({
 	id = "around_arena",
 	title = "Around arena",
-	blurb = "Lace Waterfall's stage at night: \"Around\" out of the stage amps, " ..
-		"the band on the deck, lights racing round the truss and lasers " ..
-		"sweeping the floor.",
+	blurb = "Lace Waterfall's stage at night: lights racing round the truss " ..
+		"and lasers sweeping the floor. The concert itself is next door, in " ..
+		"the concert arena.",
 	size = {x = 25, y = 12, z = 25},
 	origin = {x = 29, y = BASE, z = 76},
 	spawn = {x = 41, y = BASE + 4, z = 76},
@@ -691,21 +691,52 @@ lw_maps.register({
 		sun_tint = "#b060ff", moon_tint = "#6a3cc0",
 		fog = 120, fog_start = 0.6,
 	}),
-	-- The sound sources, one node above the cabs on the stage's front
-	-- corners, audience-left first. lw_dance puts the band between them.
-	amps = {
-		left = {x = 6, y = 6, z = 16},
-		right = {x = 18, y = 6, z = 16},
-		song = "around_happy_hard",
-	},
-	-- Four emitters ride the top of the truss round the arena's edge, a lap
-	-- every eight bars of "Around", each with a laser down to a point that
-	-- circles the dance floor the other way.
+	-- No `amps`: the song lives only in the concert arena, so a visit here
+	-- never pulls the song files in. Four emitters ride the top of the truss
+	-- round the arena's edge, a lap every eight bars at Around's tempo, each
+	-- with a laser down to a point that circles the dance floor the other way.
 	lasers = {
 		track = {x0 = 0, z0 = 0, x1 = 24, z1 = 24, y = 10},
 		target = {x = 12, y = 4, z = 9, radius = 4},
 		colors = {"#c070ff", "#ff40c8", "#f0e0ff", "#8f50ff"},
 		lap_beats = 32,
+		bpm = 175,
+	},
+})
+
+lw_maps.register({
+	id = "concert_arena",
+	title = "Concert arena",
+	blurb = "Lace Waterfall live: \"Around\" out of the stage amps as you walk " ..
+		"in, the band on a wide stage, risers down both sides, lights racing " ..
+		"round the truss and lasers over the floor.",
+	-- 49 x 13 x 49, about twice the Around arena on each side. The only map
+	-- with `amps`, so the only place the heavy song files are ever sent to a
+	-- client (lw_amps/songs/README.md); keep any heavier audio experiment here.
+	size = {x = 49, y = 13, z = 49},
+	origin = {x = 35, y = BASE, z = 120},
+	spawn = {x = 59, y = BASE + 4, z = 120},
+	day_night_ratio = 0.08,
+	sky = lw_maps.sky({
+		sky = "#160828", horizon = "#5a1450",
+		night_sky = "#0a0414", night_horizon = "#2e0a30", indoors = "#12081e",
+		sun_tint = "#ff50c0", moon_tint = "#7040d0",
+		fog = 140, fog_start = 0.6,
+	}),
+	-- The sound sources, one node above the cabs on the stage's front, twenty
+	-- nodes apart, audience-left first. lw_dance puts the band between them.
+	amps = {
+		left = {x = 14, y = 6, z = 30},
+		right = {x = 34, y = 6, z = 30},
+		song = "around_happy_hard",
+	},
+	-- Six emitters on a truss twice as long, so a lap is sixteen bars and
+	-- they move at the same speed as the Around arena's.
+	lasers = {
+		track = {x0 = 0, z0 = 0, x1 = 48, z1 = 48, y = 11},
+		target = {x = 24, y = 4, z = 15, radius = 8},
+		colors = {"#c070ff", "#ff40c8", "#f0e0ff", "#8f50ff", "#40e0ff", "#ff70a0"},
+		lap_beats = 64,
 		bpm = 175,
 	},
 })
