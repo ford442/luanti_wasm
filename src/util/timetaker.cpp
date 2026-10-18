@@ -16,7 +16,10 @@ void TimeTaker::start()
 u64 TimeTaker::stop(bool quiet)
 {
 	if (m_running) {
-		u64 dtime = porting::getTime(m_precision) - m_time1;
+		const u64 now = porting::getTime(m_precision);
+		// Unsigned wrap (non-monotonic clocks on some WASM workers)
+		// must not look like a multi-year duration.
+		u64 dtime = (now >= m_time1) ? (now - m_time1) : 0;
 		if (m_result != nullptr) {
 			(*m_result) += dtime;
 		} else {
@@ -33,6 +36,6 @@ u64 TimeTaker::stop(bool quiet)
 
 u64 TimeTaker::getTimerTime()
 {
-	return porting::getTime(m_precision) - m_time1;
+	const u64 now = porting::getTime(m_precision);
+	return (now >= m_time1) ? (now - m_time1) : 0;
 }
-

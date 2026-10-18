@@ -263,6 +263,27 @@ public:
 		return TextureCache;
 	}
 
+	// After an external presenter (Emscripten OFFSCREEN_FRAMEBUFFER blit)
+	// mutates the real GL context, cached enables no longer match. Force
+	// the next set* calls to re-issue the commands.
+	void invalidateCachedState()
+	{
+		BlendEquationInvalid = true;
+		BlendFuncInvalid = true;
+		BlendInvalid = true;
+		ColorMaskInvalid = true;
+		CullFace = !CullFace;
+		CullFaceMode = 0;
+		DepthFunc = 0;
+		DepthMask = !DepthMask;
+		DepthTest = !DepthTest;
+		FrameBufferID = 0xFFFFFFFFu;
+		ProgramID = 0xFFFFFFFFu;
+		ActiveTexture = 0;
+		ViewportWidth = 0;
+		ViewportHeight = 0;
+	}
+
 	// Blending calls.
 
 	void setBlendEquation(GLenum mode)

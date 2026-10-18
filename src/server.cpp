@@ -22,6 +22,7 @@
 #include "nodedef.h"
 #include "particles.h"
 #include "profiler.h"
+#include "porting_emscripten.h"
 #include "remoteplayer.h"
 #include "server/ban.h"
 #include "serverenvironment.h"
@@ -131,7 +132,10 @@ void *ServerThread::run()
 	}
 	framemarker.end();
 
-	float dtime = 0.0f;
+	// Start with a positive step so the first AsyncRunStep is not a no-op.
+	// Under Emscripten, a zero dtime combined with the old
+	// m_nothing_to_send_pause_timer >= 0 check prevented all mapblock sends.
+	float dtime = 0.05f;
 
 	while (!stopRequested()) {
 		framemarker.start();
@@ -147,11 +151,19 @@ void *ServerThread::run()
 			if (dtime > step_settings.steplen + 0.001f)
 				m_server->yieldToOtherThreads(dtime);
 
-			m_server->AsyncRunStep(step_settings.pause ? 0.0f : dtime);
+			const float step_dtime = step_settings.pause ? 0.0f :
+					std::max(dtime, 1e-4f);
+			m_server->AsyncRunStep(step_dtime);
 
 			const float remaining_time = step_settings.steplen
 					- 1e-6f * (porting::getTimeUs() - t0);
+#ifdef __EMSCRIPTEN__
+			// Guarantee a minimum wait so the server thread cannot busy-spin
+			// when socket Receive() returns immediately with dtime≈0.
+			m_server->Receive(std::max(remaining_time, 0.005f));
+#else
 			m_server->Receive(remaining_time);
+#endif
 
 		} catch (con::PeerNotFoundException &e) {
 			infostream<<"Server: PeerNotFoundException"<<std::endl;
@@ -164,6 +176,8 @@ void *ServerThread::run()
 		}
 
 		dtime = 1e-6f * (porting::getTimeUs() - t0);
+		if (dtime <= 0.0f)
+			dtime = step_settings.steplen > 0.0f ? step_settings.steplen : 0.05f;
 		framemarker.end();
 	}
 
@@ -427,8 +441,11 @@ Server::~Server()
 	}
 
 	// Write any changes before deletion.
-	if (m_mod_storage_database)
+	if (m_mod_storage_database) {
 		m_mod_storage_database->endSave();
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
+	}
 
 	// Clean up files
 	for (auto &it : m_media) {
@@ -527,14 +544,17 @@ void Server::init()
 	m_script->loadBuiltin();
 
 	m_gamespec.checkAndLog();
+	porting::emscripten_report_status("Loading mods…", 6, "loading");
 	m_modmgr->loadMods(*m_script);
 
 	m_script->saveGlobals();
 
 	// Read Textures and calculate sha1 sums
+	porting::emscripten_report_status("Hashing media…", 8, "loading");
 	fillMediaCache();
 
 	// Apply item aliases in the node definition manager
+	porting::emscripten_report_status("Initializing world…", 11, "loading");
 	m_nodedef->updateAliases(m_itemdef);
 
 	// Apply texture overrides from texturepack/override.txt
@@ -881,6 +901,8 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		if (m_mod_storage_save_timer <= 0.0f) {
 			m_mod_storage_save_timer = g_settings->getFloat("server_map_save_interval");
 			m_mod_storage_database->endSave();
+			porting::emscripten_mark_persistence_dirty(
+				porting::EmscriptenPersistenceReason::Periodic);
 			m_mod_storage_database->beginSave();
 		}
 	}
@@ -2594,7 +2616,6 @@ void Server::SendBlocks(float dtime)
 			unique_clients += queue.size() > old_count ? 1 : 0;
 		}
 	}
-
 	// Sort.
 	// Lowest priority number comes first.
 	// Lowest is most important.
@@ -2723,7 +2744,7 @@ bool Server::addMediaFile(const std::string &filename,
 
 void Server::fillMediaCache()
 {
-	infostream << "Server: Calculating media file checksums" << std::endl;
+	actionstream << "Server: Calculating media file checksums" << std::endl;
 
 	// Collect all media file paths
 	std::vector<std::string> paths;
@@ -2737,6 +2758,7 @@ void Server::fillMediaCache()
 	m_modmgr->getModsMediaPaths(paths);
 
 	// Collect media file information from paths into cache
+	u32 considered = 0;
 	for (const std::string &mediapath : paths) {
 		std::vector<fs::DirListNode> dirlist = fs::GetDirListing(mediapath);
 		for (const auto &dln : dirlist) {
@@ -2750,10 +2772,19 @@ void Server::fillMediaCache()
 			std::string filepath = mediapath;
 			filepath.append(DIR_DELIM).append(filename);
 			addMediaFile(filename, filepath);
+			++considered;
+			if ((considered % 50) == 0) {
+				actionstream << "Server: hashed " << m_media.size()
+					<< " media files…" << std::endl;
+				porting::emscripten_report_status(
+					"Hashing media (" + std::to_string(m_media.size()) + " files)…",
+					8, "loading");
+			}
 		}
 	}
 
-	infostream << "Server: " << m_media.size() << " media files collected" << std::endl;
+	actionstream << "Server: " << m_media.size() << " media files collected"
+		<< std::endl;
 }
 
 void Server::sendMediaAnnouncement(session_t peer_id, const std::string &lang_code)

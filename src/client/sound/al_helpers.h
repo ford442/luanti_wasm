@@ -24,7 +24,9 @@
 #else
 	#include <AL/al.h>
 	#include <AL/alc.h>
+	#ifndef __EMSCRIPTEN__
 	#include <AL/alext.h>
+	#endif
 #endif
 
 #include <utility>

@@ -10,6 +10,10 @@
 
 #include "porting.h"
 
+#ifdef __EMSCRIPTEN__
+	#include <emscripten.h>
+#endif
+
 #if defined(__FreeBSD__)  || defined(__NetBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
 	#include <sys/types.h>
 	#include <sys/sysctl.h>
@@ -25,7 +29,7 @@
 #if !defined(_WIN32)
 	#include <unistd.h>
 	#include <sys/utsname.h>
-	#if !defined(__ANDROID__)
+	#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 		#include <spawn.h>
 	#endif
 #endif
@@ -96,7 +100,14 @@ volatile std::sig_atomic_t *signal_handler_killstatus()
 	return &g_killed;
 }
 
-#if !defined(_WIN32) // POSIX
+#if defined(__EMSCRIPTEN__)
+
+void signal_handler_init(void)
+{
+	// Browsers do not deliver SIGINT/SIGTERM in the usual sense; nothing to do.
+}
+
+#elif !defined(_WIN32) // POSIX
 
 // Used to silence compiler warnings about unused function results.
 // Note that static_cast<void>(...) does not suffice for the [warn_unused_result] attribute.
@@ -619,6 +630,20 @@ bool setSystemPaths()
 }
 
 
+//// Emscripten / WebAssembly
+#elif defined(__EMSCRIPTEN__)
+
+bool setSystemPaths()
+{
+	// Read-only assets are mounted at the root by Emscripten's --preload-file.
+	// User data (worlds, config) live on the IDBFS partition set up in
+	// porting_emscripten.cpp before main() runs.
+	path_share = "/";
+	path_user  = "/home/web_user/.luanti";
+	return true;
+}
+
+
 #else
 
 bool setSystemPaths()
@@ -678,7 +703,14 @@ static void createCacheDirTag()
 
 void initializePaths()
 {
-#if RUN_IN_PLACE
+#ifdef __EMSCRIPTEN__
+	// Browser assets are preloaded at the root while writable user data is the
+	// IDBFS mount hydrated before main(). RUN_IN_PLACE path discovery cannot
+	// inspect a meaningful native executable path in Emscripten.
+	path_share = "/";
+	path_user = "/home/web_user/.luanti";
+	path_cache = path_user + DIR_DELIM "cache";
+#elif RUN_IN_PLACE
 	infostream << "Using relative paths (RUN_IN_PLACE)" << std::endl;
 
 	char buf[PATH_MAX];
@@ -946,6 +978,8 @@ static bool open_uri(const std::string &uri)
 	const char *argv[] = {"open", uri.c_str(), NULL};
 	return posix_spawnp(NULL, "open", NULL, NULL, (char**)argv,
 		(*_NSGetEnviron())) == 0;
+#elif defined(__EMSCRIPTEN__)
+	return false;
 #else
 	const char *argv[] = {"xdg-open", uri.c_str(), NULL};
 	return posix_spawnp(NULL, "xdg-open", NULL, NULL, (char**)argv, environ) == 0;
@@ -959,7 +993,16 @@ bool open_url(const std::string &url)
 		return false;
 	}
 
+#ifdef __EMSCRIPTEN__
+	return MAIN_THREAD_EM_ASM_INT({
+		var opened = window.open(UTF8ToString($0), "_blank");
+		if (opened)
+			opened.opener = null;
+		return opened ? 1 : 0;
+	}, url.c_str()) != 0;
+#else
 	return open_uri(url);
+#endif
 }
 
 bool open_directory(const std::string &path)

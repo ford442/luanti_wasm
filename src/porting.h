@@ -46,6 +46,15 @@
 	#define sleep_us(x) usleep(x)
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/threading.h>
+#undef sleep_ms
+#undef sleep_us
+#define sleep_ms(x) emscripten_thread_sleep(x)
+#define sleep_us(x) emscripten_thread_sleep(((x) + 999) / 1000)
+#endif
+
 #ifdef _MSC_VER
 	#define strtok_r(x, y, z) strtok_s(x, y, z)
 	#define strtof(x, y) (float)strtod(x, y)
@@ -151,6 +160,17 @@ inline u64 getTimeMs() { return os_get_time(1000); }
 inline u64 getTimeUs() { return os_get_time(1000*1000); }
 inline u64 getTimeNs() { return os_get_time(1000*1000*1000); }
 
+#elif defined(__EMSCRIPTEN__)
+
+// clock_gettime(CLOCK_MONOTONIC_RAW) is defined but not reliable on
+// Emscripten pthreads: it can fail (uninitialized timespec) or jump
+// between worker clocks. That makes TimeTaker report multi-year ABM
+// durations and sends shader animationTimer through the roof.
+inline u64 getTimeS() { return (u64)(emscripten_get_now() / 1000.0); }
+inline u64 getTimeMs() { return (u64)emscripten_get_now(); }
+inline u64 getTimeUs() { return (u64)(emscripten_get_now() * 1000.0); }
+inline u64 getTimeNs() { return (u64)(emscripten_get_now() * 1000000.0); }
+
 #else // POSIX
 
 inline void os_get_clock(struct timespec *ts)
@@ -231,6 +251,11 @@ inline void preciseSleepUs(u64 sleep_time)
 {
 	if (sleep_time > 0)
 	{
+#ifdef __EMSCRIPTEN__
+		// Busy-waiting for monotonic time can stall forever on the
+		// PROXY_TO_PTHREAD application worker after WebGL presentation.
+		sleep_us(sleep_time);
+#else
 		u64 target_time = porting::getTimeUs() + sleep_time;
 		if (sleep_time > SLEEP_ACCURACY_US)
 			sleep_us(sleep_time - SLEEP_ACCURACY_US);
@@ -239,6 +264,7 @@ inline void preciseSleepUs(u64 sleep_time)
 		// The target - now > 0 construct will handle overflow gracefully (even though it should
 		// never happen)
 		while ((s64)(target_time - porting::getTimeUs()) > 0) {}
+#endif
 	}
 }
 

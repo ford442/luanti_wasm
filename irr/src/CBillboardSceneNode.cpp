@@ -96,8 +96,13 @@ void CBillboardSceneNode::updateMesh(const scene::ICameraSceneNode *camera)
 	view.normalize();
 
 	core::vector3df horizontal = up.crossProduct(view);
-	if (horizontal.getLength() == 0) {
-		horizontal.set(up.Y, up.X, up.Z);
+	if (horizontal.getLengthSQ() < 1e-6f) {
+		const core::vector3df alt = (core::abs_<f32>(view.Y) > 0.5f)
+				? core::vector3df(0.f, 0.f, 1.f)
+				: core::vector3df(0.f, 1.f, 0.f);
+		horizontal = alt.crossProduct(view);
+		if (horizontal.getLengthSQ() < 1e-6f)
+			horizontal.set(1.f, 0.f, 0.f);
 	}
 	horizontal.normalize();
 	core::vector3df topHorizontal = horizontal * 0.5f * TopEdgeWidth;

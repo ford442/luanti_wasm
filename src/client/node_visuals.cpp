@@ -185,6 +185,12 @@ static bool isWorldAligned(AlignStyle style, WorldAlignMode mode, NodeDrawType d
 /// @return maximum number of layers in array textures we can use (0 if unsupported)
 static size_t getArrayTextureMax(IShaderSource *shdsrc)
 {
+#ifdef __EMSCRIPTEN__
+	// Array textures need integer vertex attribs (inVertexAux). The WebGL
+	// proxy + OFFSCREEN blit path has dropped or zeroed that attrib, which
+	// samples layer 0 / out-of-range layers as black triangles.
+	return 0;
+#endif
 	auto *driver = RenderingEngine::get_video_driver();
 	// needs to support creating array textures
 	if (!driver->queryFeature(video::EVDF_TEXTURE_2D_ARRAY))

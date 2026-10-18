@@ -6,12 +6,18 @@ on:
     paths:
       - 'builtin/**.lua'
       - 'games/devtest/**.lua'
+      - 'games/luanti_web/**.lua'
+      - 'games/luanti_web/mods/lw_amps/**'
+      - 'util/content/**'
       - 'util/ci/**'
       - '.github/workflows/lua.yml'
   pull_request:
     paths:
       - 'builtin/**.lua'
       - 'games/devtest/**.lua'
+      - 'games/luanti_web/**.lua'
+      - 'games/luanti_web/mods/lw_amps/**'
+      - 'util/content/**'
       - 'util/ci/**'
       - '.github/workflows/lua.yml'
 
@@ -72,3 +78,16 @@ jobs:
     - name: Run checks (devtest)
       run: |
         $HOME/.luarocks/bin/luacheck --config=games/devtest/.luacheckrc games/devtest
+
+    - name: Run luacheck for luanti_web
+      run: |
+        $HOME/.luarocks/bin/luacheck --config=games/luanti_web/.luacheckrc games/luanti_web
+
+    - name: Run luanti_web content checks
+      run: |
+        python3 util/content/test_luanti_web_kinetic.py
+        python3 util/content/test_luanti_web_tools.py
+        python3 util/content/test_luanti_web_theater.py
+        python3 util/content/test_luanti_web_maps.py
+        python3 util/content/test_luanti_web_routines.py
+        python3 util/content/test_luanti_web_amps.py

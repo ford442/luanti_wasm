@@ -1,0 +1,1938 @@
+#!/usr/bin/env python3
+# Luanti
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 The Luanti Contributors
+"""Generate every texture used by games/luanti_web.
+
+The showcase pack keeps its art in-repo as small indexed-free RGBA PNGs so the
+Emscripten ``--preload-file`` payload stays predictable (see the content budget
+in ``wasm_porting.md``). Rather than committing binaries nobody can edit, the
+tiles are described procedurally here and regenerated with:
+
+    python3 util/content/generate_luanti_web_textures.py
+
+Everything is deterministic: rerunning the script on an unchanged tree produces
+byte-identical files, so a regeneration shows up as an empty diff.
+
+Only the standard library is used (zlib + struct) — no Pillow, no NumPy, so it
+runs in CI containers and in the Emscripten build image.
+
+Animated tiles are written as vertical filmstrips, the layout Luanti's
+``vertical_frames`` animation expects: ``N`` square frames stacked top to
+bottom in one image of ``size x (size * N)``. Authoring the same layout from
+real footage is documented in ``games/luanti_web/docs/filmstrips.md``; the
+one-liner is::
+
+    ffmpeg -y -i clip.mp4 -vf "fps=12,scale=32:32:flags=neighbor,tile=1x24" -frames:v 1 strip.png
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Callable
+import math
+import pathlib
+import struct
+import zlib
+
+# --------------------------------------------------------------------------
+# Minimal PNG writer
+# --------------------------------------------------------------------------
+
+Color = tuple[int, int, int, int]
+Image = list[list[Color]]
+
+
+def new_image(width: int, height: int, fill: Color = (0, 0, 0, 0)) -> Image:
+	return [[fill for _ in range(width)] for _ in range(height)]
+
+
+def _paeth(a: int, b: int, c: int) -> int:
+	p = a + b - c
+	pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+	if pa <= pb and pa <= pc:
+		return a
+	return b if pb <= pc else c
+
+
+def _filter_line(row: bytes, prior: bytes, bpp: int, kind: int) -> bytes:
+	length = len(row)
+	if kind == 0:
+		return row
+	out = bytearray(length)
+	if kind == 1:
+		for i in range(length):
+			out[i] = (row[i] - (row[i - bpp] if i >= bpp else 0)) & 0xFF
+	elif kind == 2:
+		for i in range(length):
+			out[i] = (row[i] - prior[i]) & 0xFF
+	elif kind == 3:
+		for i in range(length):
+			left = row[i - bpp] if i >= bpp else 0
+			out[i] = (row[i] - ((left + prior[i]) >> 1)) & 0xFF
+	else:
+		for i in range(length):
+			left = row[i - bpp] if i >= bpp else 0
+			upper_left = prior[i - bpp] if i >= bpp else 0
+			out[i] = (row[i] - _paeth(left, prior[i], upper_left)) & 0xFF
+	return bytes(out)
+
+
+def _scanlines(image: Image) -> list[bytes]:
+	return [bytes(value for pixel in row for value in pixel) for row in image]
+
+
+def _encode_idat(lines: list[bytes], stride: int, bpp: int) -> bytes:
+	"""Search filter strategies and deflate settings for the smallest IDAT.
+
+	The repository's CI runs optipng over every committed PNG and fails a file
+	it can shrink by more than 3%, so a naive encoder is not good enough: with
+	every row stored unfiltered these tiles lose by up to 50%. On images this
+	small an exhaustive search is cheap — a few dozen deflates of a few KiB —
+	and it keeps the pipeline to the standard library, which is what lets the
+	textures be regenerated in any CI container.
+	"""
+	# Each fixed filter, plus the usual per-row minimum-sum-of-absolute-
+	# differences heuristic, which is what beats a fixed filter on photographic
+	# content.
+	candidates = []
+	for kind in range(5):
+		raw = bytearray()
+		prior = bytes(stride)
+		for line in lines:
+			raw.append(kind)
+			raw.extend(_filter_line(line, prior, bpp, kind))
+			prior = line
+		candidates.append(bytes(raw))
+
+	def cost(data: bytes) -> int:
+		return sum(value if value < 128 else 256 - value for value in data)
+
+	raw = bytearray()
+	prior = bytes(stride)
+	for line in lines:
+		best_kind, best = min(
+			((kind, _filter_line(line, prior, bpp, kind)) for kind in range(5)),
+			key=lambda entry: cost(entry[1]))
+		raw.append(best_kind)
+		raw.extend(best)
+		prior = line
+	candidates.append(bytes(raw))
+
+	strategies = (zlib.Z_DEFAULT_STRATEGY, zlib.Z_FILTERED, zlib.Z_RLE,
+		zlib.Z_HUFFMAN_ONLY)
+	best_payload = None
+	for raw_data in candidates:
+		for strategy in strategies:
+			compressor = zlib.compressobj(9, zlib.DEFLATED, 15, 9, strategy)
+			payload = compressor.compress(raw_data) + compressor.flush()
+			if best_payload is None or len(payload) < len(best_payload):
+				best_payload = payload
+	assert best_payload is not None
+	return best_payload
+
+
+def save_png(path: pathlib.Path, image: Image) -> None:
+	height = len(image)
+	width = len(image[0])
+	bpp = 4
+
+	def chunk(tag: bytes, payload: bytes) -> bytes:
+		return (struct.pack(">I", len(payload)) + tag + payload
+			+ struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF))
+
+	header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+	data = _encode_idat(_scanlines(image), width * bpp, bpp)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_bytes(b"\x89PNG\r\n\x1a\n"
+		+ chunk(b"IHDR", header)
+		+ chunk(b"IDAT", data)
+		+ chunk(b"IEND", b""))
+
+
+# --------------------------------------------------------------------------
+# Colour and drawing helpers
+# --------------------------------------------------------------------------
+
+
+def rgb(value: str, alpha: int = 255) -> Color:
+	value = value.lstrip("#")
+	return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16), alpha)
+
+
+def clamp(value: float, low: int = 0, high: int = 255) -> int:
+	return max(low, min(high, int(round(value))))
+
+
+def shade(color: Color, factor: float) -> Color:
+	return (clamp(color[0] * factor), clamp(color[1] * factor),
+		clamp(color[2] * factor), color[3])
+
+
+def mix(a: Color, b: Color, t: float) -> Color:
+	t = max(0.0, min(1.0, t))
+	return tuple(clamp(a[i] + (b[i] - a[i]) * t) for i in range(4))  # type: ignore[return-value]
+
+
+def put(image: Image, x: int, y: int, color: Color) -> None:
+	if 0 <= y < len(image) and 0 <= x < len(image[0]):
+		image[y][x] = color
+
+
+def fill_rect(image: Image, x0: int, y0: int, x1: int, y1: int, color: Color) -> None:
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			put(image, x, y, color)
+
+
+def stroke_rect(image: Image, x0: int, y0: int, x1: int, y1: int, color: Color) -> None:
+	for x in range(x0, x1 + 1):
+		put(image, x, y0, color)
+		put(image, x, y1, color)
+	for y in range(y0, y1 + 1):
+		put(image, x0, y, color)
+		put(image, x1, y, color)
+
+
+def fill_disc(image: Image, cx: float, cy: float, radius: float, color: Color) -> None:
+	for y in range(len(image)):
+		for x in range(len(image[0])):
+			if (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius:
+				put(image, x, y, color)
+
+
+class Noise:
+	"""Small deterministic value hash. Seeded per texture, never time-based."""
+
+	def __init__(self, seed: int) -> None:
+		self.seed = seed & 0xFFFFFFFF
+
+	def at(self, x: int, y: int) -> float:
+		h = (x * 374761393 + y * 668265263 + self.seed * 1274126177) & 0xFFFFFFFF
+		h = (h ^ (h >> 13)) * 1274126177 & 0xFFFFFFFF
+		h = h ^ (h >> 16)
+		return (h & 0xFFFF) / 65535.0
+
+	def grain(self, image: Image, amount: float) -> None:
+		for y in range(len(image)):
+			for x in range(len(image[0])):
+				pixel = image[y][x]
+				if pixel[3] == 0:
+					continue
+				factor = 1.0 + (self.at(x, y) - 0.5) * amount
+				image[y][x] = shade(pixel, factor)
+
+
+# --------------------------------------------------------------------------
+# A 3x5 pixel font, enough for labels baked into posters and title cards
+# --------------------------------------------------------------------------
+
+FONT = {
+	"A": ("010", "101", "111", "101", "101"),
+	"B": ("110", "101", "110", "101", "110"),
+	"C": ("011", "100", "100", "100", "011"),
+	"D": ("110", "101", "101", "101", "110"),
+	"E": ("111", "100", "110", "100", "111"),
+	"F": ("111", "100", "110", "100", "100"),
+	"G": ("011", "100", "101", "101", "011"),
+	"H": ("101", "101", "111", "101", "101"),
+	"I": ("111", "010", "010", "010", "111"),
+	"J": ("001", "001", "001", "101", "010"),
+	"K": ("101", "110", "100", "110", "101"),
+	"L": ("100", "100", "100", "100", "111"),
+	"M": ("101", "111", "111", "101", "101"),
+	"N": ("101", "111", "111", "111", "101"),
+	"O": ("010", "101", "101", "101", "010"),
+	"P": ("110", "101", "110", "100", "100"),
+	"Q": ("010", "101", "101", "111", "011"),
+	"R": ("110", "101", "110", "101", "101"),
+	"S": ("011", "100", "010", "001", "110"),
+	"T": ("111", "010", "010", "010", "010"),
+	"U": ("101", "101", "101", "101", "011"),
+	"V": ("101", "101", "101", "101", "010"),
+	"W": ("101", "101", "111", "111", "101"),
+	"X": ("101", "101", "010", "101", "101"),
+	"Y": ("101", "101", "010", "010", "010"),
+	"Z": ("111", "001", "010", "100", "111"),
+	"0": ("111", "101", "101", "101", "111"),
+	"1": ("010", "110", "010", "010", "111"),
+	"2": ("110", "001", "010", "100", "111"),
+	"3": ("110", "001", "010", "001", "110"),
+	"4": ("101", "101", "111", "001", "001"),
+	"5": ("111", "100", "110", "001", "110"),
+	"6": ("011", "100", "110", "101", "010"),
+	"7": ("111", "001", "010", "010", "010"),
+	"8": ("010", "101", "010", "101", "010"),
+	"9": ("010", "101", "011", "001", "110"),
+	".": ("000", "000", "000", "000", "010"),
+	"-": ("000", "000", "111", "000", "000"),
+	"!": ("010", "010", "010", "000", "010"),
+	" ": ("000", "000", "000", "000", "000"),
+}
+
+GLYPH_W = 3
+GLYPH_H = 5
+
+
+def text_width(text: str, spacing: int = 1, scale: int = 1) -> int:
+	if not text:
+		return 0
+	return (len(text) * (GLYPH_W + spacing) - spacing) * scale
+
+
+def draw_text(image: Image, x: int, y: int, text: str, color: Color,
+		spacing: int = 1, scale: int = 1) -> None:
+	cursor = x
+	for char in text.upper():
+		glyph = FONT.get(char)
+		if glyph is not None:
+			for row, bits in enumerate(glyph):
+				for col, bit in enumerate(bits):
+					if bit == "1":
+						fill_rect(image,
+							cursor + col * scale, y + row * scale,
+							cursor + col * scale + scale - 1,
+							y + row * scale + scale - 1, color)
+		cursor += (GLYPH_W + spacing) * scale
+
+
+# --------------------------------------------------------------------------
+# Palette
+# --------------------------------------------------------------------------
+
+# 16 dyed cubes. lw_nodes tints one greyscale weave with [multiply, so these
+# values also drive the pixel art in the gallery (games/luanti_web/mods/lw_world).
+WOOL_COLORS: dict[str, str] = {
+	"white": "e9e9e4",
+	"grey": "9a9a95",
+	"dark_grey": "4c4c48",
+	"black": "1c1c1a",
+	"red": "bf2f31",
+	"orange": "e07a22",
+	"yellow": "e6c22f",
+	"green": "5aa83c",
+	"dark_green": "2d6b2d",
+	"cyan": "31b0ae",
+	"blue": "2f5cba",
+	"violet": "6c3fb8",
+	"magenta": "b43196",
+	"pink": "e38cae",
+	"brown": "7b5230",
+	"tan": "c8a97a",
+}
+
+
+# --------------------------------------------------------------------------
+# Static node tiles (16x16)
+# --------------------------------------------------------------------------
+
+S = 16
+
+
+def tex_stone() -> Image:
+	base = rgb("7e7e7e")
+	image = new_image(S, S, base)
+	noise = Noise(11)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.82 + 0.34 * noise.at(x, y))
+	# A couple of darker pits so the surface is not pure static.
+	for cx, cy in ((3, 11), (11, 4), (8, 13)):
+		fill_disc(image, cx, cy, 1.4, shade(base, 0.68))
+	return image
+
+
+def tex_stone_brick() -> Image:
+	base = rgb("8a8780")
+	mortar = rgb("5f5d58")
+	image = new_image(S, S, base)
+	noise = Noise(23)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.88 + 0.22 * noise.at(x, y))
+	for y in (3, 7, 11, 15):
+		fill_rect(image, 0, y, S - 1, y, mortar)
+	for row, y0 in enumerate((0, 4, 8, 12)):
+		offset = 0 if row % 2 == 0 else 8
+		for x in (offset, offset + 8):
+			fill_rect(image, x % S, y0, x % S, y0 + 3, mortar)
+	# Top-light the courses so the wall reads in flat GLES2 shading.
+	for y in (0, 4, 8, 12):
+		for x in range(S):
+			if image[y][x] != mortar:
+				image[y][x] = shade(image[y][x], 1.12)
+	return image
+
+
+def tex_polished_stone() -> Image:
+	base = rgb("9d9c97")
+	image = new_image(S, S, base)
+	for y in range(S):
+		for x in range(S):
+			sheen = 1.0 + 0.10 * math.sin((x + y) * 0.38)
+			image[y][x] = shade(base, sheen)
+	Noise(31).grain(image, 0.05)
+	stroke_rect(image, 0, 0, S - 1, S - 1, shade(base, 0.82))
+	stroke_rect(image, 1, 1, S - 2, S - 2, shade(base, 1.10))
+	return image
+
+
+def tex_planks() -> Image:
+	light = rgb("a87a4e")
+	dark = rgb("6d4a2c")
+	image = new_image(S, S, light)
+	noise = Noise(41)
+	for y in range(S):
+		for x in range(S):
+			grain = 0.86 + 0.24 * noise.at(x // 1, y * 3)
+			image[y][x] = shade(light, grain)
+	for y in (0, 5, 10, 15):
+		fill_rect(image, 0, y, S - 1, y, dark)
+	for x, y0, y1 in ((6, 1, 4), (11, 6, 9), (3, 11, 14)):
+		fill_rect(image, x, y0, x, y1, shade(dark, 1.15))
+	return image
+
+
+def tex_beam_side() -> Image:
+	image = tex_planks()
+	dark = rgb("5c3d24")
+	for y in range(S):
+		image[y][0] = dark
+		image[y][S - 1] = dark
+	for y in (2, 13):
+		for x in (2, 13):
+			fill_rect(image, x, y, x + 1, y + 1, rgb("6b6b66"))
+	return image
+
+
+def tex_beam_end() -> Image:
+	image = new_image(S, S, rgb("9a6d45"))
+	noise = Noise(43)
+	for y in range(S):
+		for x in range(S):
+			ring = math.hypot(x - 7.5, y - 7.5)
+			factor = 0.86 + 0.16 * math.sin(ring * 1.7) + 0.10 * noise.at(x, y)
+			image[y][x] = shade(rgb("9a6d45"), factor)
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("5c3d24"))
+	return image
+
+
+def tex_glass() -> Image:
+	pane = rgb("cfe6ef", 60)
+	image = new_image(S, S, pane)
+	frame = rgb("dff1f7", 190)
+	stroke_rect(image, 0, 0, S - 1, S - 1, frame)
+	for i in range(5, 12):
+		put(image, i, i - 4, rgb("ffffff", 120))
+		put(image, i + 1, i - 4, rgb("ffffff", 90))
+	return image
+
+
+def tex_bars() -> Image:
+	image = new_image(S, S)
+	metal = rgb("adb2b8")
+	for x in (2, 7, 12):
+		fill_rect(image, x, 0, x + 1, S - 1, metal)
+		fill_rect(image, x, 0, x, S - 1, shade(metal, 1.15))
+	fill_rect(image, 0, 1, S - 1, 2, shade(metal, 0.86))
+	fill_rect(image, 0, 13, S - 1, 14, shade(metal, 0.86))
+	return image
+
+
+def tex_gold() -> Image:
+	base = rgb("d8a92c")
+	image = new_image(S, S, base)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.86 + 0.26 * ((x + y) % 4) / 3.0)
+	stroke_rect(image, 0, 0, S - 1, S - 1, shade(base, 0.68))
+	fill_rect(image, 2, 7, S - 3, 8, shade(base, 1.22))
+	return image
+
+
+def tex_curtain() -> Image:
+	base = rgb("7a1226")
+	image = new_image(S, S, base)
+	for y in range(S):
+		for x in range(S):
+			fold = 0.74 + 0.34 * (0.5 + 0.5 * math.sin(x * 1.05))
+			image[y][x] = shade(base, fold)
+	Noise(53).grain(image, 0.06)
+	return image
+
+
+def tex_carpet() -> Image:
+	base = rgb("8d2436")
+	image = new_image(S, S, base)
+	noise = Noise(59)
+	for y in range(S):
+		for x in range(S):
+			weave = 1.06 if (x + y) % 2 == 0 else 0.94
+			image[y][x] = shade(base, weave * (0.94 + 0.12 * noise.at(x, y)))
+	return image
+
+
+def tex_column_side() -> Image:
+	base = rgb("d9d5c8")
+	image = new_image(S, S, base)
+	for y in range(S):
+		for x in range(S):
+			flute = 0.80 + 0.30 * (0.5 + 0.5 * math.cos((x - 7.5) * 0.85))
+			image[y][x] = shade(base, flute)
+	Noise(61).grain(image, 0.05)
+	return image
+
+
+def tex_column_top() -> Image:
+	base = rgb("d9d5c8")
+	image = new_image(S, S, base)
+	Noise(67).grain(image, 0.08)
+	stroke_rect(image, 1, 1, S - 2, S - 2, shade(base, 0.80))
+	fill_disc(image, 7.5, 7.5, 4.0, shade(base, 1.06))
+	return image
+
+
+def tex_fence() -> Image:
+	image = tex_planks()
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(image[y][x], 0.92)
+	return image
+
+
+def tex_lamp() -> Image:
+	glass = rgb("fff3cf")
+	image = new_image(S, S, glass)
+	for y in range(S):
+		for x in range(S):
+			glow = 1.0 - 0.22 * (math.hypot(x - 7.5, y - 7.5) / 10.6)
+			image[y][x] = shade(glass, glow)
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("b9a36a"))
+	stroke_rect(image, 1, 1, S - 2, S - 2, rgb("ffffff"))
+	return image
+
+
+def tex_uplight() -> Image:
+	image = new_image(S, S, rgb("3b3f44"))
+	Noise(71).grain(image, 0.08)
+	fill_disc(image, 7.5, 7.5, 4.6, rgb("ffe9a8"))
+	fill_disc(image, 7.5, 7.5, 2.6, rgb("fffdf2"))
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("2b2e32"))
+	return image
+
+
+def tex_pedestal_side() -> Image:
+	base = rgb("cdc8ba")
+	image = new_image(S, S, base)
+	Noise(73).grain(image, 0.06)
+	fill_rect(image, 0, 0, S - 1, 1, shade(base, 1.12))
+	fill_rect(image, 0, S - 2, S - 1, S - 1, shade(base, 0.82))
+	fill_rect(image, 0, 7, S - 1, 8, shade(base, 0.90))
+	return image
+
+
+def tex_pedestal_top() -> Image:
+	base = rgb("e2ddd0")
+	image = new_image(S, S, base)
+	Noise(79).grain(image, 0.05)
+	stroke_rect(image, 0, 0, S - 1, S - 1, shade(base, 0.78))
+	return image
+
+
+def tex_frame() -> Image:
+	# Opaque: this is a moulding block, used both as a picture frame and as the
+	# edge of the poster panel, so it has to read from any side.
+	wood = rgb("6b4322")
+	image = new_image(S, S, wood)
+	Noise(137).grain(image, 0.10)
+	stroke_rect(image, 0, 0, S - 1, S - 1, shade(wood, 0.72))
+	stroke_rect(image, 1, 1, S - 2, S - 2, shade(wood, 1.20))
+	stroke_rect(image, 3, 3, S - 4, S - 4, rgb("d8a92c"))
+	fill_rect(image, 5, 5, S - 6, S - 6, shade(wood, 0.88))
+	return image
+
+
+def tex_poster() -> Image:
+	size = 32
+	image = new_image(size, size, rgb("101a2b"))
+	for y in range(size):
+		for x in range(size):
+			image[y][x] = mix(rgb("16233a"), rgb("2c1f4a"), y / (size - 1))
+	# Simple voxel skyline so the poster reads as exhibition art, not a swatch.
+	for x0, height, color in ((3, 9, "3f7f4f"), (9, 14, "56a367"), (16, 7, "2f6d55"),
+			(21, 12, "4a8f9c"), (26, 5, "355f7a")):
+		fill_rect(image, x0, size - height - 4, x0 + 4, size - 5, rgb(color))
+	fill_disc(image, 24, 7, 3.2, rgb("f3d98a"))
+	fill_rect(image, 0, size - 4, size - 1, size - 1, rgb("0b1220"))
+	draw_text(image, 3, size - 27, "LUANTI", rgb("dfe9d8"))
+	draw_text(image, 4, size - 3 - GLYPH_H + 2, "WEB", rgb("9fd7a6"))
+	stroke_rect(image, 0, 0, size - 1, size - 1, rgb("d8a92c"))
+	return image
+
+
+def tex_stanchion() -> Image:
+	image = new_image(S, S)
+	brass = rgb("c9a12f")
+	fill_rect(image, 6, 2, 9, S - 1, brass)
+	fill_rect(image, 6, 2, 6, S - 1, shade(brass, 1.18))
+	fill_rect(image, 9, 2, 9, S - 1, shade(brass, 0.80))
+	fill_rect(image, 4, 0, 11, 2, shade(brass, 1.10))
+	fill_rect(image, 3, 4, 12, 5, rgb("8d2436"))
+	return image
+
+
+def tex_grass_top() -> Image:
+	base = rgb("5f9e46")
+	image = new_image(S, S, base)
+	noise = Noise(83)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.84 + 0.30 * noise.at(x, y))
+	return image
+
+
+def tex_dirt() -> Image:
+	base = rgb("6b4a2f")
+	image = new_image(S, S, base)
+	noise = Noise(89)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.82 + 0.34 * noise.at(x, y))
+	return image
+
+
+def tex_grass_side() -> Image:
+	image = tex_dirt()
+	grass = tex_grass_top()
+	noise = Noise(97)
+	for x in range(S):
+		depth = 3 + int(noise.at(x, 5) * 3)
+		for y in range(depth):
+			image[y][x] = grass[y][x]
+		put(image, x, depth, mix(grass[depth % S][x], image[depth][x], 0.5))
+	return image
+
+
+def tex_sand() -> Image:
+	base = rgb("d9c98f")
+	image = new_image(S, S, base)
+	noise = Noise(101)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.90 + 0.18 * noise.at(x, y))
+	return image
+
+
+def tex_paving() -> Image:
+	base = rgb("b6b0a2")
+	image = new_image(S, S, base)
+	noise = Noise(103)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.90 + 0.18 * noise.at(x, y))
+	joint = shade(base, 0.74)
+	fill_rect(image, 0, 7, S - 1, 8, joint)
+	fill_rect(image, 7, 0, 8, S - 1, joint)
+	for x0, y0 in ((0, 0), (9, 0), (0, 9), (9, 9)):
+		stroke_rect(image, x0, y0, x0 + 6, y0 + 6, shade(base, 1.08))
+	return image
+
+
+def tex_wool() -> Image:
+	# Greyscale weave; lw_nodes tints it per colour with [multiply.
+	base = rgb("ffffff")
+	image = new_image(S, S, base)
+	noise = Noise(107)
+	for y in range(S):
+		for x in range(S):
+			weave = 1.0 if (x // 2 + y // 2) % 2 == 0 else 0.90
+			image[y][x] = shade(base, weave * (0.94 + 0.10 * noise.at(x, y)))
+	return image
+
+
+def tex_hidden_light() -> Image:
+	# Airlike nodes still need an inventory image for the material library.
+	image = new_image(S, S, rgb("ffe9a8", 70))
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("ffd76a", 200))
+	draw_text(image, 3, 6, "LT", rgb("6b5a22", 230))
+	return image
+
+
+def tex_seat_side() -> Image:
+	base = rgb("6d1326")
+	image = new_image(S, S, base)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.82 + 0.26 * (0.5 + 0.5 * math.sin(x * 0.9)))
+	fill_rect(image, 0, 0, S - 1, 1, shade(base, 1.30))
+	fill_rect(image, 0, S - 3, S - 1, S - 1, rgb("2c2c30"))
+	return image
+
+
+def tex_seat_top() -> Image:
+	base = rgb("87182f")
+	image = new_image(S, S, base)
+	Noise(109).grain(image, 0.08)
+	stroke_rect(image, 2, 2, S - 3, S - 3, shade(base, 0.78))
+	return image
+
+
+def tex_aisle_light() -> Image:
+	image = new_image(S, S, rgb("26262b"))
+	Noise(113).grain(image, 0.06)
+	fill_rect(image, 3, 6, S - 4, 9, rgb("ffd98c"))
+	fill_rect(image, 5, 7, S - 6, 8, rgb("fff6de"))
+	return image
+
+
+def tex_remote() -> Image:
+	image = new_image(S, S)
+	body = rgb("2b2f36")
+	fill_rect(image, 4, 1, 11, 14, body)
+	fill_rect(image, 4, 1, 4, 14, shade(body, 1.25))
+	fill_rect(image, 11, 1, 11, 14, shade(body, 0.76))
+	fill_rect(image, 5, 3, 10, 5, rgb("9fd7a6"))
+	for y in (7, 10):
+		for x in (5, 8):
+			fill_rect(image, x, y, x + 2, y + 1, rgb("d8a92c"))
+	return image
+
+
+def tex_screen_off() -> Image:
+	base = rgb("14161c")
+	image = new_image(S, S, base)
+	for y in range(S):
+		for x in range(S):
+			sheen = 1.0 + 0.16 * math.sin((x - y) * 0.4)
+			image[y][x] = shade(base, sheen)
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("0a0b0e"))
+	return image
+
+
+def tex_marquee_frame() -> Image:
+	image = new_image(S, S, rgb("2a1f16"))
+	Noise(127).grain(image, 0.06)
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("d8a92c"))
+	return image
+
+
+def tex_chandelier() -> Image:
+	image = new_image(S, S)
+	chain = rgb("c8a97a")
+	fill_rect(image, 7, 0, 8, 4, chain)
+	bowl = rgb("d8a92c")
+	fill_rect(image, 2, 5, 13, 10, bowl)
+	fill_rect(image, 2, 5, 2, 10, shade(bowl, 1.25))
+	fill_rect(image, 13, 5, 13, 10, shade(bowl, 0.72))
+	fill_rect(image, 1, 10, 14, 12, shade(bowl, 0.82))
+	glow = rgb("fff2c4")
+	fill_rect(image, 4, 7, 5, 8, glow)
+	fill_rect(image, 7, 6, 8, 8, rgb("fff6de"))
+	fill_rect(image, 10, 7, 11, 8, glow)
+	return image
+
+
+def tex_reel_button() -> Image:
+	image = new_image(S, S, rgb("2b2f36"))
+	fill_disc(image, 7.5, 7.5, 5.4, rgb("8d2436"))
+	fill_disc(image, 7.5, 7.5, 3.2, rgb("e24a4a"))
+	fill_disc(image, 6.2, 6.2, 1.2, rgb("f2b0b0"))
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("d8a92c"))
+	return image
+
+
+STATIC_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_stone.png": tex_stone,
+	"lw_stone_brick.png": tex_stone_brick,
+	"lw_polished_stone.png": tex_polished_stone,
+	"lw_planks.png": tex_planks,
+	"lw_beam_side.png": tex_beam_side,
+	"lw_beam_end.png": tex_beam_end,
+	"lw_glass.png": tex_glass,
+	"lw_bars.png": tex_bars,
+	"lw_gold.png": tex_gold,
+	"lw_curtain.png": tex_curtain,
+	"lw_carpet.png": tex_carpet,
+	"lw_column_side.png": tex_column_side,
+	"lw_column_top.png": tex_column_top,
+	"lw_fence.png": tex_fence,
+	"lw_lamp.png": tex_lamp,
+	"lw_uplight.png": tex_uplight,
+	"lw_pedestal_side.png": tex_pedestal_side,
+	"lw_pedestal_top.png": tex_pedestal_top,
+	"lw_frame.png": tex_frame,
+	"lw_poster.png": tex_poster,
+	"lw_stanchion.png": tex_stanchion,
+	"lw_grass_top.png": tex_grass_top,
+	"lw_grass_side.png": tex_grass_side,
+	"lw_dirt.png": tex_dirt,
+	"lw_sand.png": tex_sand,
+	"lw_paving.png": tex_paving,
+	"lw_wool.png": tex_wool,
+	"lw_hidden_light.png": tex_hidden_light,
+}
+
+
+# --------------------------------------------------------------------------
+# Themed map-pack node tiles (16x16)
+# --------------------------------------------------------------------------
+
+# lw_maps holds the props the authored maps need and the core palette
+# cannot fake: a ribbed pumpkin, a lit face, cobweb, dead bark, hay, snow, a
+# torch, a canopy weave and a vine. Everything else those maps are built from
+# is a lw_nodes tile, often just tinted with ``[multiply`` the way the wool
+# weave is, so the pack costs ten tiles rather than thirty.
+
+def tex_pumpkin_side() -> Image:
+	base = rgb("d2701c")
+	image = new_image(S, S, base)
+	noise = Noise(101)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.90 + 0.18 * noise.at(x, y))
+	# Vertical ribs: the read that says "pumpkin" instead of "orange cube".
+	for x in (1, 5, 9, 13):
+		fill_rect(image, x, 0, x, S - 1, shade(base, 0.72))
+		fill_rect(image, x + 1, 0, x + 1, S - 1, shade(base, 1.14))
+	return image
+
+
+def tex_pumpkin_top() -> Image:
+	base = rgb("c4661a")
+	image = new_image(S, S, base)
+	noise = Noise(103)
+	for y in range(S):
+		for x in range(S):
+			ring = math.hypot(x - 7.5, y - 7.5)
+			image[y][x] = shade(base,
+				0.86 + 0.10 * math.sin(ring * 1.5) + 0.14 * noise.at(x, y))
+	stem = rgb("5e7a33")
+	fill_rect(image, 6, 6, 9, 9, stem)
+	fill_rect(image, 7, 4, 8, 5, shade(stem, 1.25))
+	stroke_rect(image, 6, 6, 9, 9, shade(stem, 0.78))
+	return image
+
+
+# One carved face, drawn once and shared by every jack-o'-lantern on the map.
+JACK_FACE = (
+	"................",
+	"................",
+	"...##......##...",
+	"..####....####..",
+	".######..######.",
+	"..####....####..",
+	"................",
+	".......##.......",
+	"......####......",
+	"................",
+	"..############..",
+	"..#.##.##.##.#..",
+	"..############..",
+	"...##########...",
+	"................",
+	"................",
+)
+
+
+def tex_jack_face() -> Image:
+	image = tex_pumpkin_side()
+	glow = rgb("ffd257")
+	edge = rgb("8a4a12")
+	for y, row in enumerate(JACK_FACE):
+		for x, bit in enumerate(row):
+			if bit != "#":
+				continue
+			put(image, x, y, glow)
+			# A dark lip around the cut so the light reads as coming through.
+			for ox, oy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+				if (0 <= y + oy < S and 0 <= x + ox < S
+						and JACK_FACE[y + oy][x + ox] != "#"):
+					put(image, x + ox, y + oy, edge)
+	return image
+
+
+def tex_cobweb() -> Image:
+	image = new_image(S, S)
+	thread = rgb("e4e0d8", 225)
+	faint = rgb("cfcac2", 140)
+	# Radials run corner to corner and edge midpoint to edge midpoint, so two
+	# neighbouring cobwebs join up instead of ending in mid air.
+	for i in range(S):
+		put(image, i, i, thread)
+		put(image, S - 1 - i, i, thread)
+		put(image, i, 7, faint)
+		put(image, 7, i, faint)
+	for radius in (3, 6, 10):
+		for step in range(radius + 1):
+			for sx, sy in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+				put(image, 7 + sx * step, 7 + sy * (radius - step), thread)
+	return image
+
+
+def tex_dead_wood_side() -> Image:
+	base = rgb("5a4f42")
+	image = new_image(S, S, base)
+	noise = Noise(107)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.82 + 0.30 * noise.at(x // 2, y))
+	for x in (2, 6, 11, 14):
+		fill_rect(image, x, 0, x, S - 1, shade(base, 0.64))
+	for x, y0, y1 in ((4, 2, 7), (9, 6, 12), (13, 1, 5)):
+		fill_rect(image, x, y0, x, y1, shade(base, 1.24))
+	return image
+
+
+def tex_hay() -> Image:
+	base = rgb("d0ab5c")
+	image = new_image(S, S, base)
+	noise = Noise(109)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.84 + 0.28 * noise.at(x * 3, y))
+	for y in (3, 7, 11, 15):
+		fill_rect(image, 0, y, S - 1, y, shade(base, 0.70))
+	# Two binding cords, so the bale reads as a bale and not as sand.
+	for x in (4, 11):
+		fill_rect(image, x, 0, x, S - 1, shade(base, 0.56))
+	return image
+
+
+def tex_snow() -> Image:
+	base = rgb("eef3f8")
+	image = new_image(S, S, base)
+	noise = Noise(113)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = shade(base, 0.94 + 0.09 * noise.at(x, y))
+	# Faint drifts: pure white is invisible against pure white in flat shading.
+	for cx, cy in ((4, 5), (12, 9), (7, 13)):
+		fill_disc(image, cx, cy, 1.3, shade(base, 0.91))
+	return image
+
+
+def tex_torch() -> Image:
+	image = new_image(S, S)
+	handle = rgb("6d4a2c")
+	fill_rect(image, 7, 6, 8, S - 1, handle)
+	fill_rect(image, 7, 6, 7, S - 1, shade(handle, 1.20))
+	fill_rect(image, 6, 4, 9, 6, rgb("e06a1b"))
+	fill_rect(image, 6, 2, 9, 4, rgb("ffb52e"))
+	fill_rect(image, 7, 1, 8, 3, rgb("ffe8a8"))
+	return image
+
+
+def tex_leaves() -> Image:
+	"""Greyscale canopy weave, tinted per node with ``[multiply``.
+
+	One tile serves both the pine needles on the snow map and the oversized
+	garden canopy, the same trick the sixteen wool cubes use.
+	"""
+	image = new_image(S, S)
+	noise = Noise(127)
+	for y in range(S):
+		for x in range(S):
+			value = noise.at(x, y)
+			# Gaps, so a canopy reads as leaves rather than as a green slab.
+			if value < 0.20:
+				continue
+			level = clamp(148 + value * 107)
+			image[y][x] = (level, level, level, 255)
+	return image
+
+
+def tex_vine() -> Image:
+	image = new_image(S, S)
+	stem = rgb("3f7a30")
+	leaf = rgb("58a53c")
+	for y in range(S):
+		x = 7 + int(round(2.6 * math.sin(y * 0.6)))
+		put(image, x, y, stem)
+		put(image, x + 1, y, shade(stem, 1.20))
+		if y % 3 == 0:
+			fill_rect(image, x - 2, y, x - 1, y, leaf)
+		if y % 3 == 1:
+			fill_rect(image, x + 2, y, x + 3, y, shade(leaf, 0.84))
+	return image
+
+
+def tex_rain() -> Image:
+	"""A thin streak, brightest at its head. The rainbow storm's rain, and
+	(brightened) its lightning bolts: particles, not a node."""
+	image = new_image(S, S)
+	for y in range(2, S - 1):
+		alpha = int(60 + 150 * (y - 2) / (S - 4))
+		put(image, 7, y, rgb("c8d4e4", alpha))
+		put(image, 8, y, rgb("e8eef8", min(255, alpha + 40)))
+	return image
+
+
+MAP_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_pumpkin_side.png": tex_pumpkin_side,
+	"lw_pumpkin_top.png": tex_pumpkin_top,
+	"lw_jack_face.png": tex_jack_face,
+	"lw_cobweb.png": tex_cobweb,
+	"lw_dead_wood.png": tex_dead_wood_side,
+	"lw_hay.png": tex_hay,
+	"lw_snow.png": tex_snow,
+	"lw_torch.png": tex_torch,
+	"lw_leaves.png": tex_leaves,
+	"lw_vine.png": tex_vine,
+	"lw_rain.png": tex_rain,
+}
+
+
+# --------------------------------------------------------------------------
+# Tool inventory icons (16x16)
+# --------------------------------------------------------------------------
+
+def tex_param2() -> Image:
+	image = new_image(S, S)
+	cube = rgb("7a8aa0")
+	fill_rect(image, 3, 4, 12, 13, cube)
+	fill_rect(image, 3, 4, 3, 13, shade(cube, 1.25))
+	fill_rect(image, 12, 4, 12, 13, shade(cube, 0.72))
+	stroke_rect(image, 3, 4, 12, 13, shade(cube, 0.55))
+	# Two chevrons: the Param2 nudge is a rotation, not a paint.
+	arrow = rgb("f2f6ee")
+	fill_rect(image, 6, 7, 7, 10, arrow)
+	fill_rect(image, 8, 8, 9, 9, arrow)
+	fill_rect(image, 9, 6, 10, 7, rgb("d8a92c"))
+	fill_rect(image, 9, 10, 10, 11, rgb("d8a92c"))
+	return image
+
+
+def tex_paint() -> Image:
+	image = new_image(S, S)
+	handle = rgb("7b5230")
+	fill_rect(image, 2, 11, 7, 13, handle)
+	fill_rect(image, 3, 10, 6, 10, handle)
+	ferrule = rgb("c8a97a")
+	fill_rect(image, 6, 8, 8, 10, ferrule)
+	bristles = rgb("2f5cba")
+	fill_rect(image, 8, 4, 13, 9, bristles)
+	fill_rect(image, 9, 3, 12, 3, shade(bristles, 1.25))
+	fill_rect(image, 10, 6, 12, 8, rgb("e9e9e4"))
+	return image
+
+
+def tex_clone() -> Image:
+	image = new_image(S, S)
+	back = rgb("4c4c48")
+	fill_rect(image, 2, 2, 9, 9, back)
+	stroke_rect(image, 2, 2, 9, 9, shade(back, 0.65))
+	front = rgb("9fd7a6")
+	fill_rect(image, 6, 6, 13, 13, front)
+	stroke_rect(image, 6, 6, 13, 13, shade(front, 0.65))
+	return image
+
+
+def tex_light_wand() -> Image:
+	image = new_image(S, S)
+	shaft = rgb("8a6a3a")
+	fill_rect(image, 7, 5, 8, 14, shaft)
+	fill_rect(image, 6, 13, 9, 14, shade(shaft, 0.75))
+	glow = rgb("ffd76a")
+	fill_rect(image, 6, 2, 9, 5, glow)
+	fill_rect(image, 5, 3, 10, 4, glow)
+	fill_rect(image, 7, 1, 8, 6, rgb("fff6de"))
+	return image
+
+
+def tex_stamp() -> Image:
+	image = new_image(S, S)
+	handle = rgb("7b5230")
+	fill_rect(image, 6, 1, 9, 6, handle)
+	fill_rect(image, 5, 5, 10, 7, handle)
+	pad = rgb("2b2f36")
+	fill_rect(image, 3, 8, 12, 13, pad)
+	fill_rect(image, 3, 8, 12, 8, shade(pad, 1.30))
+	fill_rect(image, 5, 10, 10, 11, rgb("d8a92c"))
+	return image
+
+
+TOOL_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_param2.png": tex_param2,
+	"lw_paint.png": tex_paint,
+	"lw_clone.png": tex_clone,
+	"lw_light_wand.png": tex_light_wand,
+	"lw_stamp.png": tex_stamp,
+}
+
+THEATER_STATIC_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_seat_side.png": tex_seat_side,
+	"lw_seat_top.png": tex_seat_top,
+	"lw_aisle_light.png": tex_aisle_light,
+	"lw_remote.png": tex_remote,
+	"lw_screen_off.png": tex_screen_off,
+	"lw_marquee_frame.png": tex_marquee_frame,
+	"lw_chandelier.png": tex_chandelier,
+	"lw_reel_button.png": tex_reel_button,
+}
+
+
+# --------------------------------------------------------------------------
+# Animated filmstrips
+# --------------------------------------------------------------------------
+
+
+def filmstrip(frames: list[Image]) -> Image:
+	strip: Image = []
+	for frame in frames:
+		strip.extend(frame)
+	return strip
+
+
+WATER_FRAMES = 8
+
+
+def water_frame(index: int) -> Image:
+	base = rgb("2a6cb0", 190)
+	image = new_image(S, S, base)
+	phase = index / WATER_FRAMES * math.tau
+	for y in range(S):
+		for x in range(S):
+			wave = math.sin(x * 0.7 + phase) + math.sin(y * 0.5 - phase * 1.3)
+			image[y][x] = shade(base, 0.86 + 0.16 * (wave + 2) / 4 * 2)
+	for x in range(S):
+		crest = int((math.sin(x * 0.55 + phase) * 0.5 + 0.5) * (S - 1))
+		put(image, x, crest, rgb("bfe2f5", 210))
+	return image
+
+
+TICKER_FRAMES = 16
+
+
+def ticker_frame(index: int) -> Image:
+	"""LED ticker for the kinetic courtyard: a scrolling wave of lit cells."""
+	image = new_image(S, S, rgb("0d1512"))
+	offset = index
+	for cy in range(4):
+		for cx in range(4):
+			wave = math.sin((cx * 2 + cy + offset) * 0.55)
+			level = (wave + 1) / 2
+			color = mix(rgb("11301f"), rgb("7ef0a6"), level)
+			fill_rect(image, cx * 4 + 1, cy * 4 + 1, cx * 4 + 2, cy * 4 + 2, color)
+	return image
+
+
+FIRE_FRAMES = 8
+
+
+def fire_frame(index: int) -> Image:
+	"""Campfire filmstrip: 8 frames of 16x16, tall enough to read as motion."""
+	image = new_image(S, S, (0, 0, 0, 0))
+	phase = index / FIRE_FRAMES * math.tau
+	for y in range(S):
+		for x in range(S):
+			nx = (x - (S - 1) / 2) / (S / 2)
+			ny = 1.0 - y / (S - 1)
+			# A teardrop that sways: wide at the embers, pinched at the tip.
+			sway = 0.18 * math.sin(phase + ny * 2.2)
+			width = 0.55 * (1.0 - ny * 0.72) + 0.08 * math.sin(phase * 2 + x)
+			heat = math.exp(-((nx - sway) ** 2) / max(0.04, width * width)) * (0.35 + ny)
+			if heat < 0.12:
+				continue
+			inner = mix(rgb("ffef9a"), rgb("fff7d6"), min(1.0, heat))
+			outer = mix(rgb("d44512"), rgb("f0a030"), ny)
+			color = mix(outer, inner, max(0.0, min(1.0, (heat - 0.12) / 0.9)))
+			alpha = clamp(80 + heat * 180)
+			put(image, x, y, (color[0], color[1], color[2], alpha))
+	# Embers along the bottom so the pit still reads when the flame is between
+	# frames.
+	for x in range(3, S - 3):
+		glow = 0.5 + 0.5 * math.sin(x * 1.3 + phase * 3)
+		put(image, x, S - 1, mix(rgb("5a1a08"), rgb("ffb040", 230), glow))
+	return image
+
+
+MARQUEE_FRAMES = 8
+
+
+def marquee_frame(index: int) -> Image:
+	image = new_image(S, S, rgb("2a1f16"))
+	Noise(131).grain(image, 0.06)
+	stroke_rect(image, 0, 0, S - 1, S - 1, rgb("8c6a25"))
+	bulbs = [(3, 2), (8, 2), (13, 2), (13, 8), (13, 13), (8, 13), (3, 13), (3, 8)]
+	for i, (x, y) in enumerate(bulbs):
+		lit = (i - index) % len(bulbs) < 3
+		color = rgb("fff2c4") if lit else rgb("6b5b33")
+		fill_rect(image, x - 1, y - 1, x + 1, y + 1, color)
+	return image
+
+
+# --- Cinema reels ---------------------------------------------------------
+
+SCREEN_COLS = 6
+SCREEN_ROWS = 4
+CELL = 32
+REEL_FRAMES = 24
+REEL_W = SCREEN_COLS * CELL
+REEL_H = SCREEN_ROWS * CELL
+
+
+def reel_title_frame(index: int) -> Image:
+	"""Reel 1: looping film-leader countdown — the title card.
+
+	24 frames at 12 fps is a two-second 3-2-1 loop, obvious motion from the
+	aisle without needing a photographic clip. Real footage is scaled to this
+	same 192x128 frame and sliced by reel_cell_strips(); see filmstrips.md.
+	"""
+	image = new_image(REEL_W, REEL_H, rgb("14080c"))
+	Noise(149).grain(image, 0.10)
+	# Sprocket holes scrolling down the edges so the card reads as film stock.
+	shift = index % 8
+	for y in range(-2 + shift, REEL_H, 8):
+		for x in (3, 4, REEL_W - 5, REEL_W - 4):
+			fill_rect(image, x, max(0, y), x, min(REEL_H - 1, y + 3), rgb("0a0506"))
+	pulse = 0.75 + 0.25 * math.sin(index / REEL_FRAMES * math.tau)
+	gold = shade(rgb("d8a92c"), pulse)
+	stroke_rect(image, 8, 6, REEL_W - 9, REEL_H - 7, gold)
+	stroke_rect(image, 9, 7, REEL_W - 10, REEL_H - 8, gold)
+	digit = str(3 - (index // 8))
+	cx, cy = REEL_W // 2, REEL_H // 2 + 4
+	progress = (index % 8) / 8
+	radius = 26.0 - progress * 8.0
+	fill_disc(image, cx, cy, radius, rgb("e8e0d0"))
+	fill_disc(image, cx, cy, radius - 3.0, rgb("1a0c10"))
+	dw = text_width(digit, scale=4)
+	draw_text(image, cx - dw // 2, cy - 10, digit, rgb("f2f6ee"), scale=4)
+	title = "LUANTI WEB"
+	draw_text(image, (REEL_W - text_width(title, scale=2)) // 2, 12, title,
+		rgb("f2f6ee"), scale=2)
+	card = "NOW SHOWING"
+	draw_text(image, (REEL_W - text_width(card, scale=2)) // 2, REEL_H - 22, card,
+		rgb("d8a92c"), scale=2)
+	return image
+
+
+def reel_bars_frame(index: int) -> Image:
+	"""Reel 3: broadcast test pattern with a sweeping bar and a ticking counter."""
+	image = new_image(REEL_W, REEL_H, rgb("101010"))
+	bars = ["c0c0c0", "c0c000", "00c0c0", "00c000", "c000c0", "c00000", "0000c0"]
+	band = REEL_H * 2 // 3
+	width = REEL_W / len(bars)
+	for i, color in enumerate(bars):
+		fill_rect(image, int(i * width), 0, int((i + 1) * width) - 1, band - 1, rgb(color))
+	# Lower third: a gradient ramp plus the reel label.
+	for x in range(REEL_W):
+		fill_rect(image, x, band, x, REEL_H - 1,
+			mix(rgb("101010"), rgb("e8e8e8"), x / (REEL_W - 1)))
+	sweep = int((index / REEL_FRAMES) * REEL_W)
+	for dx in range(-3, 4):
+		x = (sweep + dx) % REEL_W
+		for y in range(REEL_H):
+			image[y][x] = mix(image[y][x], rgb("ffffff"), 0.55 - abs(dx) * 0.12)
+	label = "TEST PATTERN"
+	draw_text(image, (REEL_W - text_width(label, scale=2)) // 2, band + 8, label,
+		rgb("101010"), scale=2)
+	counter = "{:02d}".format(index)
+	draw_text(image, REEL_W - text_width(counter, scale=2) - 6, 6, counter,
+		rgb("101010"), scale=2)
+	return image
+
+
+def reel_show_frame(index: int) -> Image:
+	"""Reel 2: a short looping animation — sunrise over a voxel skyline."""
+	image = new_image(REEL_W, REEL_H, rgb("0b1020"))
+	t = index / REEL_FRAMES
+	horizon = REEL_H * 3 // 4
+	for y in range(horizon):
+		sky = mix(rgb("1b2a5c"), rgb("e8a05a"), (y / horizon) ** 1.6)
+		sky = mix(sky, rgb("f6cf8d"), 0.35 * math.sin(t * math.tau) ** 2)
+		fill_rect(image, 0, y, REEL_W - 1, y, sky)
+	# Sun rises and sets across the loop so the clip reads as motion at a glance.
+	sun_y = horizon - 6 - int(18 * math.sin(t * math.pi))
+	sun_x = int(REEL_W * (0.18 + 0.64 * t))
+	fill_disc(image, sun_x, sun_y, 9.0, rgb("ffe7a8"))
+	fill_disc(image, sun_x, sun_y, 6.0, rgb("fff8e2"))
+	# Parallax hills.
+	for layer, (color, height, speed) in enumerate((
+			("22405c", 22, 0.5), ("1d5240", 15, 1.0), ("14301f", 9, 1.8))):
+		shift = int(t * REEL_W * speed * 0.25)
+		for x in range(REEL_W):
+			wave = math.sin((x + shift) * 0.08 + layer) + 0.5 * math.sin((x + shift) * 0.21)
+			top = horizon - height - int(wave * height * 0.45)
+			fill_rect(image, x, max(0, top), x, horizon - 1, rgb(color))
+	fill_rect(image, 0, horizon, REEL_W - 1, REEL_H - 1, rgb("0d1a12"))
+	# Foreground: a cart trundling along the bottom of the frame.
+	cart_x = int((t * 1.2 % 1.0) * (REEL_W + 24)) - 24
+	fill_rect(image, cart_x, horizon + 4, cart_x + 17, horizon + 13, rgb("8a4b25"))
+	fill_rect(image, cart_x + 2, horizon + 2, cart_x + 15, horizon + 4, rgb("c07c3f"))
+	for wheel in (cart_x + 4, cart_x + 13):
+		fill_disc(image, wheel, horizon + 15, 2.4, rgb("2c2c30"))
+	title = "LUANTI IN YOUR BROWSER"
+	draw_text(image, (REEL_W - text_width(title, scale=2)) // 2, 8, title,
+		rgb("f2f6ee"), scale=2)
+	return image
+
+
+REELS: dict[str, Callable[[int], Image]] = {
+	"title": reel_title_frame,
+	"show": reel_show_frame,
+	"bars": reel_bars_frame,
+}
+
+
+def reel_cell_strips(frame_fn: Callable[[int], Image]) -> dict[tuple[int, int], Image]:
+	"""Slice every reel frame into node-sized cells and stack them per cell.
+
+	The theater screen is a wall of ``SCREEN_COLS x SCREEN_ROWS`` nodes. Each
+	node owns one cell of the picture and animates through that cell's frames,
+	so the wall shows a single large moving image rather than a tiled thumbnail.
+	"""
+	frames = [frame_fn(i) for i in range(REEL_FRAMES)]
+	strips: dict[tuple[int, int], Image] = {}
+	for row in range(SCREEN_ROWS):
+		for col in range(SCREEN_COLS):
+			cell_frames = []
+			for frame in frames:
+				cell = [frame[row * CELL + y][col * CELL:(col + 1) * CELL]
+					for y in range(CELL)]
+				cell_frames.append(cell)
+			strips[(row, col)] = filmstrip(cell_frames)
+	return strips
+
+
+# --------------------------------------------------------------------------
+# Dance skins (64x32, the character.b3d layout)
+# --------------------------------------------------------------------------
+
+# lw_dance's character mesh is the classic 64x32 player layout: every box is
+# unfolded as top/bottom above, then right/front/left/back in a row. `box_faces`
+# names where each face of each box lands, so the skins below are painted per
+# face and never by raw coordinate. The hat overlay (x >= 32, y < 16) is left
+# transparent; the mesh does not draw it.
+SKIN_W = 64
+SKIN_H = 32
+
+SKIN_BOXES: dict[str, tuple[int, int, int, int, int]] = {
+	# name: (u, v, width, height, depth)
+	"head": (0, 0, 8, 8, 8),
+	"body": (16, 16, 8, 12, 4),
+	"arm": (40, 16, 4, 12, 4),
+	"leg": (0, 16, 4, 12, 4),
+}
+
+
+def box_faces(part: str) -> dict[str, tuple[int, int, int, int]]:
+	"""Face name -> (x0, y0, width, height) for one box of the skin."""
+	u, v, w, h, d = SKIN_BOXES[part]
+	return {
+		"top": (u + d, v, w, d),
+		"bottom": (u + d + w, v, w, d),
+		"right": (u, v + d, d, h),
+		"front": (u + d, v + d, w, h),
+		"left": (u + d + w, v + d, d, h),
+		"back": (u + d + w + d, v + d, w, h),
+	}
+
+
+def paint_face(image: Image, part: str, face: str,
+		fn: Callable[[int, int, int, int], Color]) -> None:
+	"""Fill one face; `fn(x, y, w, h)` gets face-local coordinates."""
+	x0, y0, w, h = box_faces(part)[face]
+	for y in range(h):
+		for x in range(w):
+			put(image, x0 + x, y0 + y, fn(x, y, w, h))
+
+
+def paint_rows(image: Image, part: str, face: str, rows: tuple[str, ...],
+		legend: dict[str, Color]) -> None:
+	"""ASCII art onto one face, one character per pixel."""
+	x0, y0, _, _ = box_faces(part)[face]
+	for y, row in enumerate(rows):
+		for x, char in enumerate(row):
+			put(image, x0 + x, y0 + y, legend[char])
+
+
+# Lace Waterfall: black lace, pale skin, red lips, a thread of purple. Taken
+# from the band's own stills (both members in black lace with sheer sleeves and
+# black tights); the purple is the band's accent colour, kept to a choker and
+# the cuffs so it reads as a detail and not as a costume.
+LW_PURPLE = rgb("7b3fc4")
+LW_PURPLE_HI = rgb("a774e8")
+LACE_BLACK = rgb("121014")
+LACE_THREAD = rgb("2c2632")
+VELVET = rgb("0b0a0d")
+BAND_SKIN = rgb("ecd8cc")
+BAND_SKIN_SHADE = rgb("d4b8ab")
+BAND_HAIR = rgb("0e0c11")
+BAND_HAIR_HI = rgb("2a2533")
+LIPS = rgb("a3121d")
+LINER = rgb("19131a")
+
+
+def lace(noise: Noise, x: int, y: int, under: Color, sheer: float) -> Color:
+	"""One pixel of lace over `under`. `sheer` 0 is solid black, 1 is bare."""
+	# A diamond mesh with a few denser motifs, which is what lace reads as at
+	# four pixels a limb: an even net with flowers caught in it.
+	thread = (x + y) % 4 == 0 or (x - y) % 4 == 0
+	motif = noise.at(x // 2, y // 2) > 0.78
+	if thread or motif:
+		return mix(LACE_BLACK, LACE_THREAD, 0.25 + 0.3 * noise.at(x, y))
+	return mix(LACE_BLACK, under, sheer)
+
+
+def band_member(face_rows: tuple[str, ...], eye: str, seed: int,
+		sideburn_rows: tuple[int, int]) -> Image:
+	image = new_image(SKIN_W, SKIN_H)
+	noise = Noise(seed)
+
+	def hair(x: int, y: int, w: int, h: int) -> Color:
+		return mix(BAND_HAIR, BAND_HAIR_HI, 0.6 * noise.at(x + 3 * w, y))
+
+	legend = {
+		"H": BAND_HAIR, "h": BAND_HAIR_HI,
+		"s": BAND_SKIN, "S": BAND_SKIN_SHADE,
+		"e": LINER, "i": rgb(eye), "l": LIPS,
+	}
+
+	# Head: the face is art, the rest is hair, and long hair covers the sides
+	# down to the jaw except for a strip of cheek next to the face.
+	paint_rows(image, "head", "front", face_rows, legend)
+	paint_face(image, "head", "top", hair)
+	paint_face(image, "head", "back", hair)
+	first, last = sideburn_rows
+
+	def side(edge: int) -> Callable[[int, int, int, int], Color]:
+		def fn(x: int, y: int, w: int, h: int) -> Color:
+			if x == edge and first <= y <= last:
+				return BAND_SKIN_SHADE
+			return hair(x, y, w, h)
+		return fn
+
+	# The right face meets the front at its last column, the left at its first.
+	paint_face(image, "head", "right", side(7))
+	paint_face(image, "head", "left", side(0))
+	paint_face(image, "head", "bottom",
+		lambda x, y, w, h: BAND_SKIN_SHADE if y < 4 else BAND_HAIR)
+
+	# Body: a high lace collar with the purple choker, a sheer yoke, then the
+	# dress. The back is hair to the shoulder blades.
+	def bodice(x: int, y: int, w: int, h: int) -> Color:
+		if y == 0:
+			return LW_PURPLE if 2 <= x <= 5 else LACE_BLACK
+		if y <= 4:
+			return lace(noise, x, y, BAND_SKIN, 0.65)
+		return lace(noise, x + 9, y, LACE_BLACK, 0.0)
+
+	def bodice_back(x: int, y: int, w: int, h: int) -> Color:
+		if y <= 5 and 1 <= x <= w - 2:
+			return hair(x, y, w, h)
+		return lace(noise, x + 17, y, LACE_BLACK, 0.0)
+
+	paint_face(image, "body", "front", bodice)
+	paint_face(image, "body", "back", bodice_back)
+	for face in ("right", "left", "top", "bottom"):
+		paint_face(image, "body", face,
+			lambda x, y, w, h: lace(noise, x + 31, y, LACE_BLACK, 0.0))
+
+	# Arms: puffed velvet shoulders, sheer lace sleeves to a purple cuff, hands.
+	def sleeve(x: int, y: int, w: int, h: int) -> Color:
+		if y <= 2:
+			return mix(VELVET, LACE_THREAD, 0.25 * noise.at(x + 40, y))
+		if y == h - 2:
+			return LW_PURPLE_HI if x % 2 == 0 else LW_PURPLE
+		if y == h - 1:
+			return BAND_SKIN
+		return lace(noise, x + 44, y, BAND_SKIN, 0.4)
+
+	for face in ("right", "front", "left", "back"):
+		paint_face(image, "arm", face, sleeve)
+	paint_face(image, "arm", "top", lambda x, y, w, h: VELVET)
+	# The underside of the arm box is the palm; the nails are the band's red.
+	paint_face(image, "arm", "bottom",
+		lambda x, y, w, h: LIPS if y == 0 else BAND_SKIN)
+
+	# Legs: the dress to the knee with a lace hem, sheer black tights, shoes.
+	def leg(x: int, y: int, w: int, h: int) -> Color:
+		if y <= 4:
+			return lace(noise, x + 50, y, LACE_BLACK, 0.0)
+		if y == 5:
+			return LACE_THREAD if x % 2 == 0 else LACE_BLACK
+		if y == h - 1:
+			return rgb("060507") if x % 3 else rgb("2a2730")
+		return mix(BAND_SKIN, LACE_BLACK, 0.8 + 0.06 * noise.at(x + 60, y))
+
+	for face in ("right", "front", "left", "back"):
+		paint_face(image, "leg", face, leg)
+	paint_face(image, "leg", "top", lambda x, y, w, h: LACE_BLACK)
+	paint_face(image, "leg", "bottom", lambda x, y, w, h: rgb("060507"))
+	return image
+
+
+# Rubella: long straight hair with a centre part.
+RUBELLA_FACE = (
+	"HHHhhHHH",
+	"HHssssHH",
+	"HssssssH",
+	"HeiSSieH",
+	"HssSSssH",
+	"HsssSssH",
+	"HssllssH",
+	"HHssssHH",
+)
+
+# Lillith: the blunt bangs are what tells the two apart at a distance.
+LILLITH_FACE = (
+	"HHHHHHHH",
+	"HhHHHHhH",
+	"HeiSSieH",
+	"HssSSssH",
+	"HssssssH",
+	"HssllssH",
+	"HHssssHH",
+	"HHHssHHH",
+)
+
+
+def tex_rubella() -> Image:
+	return band_member(RUBELLA_FACE, "3a2a28", 611, (2, 6))
+
+
+def tex_lillith() -> Image:
+	return band_member(LILLITH_FACE, "6f7f7b", 613, (2, 6))
+
+
+def crowd_member(skin: str, hair: str, top: str, legs: str, seed: int,
+		long_hair: bool) -> Image:
+	"""A fan: band tee with the purple stripe, plainer than the band."""
+	image = new_image(SKIN_W, SKIN_H)
+	noise = Noise(seed)
+	skin_c, hair_c = rgb(skin), rgb(hair)
+	skin_shade = shade(skin_c, 0.88)
+	top_c, legs_c = rgb(top), rgb(legs)
+
+	face = (
+		"HHHHHHHH",
+		"HssssssH" if long_hair else "ssssssss",
+		"ssssssss",
+		"seissies",
+		"sssSSsss",
+		"ssssssss",
+		"ssseesss",
+		"ssssssss",
+	)
+	legend = {"H": hair_c, "s": skin_c, "S": skin_shade, "e": rgb("3a2422"),
+		"i": rgb("201818")}
+	paint_rows(image, "head", "front", face, legend)
+
+	def hair_fn(x: int, y: int, w: int, h: int) -> Color:
+		return shade(hair_c, 0.85 + 0.3 * noise.at(x, y))
+
+	paint_face(image, "head", "top", hair_fn)
+
+	def head_side(x: int, y: int, w: int, h: int) -> Color:
+		limit = 6 if long_hair else 2
+		return hair_fn(x, y, w, h) if y <= limit else skin_shade
+
+	for face_name in ("right", "left"):
+		paint_face(image, "head", face_name, head_side)
+	paint_face(image, "head", "back",
+		lambda x, y, w, h: hair_fn(x, y, w, h) if (long_hair or y <= 5) else skin_shade)
+	paint_face(image, "head", "bottom", lambda x, y, w, h: skin_shade)
+
+	# The tee: plain colour, the band's purple stripe across the chest.
+	def tee(x: int, y: int, w: int, h: int) -> Color:
+		if 3 <= y <= 4 and w == 8:
+			return LW_PURPLE_HI if (x + y) % 2 else LW_PURPLE
+		return shade(top_c, 0.92 + 0.12 * noise.at(x + 20, y))
+
+	for face_name in ("front", "back", "right", "left", "top", "bottom"):
+		paint_face(image, "body", face_name, tee)
+
+	def arm(x: int, y: int, w: int, h: int) -> Color:
+		return shade(top_c, 0.9) if y <= 3 else skin_c
+
+	for face_name in ("right", "front", "left", "back"):
+		paint_face(image, "arm", face_name, arm)
+	paint_face(image, "arm", "top", lambda x, y, w, h: shade(top_c, 0.9))
+	paint_face(image, "arm", "bottom", lambda x, y, w, h: skin_c)
+
+	def leg(x: int, y: int, w: int, h: int) -> Color:
+		if y >= h - 2:
+			return rgb("e6e3dc") if y == h - 2 else rgb("2b2b2b")
+		return shade(legs_c, 0.88 + 0.16 * noise.at(x + 50, y))
+
+	for face_name in ("right", "front", "left", "back"):
+		paint_face(image, "leg", face_name, leg)
+	paint_face(image, "leg", "top", lambda x, y, w, h: legs_c)
+	paint_face(image, "leg", "bottom", lambda x, y, w, h: rgb("2b2b2b"))
+	return image
+
+
+def tex_crowd_a() -> Image:
+	return crowd_member("c99a74", "4a3020", "141216", "3b5a8a", 701, False)
+
+
+def tex_crowd_b() -> Image:
+	return crowd_member("6b4630", "120f0e", "3d1f63", "1a1a1e", 703, True)
+
+
+def tex_crowd_c() -> Image:
+	return crowd_member("efd2bf", "d77fb8", "6c6a70", "202024", 705, True)
+
+
+DANCE_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_dance_rubella.png": tex_rubella,
+	"lw_dance_lillith.png": tex_lillith,
+	"lw_dance_crowd_a.png": tex_crowd_a,
+	"lw_dance_crowd_b.png": tex_crowd_b,
+	"lw_dance_crowd_c.png": tex_crowd_c,
+}
+
+
+# --------------------------------------------------------------------------
+# Amp cabinets (lw_amps)
+# --------------------------------------------------------------------------
+
+TOLEX = rgb("16151a")
+
+
+def tolex(noise: Noise, x: int, y: int) -> Color:
+	return shade(TOLEX, 0.85 + 0.35 * noise.at(x, y))
+
+
+def tex_amp_front() -> Image:
+	# Tolex frame, purple grille cloth, a little silver badge up top.
+	noise = Noise(801)
+	image = new_image(S, S, TOLEX)
+	for y in range(S):
+		for x in range(S):
+			if 2 <= x <= S - 3 and 3 <= y <= S - 3:
+				weave = 1.0 if (x + y) % 2 == 0 else 0.78
+				image[y][x] = shade(rgb("4a2479"), weave * (0.9 + 0.2 * noise.at(x, y)))
+			else:
+				image[y][x] = tolex(noise, x, y)
+	fill_rect(image, 6, 1, 9, 1, rgb("c9c6d2"))
+	# Two speaker cones behind the cloth, just darker rings in the weave.
+	for cy in (6.5, 11.5):
+		for y in range(S):
+			for x in range(2, S - 2):
+				r = math.hypot(x - 7.5, y - cy)
+				if 1.5 <= r <= 2.4 and 3 <= y <= S - 3:
+					image[y][x] = shade(image[y][x], 0.6)
+	return image
+
+
+def tex_amp_side() -> Image:
+	noise = Noise(803)
+	image = new_image(S, S, TOLEX)
+	for y in range(S):
+		for x in range(S):
+			image[y][x] = tolex(noise, x, y)
+	# Corner protectors.
+	for cx, cy in ((0, 0), (S - 2, 0), (0, S - 2), (S - 2, S - 2)):
+		fill_rect(image, cx, cy, cx + 1, cy + 1, rgb("8d8a96"))
+	return image
+
+
+def tex_amp_top() -> Image:
+	image = tex_amp_side()
+	# The carry handle.
+	fill_rect(image, 4, 7, 11, 8, rgb("050406"))
+	fill_rect(image, 4, 6, 4, 9, rgb("8d8a96"))
+	fill_rect(image, 11, 6, 11, 9, rgb("8d8a96"))
+	return image
+
+
+AMP_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_amps_cab_front.png": tex_amp_front,
+	"lw_amps_cab_side.png": tex_amp_side,
+	"lw_amps_cab_top.png": tex_amp_top,
+}
+
+
+# --------------------------------------------------------------------------
+# The Around arena's banners (lw_maps)
+# --------------------------------------------------------------------------
+
+# Lace Waterfall's cloth: storm violet and black. Each banner is one image
+# that lw_maps slices across several nodes with `[sheet`, so a banner two
+# nodes wide and four tall is still one small file.
+STORM_VIOLET = rgb("4a2470")
+STORM_DEEP = rgb("2a1446")
+
+
+def tex_around_sign() -> Image:
+	""""AROUND!" in the pack's own pixel font, five nodes wide."""
+	image = new_image(80, 16, VELVET)
+	stroke_rect(image, 0, 0, 79, 15, LW_PURPLE)
+	stroke_rect(image, 1, 1, 78, 14, STORM_DEEP)
+	text = "AROUND!"
+	x = (80 - text_width(text, scale=2)) // 2
+	draw_text(image, x + 1, 4, text, STORM_VIOLET, scale=2)
+	draw_text(image, x, 3, text, rgb("efe2ff"), scale=2)
+	# A lace diamond in each end panel, the band's mark in miniature.
+	for cx in (5, 74):
+		for y in range(16):
+			for px in range(cx - 4, cx + 5):
+				d = abs(px - cx) + abs(y - 7.5)
+				if d <= 1.5:
+					put(image, px, y, LW_PURPLE_HI)
+				elif d <= 3.5:
+					put(image, px, y, LW_PURPLE)
+	return image
+
+
+def tex_lace_banner() -> Image:
+	"""A hanging cloth, one node wide and three tall: a lace diamond for a
+	sigil on storm violet, black lace selvedges, threads falling below it
+	like the water in the band's name, and a fringe."""
+	noise = Noise(907)
+	image = new_image(16, 48)
+	for y in range(48):
+		for x in range(16):
+			image[y][x] = mix(STORM_DEEP, STORM_VIOLET, 0.35 + 0.4 * noise.at(x, y))
+	for y in range(48):
+		for x in (0, 1, 14, 15):
+			image[y][x] = lace(noise, x, y, STORM_VIOLET, 0.0)
+	fill_rect(image, 0, 0, 15, 1, LACE_BLACK)
+	for y in range(4, 21):
+		for x in range(16):
+			d = abs(x - 7.5) + abs(y - 12)
+			if d <= 1:
+				put(image, x, y, LW_PURPLE_HI)
+			elif d <= 2.5:
+				put(image, x, y, LACE_BLACK)
+			elif d <= 4.5:
+				put(image, x, y, LW_PURPLE)
+			elif d <= 6.5:
+				put(image, x, y, lace(noise, x, y, STORM_VIOLET, 0.0))
+	for y in range(22, 45):
+		for x in range(3, 13):
+			if (x * 3 + y // 2) % 5 == 0:
+				put(image, x, y, mix(LACE_BLACK, LACE_THREAD, noise.at(x, y)))
+	for x in range(16):
+		put(image, x, 46, LACE_BLACK)
+		put(image, x, 47, LW_PURPLE_HI if x % 2 else LACE_BLACK)
+	return image
+
+
+def band_portrait(skin: Image, seed: int) -> Image:
+	"""A full-length banner of one band member, two nodes wide and four tall.
+
+	Drawn from her own skin — the front of every box, as she stands — so the
+	banner and the dancer on stage are the same picture. A still exported from
+	the band's footage can replace it: same name, any size that is twice as
+	tall as it is wide (lw_maps cuts it 2 x 4).
+	"""
+	noise = Noise(seed)
+	image = new_image(18, 36)
+	for y in range(36):
+		for x in range(18):
+			image[y][x] = mix(STORM_DEEP, STORM_VIOLET, 0.3 + 0.5 * noise.at(x, y))
+
+	def blit(part: str, face: str, dx: int, dy: int, mirror: bool = False) -> None:
+		x0, y0, w, h = box_faces(part)[face]
+		for y in range(h):
+			for x in range(w):
+				put(image, dx + x, dy + y, skin[y0 + y][x0 + (w - 1 - x if mirror else x)])
+
+	blit("head", "front", 5, 2)
+	blit("arm", "front", 1, 10)
+	blit("body", "front", 5, 10)
+	blit("arm", "front", 13, 10, mirror=True)
+	blit("leg", "front", 5, 22)
+	blit("leg", "front", 9, 22, mirror=True)
+	for y in range(36):
+		put(image, 0, y, LACE_BLACK)
+		put(image, 17, y, LACE_BLACK)
+	for x in range(18):
+		put(image, x, 0, LACE_BLACK)
+		put(image, x, 35, LW_PURPLE_HI if x % 2 else LACE_BLACK)
+	return image
+
+
+def tex_portrait_rubella() -> Image:
+	return band_portrait(tex_rubella(), 911)
+
+
+def tex_portrait_lillith() -> Image:
+	return band_portrait(tex_lillith(), 913)
+
+
+ARENA_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_around_sign.png": tex_around_sign,
+	"lw_lace_banner.png": tex_lace_banner,
+	"lw_portrait_rubella.png": tex_portrait_rubella,
+	"lw_portrait_lillith.png": tex_portrait_lillith,
+}
+
+
+# --------------------------------------------------------------------------
+# Menu art
+# --------------------------------------------------------------------------
+
+
+def menu_background() -> Image:
+	width, height = 256, 256
+	image = new_image(width, height, rgb("0f1a14"))
+	for y in range(height):
+		fill_rect(image, 0, y, width - 1, y,
+			mix(rgb("13261b"), rgb("070d09"), y / (height - 1)))
+	noise = Noise(211)
+	for y in range(height):
+		for x in range(width):
+			if noise.at(x, y) > 0.995:
+				image[y][x] = rgb("9fd7a6")
+	return image
+
+
+def menu_header() -> Image:
+	width, height = 384, 160
+	image = new_image(width, height, rgb("101c15"))
+	for y in range(height):
+		fill_rect(image, 0, y, width - 1, y,
+			mix(rgb("16301f"), rgb("0a140e"), y / (height - 1)))
+	# Plaza silhouette: a colonnade along the bottom, the lit theater screen
+	# above it on the right, and the wordmark clear of both on the left.
+	fill_rect(image, 0, height - 26, width - 1, height - 1, rgb("1d2b22"))
+	for x in range(40, width - 40, 44):
+		fill_rect(image, x, height - 92, x + 13, height - 27, rgb("cdc8ba"))
+		fill_rect(image, x - 3, height - 97, x + 16, height - 92, rgb("e2ddd0"))
+	fill_rect(image, 214, 16, 360, 62, rgb("14161c"))
+	fill_rect(image, 218, 20, 356, 58, rgb("3f7fa8"))
+	for x in range(218, 356, 24):
+		fill_rect(image, x, 20, x + 11, 58, rgb("5fa8c9"))
+	draw_text(image, 16, 14, "LUANTI WEB", rgb("f2f6ee"), scale=4)
+	draw_text(image, 18, 44, "SHOWCASE", rgb("9fd7a6"), scale=2)
+	return image
+
+
+def menu_icon() -> Image:
+	size = 128
+	image = new_image(size, size, rgb("13261b"))
+	for y in range(size):
+		fill_rect(image, 0, y, size - 1, y,
+			mix(rgb("1b3a26"), rgb("0a140e"), y / (size - 1)))
+	fill_rect(image, 18, 30, size - 19, 82, rgb("14161c"))
+	fill_rect(image, 22, 34, size - 23, 78, rgb("3f7fa8"))
+	for x in range(22, size - 22, 18):
+		fill_rect(image, x, 34, x + 8, 78, rgb("5fa8c9"))
+	fill_rect(image, 10, 88, size - 11, 96, rgb("cdc8ba"))
+	for x in (26, 58, 90):
+		fill_rect(image, x, 96, x + 12, size - 12, rgb("8d2436"))
+	stroke_rect(image, 0, 0, size - 1, size - 1, rgb("d8a92c"))
+	return image
+
+
+# --------------------------------------------------------------------------
+# Shared pixel font for the world builder
+# --------------------------------------------------------------------------
+
+
+def font_lua() -> str:
+	"""Emit the 3x5 font as a Lua table.
+
+	lw_world spells the plaza banner and the gallery labels out of wool nodes.
+	Exporting the same glyphs the textures use keeps in-world text and baked
+	text identical instead of letting two hand-typed copies drift apart.
+	"""
+	lines = [
+		"-- Luanti",
+		"-- SPDX-License-Identifier: LGPL-2.1-or-later",
+		"-- Copyright (C) 2026 The Luanti Contributors",
+		"",
+		"-- GENERATED FILE - do not edit.",
+		"-- Regenerate with util/content/generate_luanti_web_textures.py.",
+		"",
+		"-- A 3x5 pixel font. Each glyph is 5 rows of 3 columns, top row first;",
+		"-- \"1\" is a set pixel. Shared with the baked textures so the banner in",
+		"-- the plaza and the title card on the screen use the same letterforms.",
+		"",
+		"return {",
+		"\tglyph_width = {},".format(GLYPH_W),
+		"\tglyph_height = {},".format(GLYPH_H),
+		"\tglyphs = {",
+	]
+	for char in sorted(FONT):
+		rows = ", ".join('"{}"'.format(row) for row in FONT[char])
+		key = '[" "]' if char == " " else '["{}"]'.format(char)
+		lines.append("\t\t{} = {{{}}},".format(key, rows))
+	lines.extend(["\t},", "}", ""])
+	return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# Driver
+# --------------------------------------------------------------------------
+
+
+def generate(root: pathlib.Path) -> list[pathlib.Path]:
+	game = root / "games" / "luanti_web"
+	nodes = game / "mods" / "lw_nodes" / "textures"
+	theater = game / "mods" / "lw_theater" / "textures"
+	written: list[pathlib.Path] = []
+
+	def emit(path: pathlib.Path, image: Image) -> None:
+		save_png(path, image)
+		written.append(path)
+
+	for name, factory in STATIC_NODE_TEXTURES.items():
+		emit(nodes / name, factory())
+	emit(nodes / "lw_water.png",
+		filmstrip([water_frame(i) for i in range(WATER_FRAMES)]))
+	emit(nodes / "lw_ticker.png",
+		filmstrip([ticker_frame(i) for i in range(TICKER_FRAMES)]))
+	emit(nodes / "lw_fire.png",
+		filmstrip([fire_frame(i) for i in range(FIRE_FRAMES)]))
+
+	maps = game / "mods" / "lw_maps" / "textures"
+	for name, factory in MAP_NODE_TEXTURES.items():
+		emit(maps / name, factory())
+	for name, factory in ARENA_TEXTURES.items():
+		emit(maps / name, factory())
+
+	tools = game / "mods" / "lw_tools" / "textures"
+	for name, factory in TOOL_TEXTURES.items():
+		emit(tools / name, factory())
+
+	for name, factory in THEATER_STATIC_TEXTURES.items():
+		emit(theater / name, factory())
+	emit(theater / "lw_marquee.png",
+		filmstrip([marquee_frame(i) for i in range(MARQUEE_FRAMES)]))
+	for reel, frame_fn in REELS.items():
+		for (row, col), strip in reel_cell_strips(frame_fn).items():
+			emit(theater / "lw_screen_{}_{}_{}.png".format(reel, row, col), strip)
+
+	dance = game / "mods" / "lw_dance" / "textures"
+	for name, factory in DANCE_TEXTURES.items():
+		emit(dance / name, factory())
+
+	amps = game / "mods" / "lw_amps" / "textures"
+	for name, factory in AMP_TEXTURES.items():
+		emit(amps / name, factory())
+
+	font_path = game / "mods" / "lw_world" / "font.lua"
+	font_path.parent.mkdir(parents=True, exist_ok=True)
+	font_path.write_text(font_lua(), encoding="utf-8")
+	written.append(font_path)
+
+	emit(game / "menu" / "background.png", menu_background())
+	emit(game / "menu" / "header.png", menu_header())
+	emit(game / "menu" / "icon.png", menu_icon())
+	return written
+
+
+def main() -> int:
+	parser = argparse.ArgumentParser(description=__doc__,
+		formatter_class=argparse.RawDescriptionHelpFormatter)
+	parser.add_argument("--root", type=pathlib.Path,
+		default=pathlib.Path(__file__).resolve().parents[2],
+		help="repository root (default: inferred from this script)")
+	parser.add_argument("--quiet", action="store_true")
+	args = parser.parse_args()
+
+	written = generate(args.root)
+	total = sum(path.stat().st_size for path in written)
+	if not args.quiet:
+		for path in written:
+			print(path.relative_to(args.root))
+	print("{} files, {:.1f} KiB".format(len(written), total / 1024))
+	return 0
+
+
+if __name__ == "__main__":
+	raise SystemExit(main())

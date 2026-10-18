@@ -1,0 +1,4 @@
+{
+  "name": "luanti_wasm dev",
+  "install": "bash .cursor/install.sh"
+}

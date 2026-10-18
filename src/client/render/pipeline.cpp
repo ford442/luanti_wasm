@@ -243,7 +243,13 @@ video::ITexture *DynamicSource::getTexture(u8 index)
 void ScreenTarget::activate(PipelineContext &context)
 {
 	auto driver = context.device->getVideoDriver();
+#ifdef __EMSCRIPTEN__
+	// Game::drawScene already clears via beginScene(). A second clear here leaves
+	// OFFSCREEN_FRAMEBUFFER presentation stuck on Chrome under PROXY_TO_PTHREAD.
+	driver->setRenderTargetEx(nullptr, video::ECBF_NONE, context.clear_color);
+#else
 	driver->setRenderTargetEx(nullptr, m_clear ? video::ECBF_ALL : video::ECBF_NONE, context.clear_color);
+#endif
 	driver->OnResize(size);
 	RenderTarget::activate(context);
 }

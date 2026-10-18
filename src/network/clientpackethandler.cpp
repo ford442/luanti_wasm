@@ -34,6 +34,7 @@
 #include "gettext.h"
 #include "skyparams.h"
 #include "particles.h"
+#include <atomic>
 #include <memory>
 #include <sstream>
 
@@ -67,6 +68,9 @@ void Client::handleCommand_Hello(NetworkPacket* pkt)
 
 	u8 serialization_ver; // negotiated value
 	u16 proto_ver;
+	actionstream << "Client: handling TOCLIENT_HELLO (" << pkt->getSize()
+		<< " bytes)" << std::endl;
+
 	u16 unused_compression_mode;
 	u32 auth_mechs;
 	std::string unused;
@@ -76,7 +80,7 @@ void Client::handleCommand_Hello(NetworkPacket* pkt)
 	// Chose an auth method we support
 	AuthMechanism chosen_auth_mechanism = choseAuthMech(auth_mechs);
 
-	infostream << "Client: TOCLIENT_HELLO received with "
+	actionstream << "Client: TOCLIENT_HELLO received with "
 			<< "serialization_ver=" << (u32)serialization_ver
 			<< ", auth_mechs=" << auth_mechs
 			<< ", proto_ver=" << proto_ver
@@ -156,6 +160,7 @@ void Client::handleCommand_AuthAccept(NetworkPacket* pkt)
 	Send(&resp_pkt);
 
 	m_state = LC_Init;
+	actionstream << "Client: authentication accepted" << std::endl;
 
 	// Log meaningful info
 	if (!m_internal_server) {
@@ -337,6 +342,7 @@ void Client::handleCommand_BlockData(NetworkPacket* pkt)
 		Add it to mesh update queue and set it to be acknowledged after update.
 	*/
 	addUpdateMeshTaskWithEdge(p, true);
+
 }
 
 void Client::handleCommand_Inventory(NetworkPacket* pkt)

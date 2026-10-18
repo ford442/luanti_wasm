@@ -29,6 +29,7 @@
 #include "player.h"
 #include "daynightratio.h"
 #include "constants.h"
+#include "porting_emscripten.h"
 #include <cstdio>
 
 // only available in zstd 1.3.5+
@@ -734,6 +735,104 @@ int ModApiUtil::l_strip_escapes(lua_State *L)
 	return 1;
 }
 
+#ifdef __EMSCRIPTEN__
+
+// set_web_video({clip = "reel.webm", title = "...", loop = true, muted = true})
+//
+// Hands a clip to the browser page's own <video> element. This exists only in
+// the WebAssembly client: a mod feature-detects it with
+// `if core.set_web_video then` and falls back to whatever it can render with
+// engine-native nodes. `clip` names a file the launcher serves from its media/
+// directory — same-origin by construction, and never a URL.
+int ModApiUtil::l_set_web_video(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	luaL_checktype(L, 1, LUA_TTABLE);
+
+	lua_getfield(L, 1, "clip");
+	std::string clip = luaL_checkstring(L, -1);
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "title");
+	std::string title = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "loop");
+	const bool loop = lua_isnil(L, -1) ? true : readParam<bool>(L, -1);
+	lua_pop(L, 1);
+
+	// Browsers refuse to autoplay audible media without a user gesture, so
+	// muted defaults to true and the page offers its own unmute control.
+	lua_getfield(L, 1, "muted");
+	const bool muted = lua_isnil(L, -1) ? true : readParam<bool>(L, -1);
+	lua_pop(L, 1);
+
+	lua_pushboolean(L, porting::emscripten_show_video_overlay(clip, title,
+			loop, muted));
+	return 1;
+}
+
+// clear_web_video()
+int ModApiUtil::l_clear_web_video(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	porting::emscripten_hide_video_overlay();
+	lua_pushboolean(L, true);
+	return 1;
+}
+
+// set_web_video_texture({clip = "reel.webm", texture = "lw_screen_video.png",
+//                         width = 320, height = 180, fps = 24})
+//
+// Theater Tier C spike (GH issue #29): instead of an HTML overlay, the
+// browser decodes the clip and republishes frames onto an engine texture, so
+// any tile/node already using `texture` picks up the video directly. This is
+// a feasibility spike -- one quad, capped resolution/fps (see
+// porting_emscripten.h) -- not a production replacement for Tier B.
+int ModApiUtil::l_set_web_video_texture(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	luaL_checktype(L, 1, LUA_TTABLE);
+
+	lua_getfield(L, 1, "clip");
+	std::string clip = luaL_checkstring(L, -1);
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "texture");
+	std::string texture = luaL_checkstring(L, -1);
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "width");
+	const int width = lua_isnil(L, -1) ? porting::VIDEO_TEXTURE_SPIKE_MAX_WIDTH
+			: readParam<int>(L, -1);
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "height");
+	const int height = lua_isnil(L, -1) ? porting::VIDEO_TEXTURE_SPIKE_MAX_HEIGHT
+			: readParam<int>(L, -1);
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "fps");
+	const int fps = lua_isnil(L, -1) ? porting::VIDEO_TEXTURE_SPIKE_MAX_FPS
+			: readParam<int>(L, -1);
+	lua_pop(L, 1);
+
+	lua_pushboolean(L, porting::emscripten_start_video_texture(
+			clip, texture, width, height, fps));
+	return 1;
+}
+
+// clear_web_video_texture()
+int ModApiUtil::l_clear_web_video_texture(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	porting::emscripten_stop_video_texture();
+	lua_pushboolean(L, true);
+	return 1;
+}
+
+#endif // __EMSCRIPTEN__
+
 void ModApiUtil::Initialize(lua_State *L, int top)
 {
 	API_FCT(log);
@@ -788,6 +887,14 @@ void ModApiUtil::Initialize(lua_State *L, int top)
 	API_FCT(urlencode);
 	API_FCT(is_valid_player_name);
 	API_FCT(strip_escapes);
+
+#ifdef __EMSCRIPTEN__
+	// Browser-only. Left undefined elsewhere so a mod can feature-detect it.
+	API_FCT(set_web_video);
+	API_FCT(clear_web_video);
+	API_FCT(set_web_video_texture);
+	API_FCT(clear_web_video_texture);
+#endif
 
 	LuaSettings::create(L, g_settings, g_settings_path);
 	lua_setfield(L, top, "settings");

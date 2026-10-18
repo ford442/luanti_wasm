@@ -12,6 +12,10 @@
 #include "CIrrDeviceStub.h"
 #include "ICursorControl.h"
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+#include <emscripten/html5.h>
+#endif
+
 #ifdef _IRR_USE_SDL3_
 #define SDL_DISABLE_OLD_NAMES
 #include <SDL3/SDL.h>
@@ -175,20 +179,34 @@ public:
 #if !defined(__ANDROID__) && !defined(_IRR_EMSCRIPTEN_PLATFORM_)
 			// On Android, this somehow results in a camera jump when enabling
 			// relative mouse mode and it isn't supported anyway.
-			// For Emscripten, browsers don't allow moving the pointer at all.
+			// On Emscripten, pointer lock has no cursor to warp; SDL_WarpMouse
+			// injects a huge relative mousemove (CSS box → center) that the
+			// look code then applies on top of the real movementX delta.
 			SDL_WarpMouseInWindow(Device->Window,
 					static_cast<int>(x / Device->ScaleX),
 					static_cast<int>(y / Device->ScaleY));
 #endif
-#ifdef _IRR_USE_SDL3_
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+			// Always record the warp. getPosition(true) copies MouseX/Y over
+			// CursorPos, so only updating CursorPos left the previous offset
+			// in place and look was re-applied every game-loop iteration.
+			Device->MouseX = x;
+			Device->MouseY = y;
+			CursorPos.X = x;
+			CursorPos.Y = y;
+#elif defined(_IRR_USE_SDL3_)
 			if (SDL_GetWindowRelativeMouseMode(Device->Window)) {
-#else
-			if (SDL_GetRelativeMouseMode()) {
-#endif
 				// There won't be an event for this warp (details on libsdl-org/SDL/issues/6034)
 				Device->MouseX = x;
 				Device->MouseY = y;
 			}
+#else
+			if (SDL_GetRelativeMouseMode()) {
+				// There won't be an event for this warp (details on libsdl-org/SDL/issues/6034)
+				Device->MouseX = x;
+				Device->MouseY = y;
+			}
+#endif
 		}
 
 		//! Returns the current position of the mouse cursor.
@@ -214,11 +232,7 @@ public:
 
 		virtual void setRelativeMode(bool relative) override
 		{
-#ifdef _IRR_EMSCRIPTEN_PLATFORM_
-			// Relative mode on the web means asking for a pointer lock,
-			// which the browser will only grant from within an input
-			// event handler. Leave it up to the page embedding the game.
-#elif defined(_IRR_USE_SDL3_)
+#ifdef _IRR_USE_SDL3_
 			if (relative != (bool)SDL_GetWindowRelativeMouseMode(Device->Window)) {
 				SDL_SetWindowRelativeMouseMode(Device->Window, relative);
 			}
@@ -282,6 +296,9 @@ public:
 	GamepadButtonLabel getGamepadButtonLabel(const GamepadButton button) const override;
 
 private:
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	static EM_BOOL MouseUpDownCallback(int eventType, const EmscriptenMouseEvent *event, void *userData);
+#endif
 	// Check if a key is a known special character with no side effects on text boxes.
 	static bool keyIsKnownSpecial(EKEY_CODE irrlichtKey);
 

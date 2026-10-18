@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.12)
 if(POLICY CMP0177)
     cmake_policy(SET CMP0177 NEW)
 endif()
+if(POLICY CMP0135)
+	cmake_policy(SET CMP0135 NEW)
+endif()
 
 # This can be read from ${PROJECT_NAME} after project() is called
 project(luanti)
@@ -91,6 +94,16 @@ set(ENABLE_UPDATE_CHECKER (NOT ${DEVELOPMENT_BUILD}) CACHE BOOL
 
 # Included stuff
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
+
+# Emscripten's built-in ports are installed lazily, but Irrlicht and Luanti run
+# find_package() during configure. Populate the pinned SDK's cache first and
+# provide the one required dependency (zstd) that Emscripten does not ship.
+if(EMSCRIPTEN)
+	# Every object linked into shared WebAssembly memory must be compiled with
+	# atomics and bulk-memory support, including Irrlicht and bundled libraries.
+	add_compile_options(-pthread -fexceptions)
+	include(EmscriptenDependencies)
+endif()
 
 # Load default options for Android
 if(ANDROID)

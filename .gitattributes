@@ -6,3 +6,7 @@
 
 *.gltf binary
 *.x binary
+
+# Luanti schematics are zlib blobs. Opt in to readable diffs with:
+#   git config diff.mts.textconv "python3 util/content/mts_to_text.py"
+*.mts -text diff=mts

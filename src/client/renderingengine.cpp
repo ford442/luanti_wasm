@@ -18,6 +18,7 @@
 #include "camera.h"
 #include "minimap.h"
 #include "porting.h"
+#include "porting_emscripten.h"
 #include "clientmap.h"
 #include "renderingengine.h"
 #include "render/core.h"
@@ -25,6 +26,7 @@
 #include "filesys.h"
 #include "irrlicht_changes/static_text.h"
 #include "irr_ptr.h"
+#include "util/string.h"
 
 RenderingEngine *RenderingEngine::s_singleton = nullptr;
 
@@ -163,7 +165,11 @@ RenderingEngine::RenderingEngine(MyEventReceiver *receiver)
 
 	// Resolution selection
 	bool fullscreen = g_settings->getBool("fullscreen");
-#ifdef __ANDROID__
+#ifdef __EMSCRIPTEN__
+	u16 screen_w = 1, screen_h = 1;
+	bool window_maximized = false;
+	fullscreen = false;
+#elif defined(__ANDROID__)
 	u16 screen_w = 0, screen_h = 0;
 	bool window_maximized = false;
 #else
@@ -211,7 +217,12 @@ RenderingEngine::RenderingEngine(MyEventReceiver *receiver)
 	verbosestream << "Using the " << getVideoDriverName(driver->getDriverType()) << " video driver" << std::endl;
 
 	// This changes the minimum allowed number of vertices in a VBO. Default is 500.
+	// WebGL forbids client-memory vertex arrays; keep every mesh on a VBO.
+#ifdef __EMSCRIPTEN__
+	driver->setMinHardwareBufferVertexCount(1);
+#else
 	driver->setMinHardwareBufferVertexCount(4);
+#endif
 
 	m_receiver = receiver;
 
@@ -293,6 +304,7 @@ void RenderingEngine::draw_load_screen(const std::wstring &text,
 		gui::IGUIEnvironment *guienv, ITextureSource *tsrc, float dtime,
 		int percent, float *indef_pos, const std::wstring &bottom_text)
 {
+	porting::emscripten_report_status(wide_to_utf8(text), percent, "loading");
 	v2u32 screensize = getWindowSize();
 
 	v2s32 textsize(g_fontengine->getTextWidth(text), g_fontengine->getLineHeight());
@@ -391,12 +403,19 @@ std::vector<video::E_DRIVER_TYPE> RenderingEngine::getSupportedVideoDrivers()
 {
 	// Only check these drivers. We do not support software and D3D in any capacity.
 	// ordered by preference (best first)
+#ifdef __EMSCRIPTEN__
+	static const video::E_DRIVER_TYPE glDrivers[] = {
+		video::EDT_OGLES2,
+		video::EDT_NULL,
+	};
+#else
 	static const video::E_DRIVER_TYPE glDrivers[] = {
 		video::EDT_OPENGL3,
 		video::EDT_OPENGL,
 		video::EDT_OGLES2,
 		video::EDT_NULL,
 	};
+#endif
 	std::vector<video::E_DRIVER_TYPE> drivers;
 
 	for (auto driver : glDrivers) {

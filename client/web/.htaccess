@@ -1,0 +1,16 @@
+DirectoryIndex index.html luanti.html 1ink.1ink
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+AddType application/wasm wasm
+AddType 'text/html;charset=UTF-16' 1ink
+AddType 'application/x-javascript; charset=UTF-16' 1ijs
+AddType 'application/x-javascript; charset=UTF-8' js
+AddType 'text/css;charset=UTF-16' 1iss
+AddOutputFilterByType DEFLATE application/wasm
+Header set Accept-Ranges bytes
+# Host already sends COOP. Do not set it here — a second COOP value
+# becomes "same-origin\nsame-origin" and disables SharedArrayBuffer.
+#Header always set Cross-Origin-Embedder-Policy: require-corp
+Header set Access-Control-Allow-Origin "*"
+Header set Cross-Origin-Resource-Policy: cross-origin

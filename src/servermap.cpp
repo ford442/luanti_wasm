@@ -10,6 +10,7 @@
 #include "voxel.h"
 #include "voxelalgorithms.h"
 #include "porting.h"
+#include "porting_emscripten.h"
 #include "serialization.h"
 #include "settings.h"
 #include "log.h"
@@ -519,9 +520,12 @@ void ServerMap::save(ModifiedState save_level)
 		infostream<<"ServerMap: Saving whole map, this can take time."
 				<<std::endl;
 
+	bool metadata_committed = false;
 	if (m_map_metadata_changed || save_level == MOD_STATE_CLEAN) {
-		if (settings_mgr.saveMapMeta())
+		if (settings_mgr.saveMapMeta()) {
 			m_map_metadata_changed = false;
+			metadata_committed = true;
+		}
 	}
 
 	// Profile modified reasons
@@ -557,8 +561,12 @@ void ServerMap::save(ModifiedState save_level)
 		}
 	}
 
-	if(save_started)
+	if(save_started) {
 		endSave();
+	}
+	if (metadata_committed)
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
 
 	/*
 		Only print if something happened or saved whole map
@@ -673,6 +681,8 @@ void ServerMap::endSave()
 {
 	MutexAutoLock dblock(m_db.mutex);
 	m_db.dbase->endSave();
+	porting::emscripten_mark_persistence_dirty(
+		porting::EmscriptenPersistenceReason::Periodic);
 }
 
 bool ServerMap::saveBlock(MapBlock *block)

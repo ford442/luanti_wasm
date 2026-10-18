@@ -266,7 +266,13 @@ endif(ENABLE_OPENSSL)
 
 
 find_package(ZLIB REQUIRED)
-find_package(Zstd REQUIRED)
+if(TARGET libzstd_static)
+	# Supplied by EmscriptenDependencies.cmake. FindZstd performs a try-link and
+	# cannot pass a build-tree target into its isolated check project.
+	set(ZSTD_LIBRARY libzstd_static)
+else()
+	find_package(Zstd REQUIRED)
+endif()
 
 
 if(NOT MSVC)
@@ -326,6 +332,10 @@ if(WIN32)
 			set(LUA_DLL "" CACHE FILEPATH "Path to luajit-5.1.dll for installation (optional)")
 		endif()
 	endif()
+elseif(EMSCRIPTEN)
+	# Emscripten / WebAssembly — no native sockets, no platform threading libs needed
+	# SDL2, ZLIB, and Freetype are provided via Emscripten ports (USE_SDL=2 etc.)
+	# pthreads come from the -pthread compile/link flag added to the target below
 else()
 	# Unix probably
 	list(APPEND PLATFORM_LIBS ${CMAKE_DL_LIBS})
@@ -533,6 +543,10 @@ set(common_SRCS
 
 if(ANDROID)
 	list(APPEND common_SRCS porting_android.cpp)
+endif()
+
+if(EMSCRIPTEN)
+	list(APPEND common_SRCS porting_emscripten.cpp)
 endif()
 
 if(BUILD_UNITTESTS OR BUILD_BENCHMARKS)
@@ -792,6 +806,107 @@ if(BUILD_CLIENT)
 
 	if(PRECOMPILE_HEADERS)
 		target_precompile_headers(${PROJECT_NAME} PRIVATE ${PRECOMPILED_HEADERS_LIST})
+	endif()
+
+	if(EMSCRIPTEN)
+		# Emscripten ports and WebAssembly-specific linker flags
+		target_compile_options(${PROJECT_NAME} PRIVATE
+			-pthread
+			-fexceptions
+			-sUSE_SDL=2
+			-sUSE_ZLIB=1
+			-sUSE_FREETYPE=1
+			$<$<BOOL:${USE_SOUND}>:-sUSE_OGG=1>
+			$<$<BOOL:${USE_SOUND}>:-sUSE_VORBIS=1>
+		)
+		target_link_options(${PROJECT_NAME} PRIVATE
+			-fexceptions
+			-sUSE_SDL=2
+			-sUSE_ZLIB=1
+			-sUSE_FREETYPE=1
+			$<$<BOOL:${USE_SOUND}>:-sUSE_OGG=1>
+			$<$<BOOL:${USE_SOUND}>:-sUSE_VORBIS=1>
+			-sFULL_ES2=1
+			-sMAX_WEBGL_VERSION=2
+			# Keep Luanti's synchronous launcher/game stack off the browser UI
+			# thread. GL is proxied to the browser main thread; OFFSCREEN_FRAMEBUFFER
+			# supplies the intermediate FBO that commit_frame presents. Do not
+			# enable OFFSCREENCANVAS_SUPPORT — transferring #canvas blanked the
+			# game under PROXY_TO_PTHREAD in practice.
+			-sPROXY_TO_PTHREAD=1
+			-sOFFSCREEN_FRAMEBUFFER=1
+			-sALLOW_MEMORY_GROWTH=1
+			-sINITIAL_MEMORY=268435456  # 256 MB
+			-sMAXIMUM_MEMORY=1073741824 # 1 GB
+			-pthread
+			-sSHARED_MEMORY=1
+			-sFETCH=1
+			-sFORCE_FILESYSTEM=1
+			-sEXIT_RUNTIME=0
+			-sASSERTIONS=1
+			-sDISABLE_EXCEPTION_CATCHING=0
+			# HEAPU8 is for client/web/videotexture.js (Theater Tier C spike):
+			# with ALLOW_MEMORY_GROWTH, listing it here is what keeps
+			# Module.HEAPU8 pointing at the live buffer after a growth instead
+			# of a detached one.
+			-sEXPORTED_RUNTIME_METHODS=callMain,HEAPU8
+			-lidbfs.js
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
+			"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/client/web/shell.html"
+			# Asset preloading — paths are relative to CMAKE_SOURCE_DIR at build
+			# time. Everything listed here lands in luanti.data, which every
+			# visitor downloads before the engine starts: check the content
+			# budget in wasm_porting.md before adding to this list. Runtime
+			# media (theater clips) goes in client/web/media instead.
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/builtin@/builtin"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/luanti_web@/games/luanti_web"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/devtest@/games/devtest"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/flower_island@/games/flower_island"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/rollercoaster@/games/rollercoaster"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/log_ride@/games/log_ride"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/spire_tunnel@/games/spire_tunnel"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/textures@/textures"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/fonts@/fonts"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/client/shaders@/client/shaders"
+			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/clientmods@/clientmods"
+		)
+		# Emit .html shell so the build is directly servable
+		set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
+		set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
+			${CMAKE_SOURCE_DIR}/client/web/network.js
+			${CMAKE_SOURCE_DIR}/client/web/persistence.js
+			${CMAKE_SOURCE_DIR}/client/web/shell.html
+			${CMAKE_SOURCE_DIR}/client/web/launcher.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher.css
+			${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+			${CMAKE_SOURCE_DIR}/client/web/theater.js
+			${CMAKE_SOURCE_DIR}/client/web/videotexture.js
+			${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
+			${CMAKE_SOURCE_DIR}/client/web/service-worker.js
+			${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
+			${CMAKE_SOURCE_DIR}/client/web/.htaccess
+		)
+		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				${CMAKE_SOURCE_DIR}/client/web/launcher.js
+				${CMAKE_SOURCE_DIR}/client/web/launcher.css
+				${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+				${CMAKE_SOURCE_DIR}/client/web/theater.js
+				${CMAKE_SOURCE_DIR}/client/web/videotexture.js
+				${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
+				${CMAKE_SOURCE_DIR}/client/web/service-worker.js
+				${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
+				${CMAKE_SOURCE_DIR}/client/web/.htaccess
+				$<TARGET_FILE_DIR:${PROJECT_NAME}>
+			# Theater clips are served from media/ at runtime rather than baked
+			# into luanti.data. The directory ships with only its README; a
+			# deployment drops real clips in beside it.
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+				${CMAKE_SOURCE_DIR}/client/web/media
+				$<TARGET_FILE_DIR:${PROJECT_NAME}>/media
+			COMMENT "Copying Luanti web launcher and PWA assets"
+		)
 	endif()
 endif(BUILD_CLIENT)
 

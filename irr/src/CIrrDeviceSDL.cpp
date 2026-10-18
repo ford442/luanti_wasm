@@ -10,6 +10,7 @@
 #include "IGUIEnvironment.h"
 #include "IImageLoader.h"
 #include "IFileSystem.h"
+#include "ISceneManager.h"
 #include "IVideoDriver.h"
 #include "os.h"
 #include "CTimer.h"
@@ -33,6 +34,8 @@
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
 #include <emscripten.h>
 #include <emscripten/html5.h>
+#include <emscripten/html5_webgl.h>
+#include <emscripten/threading.h>
 #endif
 
 #include "CSDLManager.h"
@@ -106,6 +109,16 @@
 #endif
 
 static int SDLDeviceInstances = 0;
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+EM_BOOL CIrrDeviceSDL::MouseUpDownCallback(int eventType, const EmscriptenMouseEvent *event, void *userData)
+{
+	// We need this callback so far only because otherwise "emscripten_request_pointerlock" calls will
+	// fail as their request are infinitely deferred.
+	// Not exactly certain why, maybe SDL does catch those mouse-events otherwise and not pass them on.
+	return EM_FALSE;
+}
+#endif
 
 bool CIrrDeviceSDL::keyIsKnownSpecial(EKEY_CODE irrlichtKey)
 {
@@ -340,6 +353,7 @@ void CIrrDeviceSDL::resetReceiveTextInputEvents()
 //! constructor
 CIrrDeviceSDL::CIrrDeviceSDL(const SIrrlichtCreationParameters &param) :
 		CIrrDeviceStub(param),
+		Context(nullptr),
 		Window((SDL_Window *)param.WindowId),
 		MouseX(0), MouseY(0), MouseXRel(0), MouseYRel(0), MouseButtonStates(0),
 		Width(param.WindowSize.Width), Height(param.WindowSize.Height),
@@ -466,10 +480,39 @@ CIrrDeviceSDL::~CIrrDeviceSDL()
 	for (const auto &p: gamepads)
 		SDL_CloseGamepad(p.second);
 #endif
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// Drop GL-backed Irrlicht objects before destroying the WebGL context.
+	// ~CIrrDeviceStub() runs afterward and would call glDeleteTextures on a
+	// context that is already gone (GLctx undefined in Emscripten glue).
+	if (GUIEnvironment) {
+		GUIEnvironment->drop();
+		GUIEnvironment = nullptr;
+	}
+	if (SceneManager) {
+		SceneManager->drop();
+		SceneManager = nullptr;
+	}
+	if (VideoDriver) {
+		VideoDriver->drop();
+		VideoDriver = nullptr;
+	}
+	if (ContextManager) {
+		ContextManager->drop();
+		ContextManager = nullptr;
+	}
+
+	if (Context) {
+		emscripten_webgl_make_context_current(0);
+		emscripten_webgl_destroy_context(
+			reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context));
+		Context = nullptr;
+	}
+#else
 	if (Window && Context) {
 		SDL_GL_MakeCurrent(Window, NULL);
 		SDL_GL_DestroyContext(Context);
 	}
+#endif
 	if (Window) {
 		SDL_DestroyWindow(Window);
 	}
@@ -586,10 +629,119 @@ bool CIrrDeviceSDL::createWindow()
 	return false;
 }
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+// CSS box and backing store of #canvas in one main-thread hop so width/height
+// cannot tear, and so we never assign canvas.width unless it actually changed
+// (that assignment resets the WebGL drawing buffer).
+static bool queryCanvasLayoutSize(int *css_w, int *css_h, int *canvas_w, int *canvas_h)
+{
+	int cw = 0, ch = 0, bw = 0, bh = 0;
+	MAIN_THREAD_EM_ASM({
+		var c = Module['canvas'] || document.getElementById('canvas');
+		HEAP32[$0 >> 2] = c ? (c.clientWidth | 0) : 0;
+		HEAP32[$1 >> 2] = c ? (c.clientHeight | 0) : 0;
+		HEAP32[$2 >> 2] = c ? (c.width | 0) : 0;
+		HEAP32[$3 >> 2] = c ? (c.height | 0) : 0;
+	}, &cw, &ch, &bw, &bh);
+	if (cw < 2 || ch < 2)
+		return false;
+	*css_w = cw;
+	*css_h = ch;
+	*canvas_w = bw;
+	*canvas_h = bh;
+	return true;
+}
+
+static void logBrowserWebGLFailure()
+{
+	static bool logged = false;
+	if (logged)
+		return;
+	logged = true;
+	MAIN_THREAD_EM_ASM({
+		var c = Module['canvas'] || document.getElementById('canvas');
+		var parent = c && c.parentElement;
+		var info = ({
+			found: !!c,
+			connected: !!(c && c.isConnected),
+			hidden: !!(c && c.hidden),
+			parentHidden: !!(parent && parent.hidden),
+			closestHidden: !!(c && c.closest('[hidden]')),
+			width: c ? c.width : 0,
+			height: c ? c.height : 0,
+			clientWidth: c ? c.clientWidth : 0,
+			clientHeight: c ? c.clientHeight : 0,
+			innerWidth: window.innerWidth | 0,
+			innerHeight: window.innerHeight | 0
+		});
+		console.error('Luanti: WebGL context creation failed', info);
+	});
+}
+
+// Canvas was display:none in the launcher until Play. CSS size can still be
+// 0x0 on the first worker hop; never hand a degenerate backing store to WebGL.
+static void ensureBrowserCanvasSize(u32 *width, u32 *height)
+{
+	int css_w = 0, css_h = 0, canvas_w = 0, canvas_h = 0;
+	if (queryCanvasLayoutSize(&css_w, &css_h, &canvas_w, &canvas_h)) {
+		*width = static_cast<u32>(css_w);
+		*height = static_cast<u32>(css_h);
+		if (canvas_w != css_w || canvas_h != css_h)
+			emscripten_set_canvas_element_size("#canvas", css_w, css_h);
+		return;
+	}
+	int fallback_w = 0, fallback_h = 0;
+	MAIN_THREAD_EM_ASM({
+		HEAP32[$0 >> 2] = (window.innerWidth | 0) || 1280;
+		HEAP32[$1 >> 2] = (window.innerHeight | 0) || 720;
+	}, &fallback_w, &fallback_h);
+	if (fallback_w < 2)
+		fallback_w = 1280;
+	if (fallback_h < 2)
+		fallback_h = 720;
+	*width = static_cast<u32>(fallback_w);
+	*height = static_cast<u32>(fallback_h);
+	emscripten_set_canvas_element_size("#canvas", fallback_w, fallback_h);
+}
+
+static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE createBrowserWebGLContext(
+		const SIrrlichtCreationParameters &params)
+{
+	auto try_create = [&](int major_version, bool explicit_swap) {
+		EmscriptenWebGLContextAttributes attributes;
+		emscripten_webgl_init_context_attributes(&attributes);
+		attributes.alpha = params.WithAlphaChannel;
+		attributes.depth = params.ZBufferBits > 0;
+		attributes.stencil = params.Stencilbuffer;
+		attributes.antialias = params.AntiAlias > 1;
+		attributes.majorVersion = major_version;
+		attributes.minorVersion = 0;
+		attributes.enableExtensionsByDefault = true;
+		attributes.explicitSwapControl = explicit_swap;
+		attributes.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_ALWAYS;
+		attributes.renderViaOffscreenBackBuffer = true;
+		attributes.failIfMajorPerformanceCaveat = false;
+		return emscripten_webgl_create_context("#canvas", &attributes);
+	};
+
+	EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_context = try_create(2, true);
+	if (webgl_context)
+		return webgl_context;
+	webgl_context = try_create(2, false);
+	if (webgl_context)
+		return webgl_context;
+	return 0;
+}
+#endif
+
 bool CIrrDeviceSDL::createWindowWithContext()
 {
 	u32 SDL_Flags = 0;
+	// HiDPI backing stores make SDL scale mouse X/Y by window/CSS ratios that
+	// differ per axis. Keep CSS pixels, backing store, and mouse deltas 1:1.
+#ifndef _IRR_EMSCRIPTEN_PLATFORM_
 	SDL_Flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#endif
 
 #ifndef _IRR_USE_SDL3_
 	SDL_Flags |= getFullscreenFlag(CreationParams.Fullscreen);
@@ -598,19 +750,15 @@ bool CIrrDeviceSDL::createWindowWithContext()
 		SDL_Flags |= SDL_WINDOW_RESIZABLE;
 	if (CreationParams.WindowMaximized)
 		SDL_Flags |= SDL_WINDOW_MAXIMIZED;
+#ifndef _IRR_EMSCRIPTEN_PLATFORM_
 	SDL_Flags |= SDL_WINDOW_OPENGL;
+#endif
 
 	SDL_GL_ResetAttributes();
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-	if (Width != 0 || Height != 0)
-		emscripten_set_canvas_size(Width, Height);
-	else {
-		int w, h, fs;
-		emscripten_get_canvas_size(&w, &h, &fs);
-		Width = w;
-		Height = h;
-	}
+	updateSizeAndScale();
+	ensureBrowserCanvasSize(&Width, &Height);
 
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
@@ -629,9 +777,51 @@ bool CIrrDeviceSDL::createWindowWithContext()
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
 	}
 
-	SDL_CreateWindowAndRenderer(0, 0, SDL_Flags, &Window, &Renderer); // 0,0 will use the canvas size
+	Window = SDL_CreateWindow("", SDL_WINDOWPOS_UNDEFINED,
+		SDL_WINDOWPOS_UNDEFINED, Width, Height, SDL_Flags);
+	if (!Window) {
+		os::Printer::log("Could not create browser window", SDL_GetError(), ELL_WARNING);
+		return false;
+	}
 
+	ensureBrowserCanvasSize(&Width, &Height);
+
+	const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_context =
+		createBrowserWebGLContext(CreationParams);
+	if (!webgl_context) {
+		os::Printer::log("Could not create browser WebGL context", ELL_WARNING);
+		logBrowserWebGLFailure();
+		SDL_DestroyWindow(Window);
+		Window = nullptr;
+		return false;
+	}
+	Context = reinterpret_cast<SDL_GLContext>(webgl_context);
+	if (emscripten_webgl_make_context_current(webgl_context) != EMSCRIPTEN_RESULT_SUCCESS) {
+		os::Printer::log("Could not activate browser WebGL context", ELL_WARNING);
+		emscripten_webgl_destroy_context(webgl_context);
+		Context = nullptr;
+		SDL_DestroyWindow(Window);
+		Window = nullptr;
+		return false;
+	}
+
+	// SDL_GL_GetAttribute resolves GL entry points dynamically. Under
+	// PROXY_TO_PTHREAD + OFFSCREEN_FRAMEBUFFER those indirect calls do not carry
+	// Emscripten's worker-side GL proxy context, so this diagnostic query fails
+	// even though the context itself was created and made current successfully.
+	// Rendering uses the normal linked GL entry points and remains proxied.
+#ifndef _IRR_EMSCRIPTEN_PLATFORM_
 	logAttributes();
+#endif
+
+	// SDL_CreateWindow probes CSS by temporarily setting the canvas to 1x1.
+	// Re-apply the layout size now that the WebGL context (and offscreen FBO)
+	// exist so viewport, backing store, and mouse space stay aligned.
+	updateSizeAndScale();
+
+	// "#canvas" is for the opengl context
+	emscripten_set_mousedown_callback("#canvas", (void *)this, true, MouseUpDownCallback);
+	emscripten_set_mouseup_callback("#canvas", (void *)this, true, MouseUpDownCallback);
 
 	return true;
 #else // !_IRR_EMSCRIPTEN_PLATFORM_
@@ -769,6 +959,17 @@ bool CIrrDeviceSDL::run()
 {
 	os::Timer::tick();
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// Align CSS size with the engine. updateSizeAndScale must not assign
+	// canvas.width unless the backing store actually changed — that reset
+	// clears the offscreen FBO and flickers 2D quads (HUD text).
+	const u32 old_w = Width;
+	const u32 old_h = Height;
+	updateSizeAndScale();
+	if (VideoDriver && (old_w != Width || old_h != Height))
+		VideoDriver->OnResize(core::dimension2d<u32>(Width, Height));
+#endif
+
 	SEvent irrevent;
 	SDL_Event SDL_event;
 
@@ -804,6 +1005,26 @@ bool CIrrDeviceSDL::run()
 			irrevent.EventType = EET_MOUSE_INPUT_EVENT;
 			irrevent.MouseInput.Event = EMIE_MOUSE_MOVED;
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+			// Pointer-lock movementX/Y is already in CSS pixels, matching
+			// Width/Height. Do not rescale by SDL window size: CreateWindow
+			// often keeps a 1024×600 window while the canvas CSS box is the
+			// full viewport, which multiplied yaw/pitch by ~2×.
+			MouseXRel = SDL_event.motion.xrel;
+			MouseYRel = SDL_event.motion.yrel;
+			EmscriptenPointerlockChangeEvent pointerlock{};
+			const bool pointer_locked =
+					emscripten_get_pointerlock_status(&pointerlock) ==
+							EMSCRIPTEN_RESULT_SUCCESS &&
+					pointerlock.isActive;
+			if (pointer_locked || SDL_GetRelativeMouseMode()) {
+				MouseX += MouseXRel;
+				MouseY += MouseYRel;
+			} else {
+				MouseX = SDL_event.motion.x;
+				MouseY = SDL_event.motion.y;
+			}
+#else
 			MouseXRel = static_cast<s32>(SDL_event.motion.xrel * ScaleX);
 			MouseYRel = static_cast<s32>(SDL_event.motion.yrel * ScaleY);
 #ifdef _IRR_USE_SDL3_
@@ -818,6 +1039,7 @@ bool CIrrDeviceSDL::run()
 				MouseX += MouseXRel;
 				MouseY += MouseYRel;
 			}
+#endif
 			irrevent.MouseInput.X = MouseX;
 			irrevent.MouseInput.Y = MouseY;
 			irrevent.MouseInput.XRel = MouseXRel;
@@ -861,6 +1083,25 @@ bool CIrrDeviceSDL::run()
 
 			irrevent.EventType = EET_MOUSE_INPUT_EVENT;
 			irrevent.MouseInput.Event = EMIE_MOUSE_MOVED; // value to be ignored
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+			// Handle mouselocking in emscripten.
+			// When the canvas is clicked, lock the mouse-pointer if it should be invisible.
+			// For security reasons this is delayed until the mouse-up event.
+			// We do not pass on this event as we don't want the activation click to trigger in-game actions.
+			if (SDL_event.type == SDL_MOUSEBUTTONDOWN) {
+				EmscriptenPointerlockChangeEvent pointerlockStatus; // let's hope that test is not expensive ...
+				if (emscripten_get_pointerlock_status(&pointerlockStatus) == EMSCRIPTEN_RESULT_SUCCESS) {
+					if (CursorControl->isVisible() && pointerlockStatus.isActive) {
+						emscripten_exit_pointerlock();
+						return !Close;
+					} else if (!CursorControl->isVisible() && !pointerlockStatus.isActive) {
+						emscripten_request_pointerlock("#canvas", true);
+						return !Close;
+					}
+				}
+			}
+#endif
 
 			auto button = SDL_event.button.button;
 #ifdef __ANDROID__
@@ -1148,6 +1389,39 @@ bool CIrrDeviceSDL::run()
 
 void CIrrDeviceSDL::updateSizeAndScale()
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	int css_w = 0, css_h = 0, canvas_w = 0, canvas_h = 0;
+	if (queryCanvasLayoutSize(&css_w, &css_h, &canvas_w, &canvas_h)) {
+		ScaleX = 1.f;
+		ScaleY = 1.f;
+		// Subpixel CSS layout can report clientWidth off by 1px. Treating
+		// that as a resize assigns canvas.width and clears the FBO.
+		auto close = [](int a, int b) {
+			return a == b || a == b - 1 || a == b + 1;
+		};
+		const bool engine_matches = close(css_w, (int)Width) && close(css_h, (int)Height);
+		const bool backing_matches = close(canvas_w, css_w) && close(canvas_h, css_h);
+		if (engine_matches && backing_matches)
+			return;
+		Width = static_cast<u32>(css_w);
+		Height = static_cast<u32>(css_h);
+		if (backing_matches)
+			return;
+		// One resize path only. SDL_SetWindowSize also assigns canvas.width,
+		// so calling both would clear the drawing buffer twice.
+		if (Window) {
+			int window_w = 0, window_h = 0;
+			SDL_GetWindowSize(Window, &window_w, &window_h);
+			if (window_w != css_w || window_h != css_h)
+				SDL_SetWindowSize(Window, css_w, css_h);
+			else
+				emscripten_set_canvas_element_size("#canvas", css_w, css_h);
+		} else {
+			emscripten_set_canvas_element_size("#canvas", css_w, css_h);
+		}
+		return;
+	}
+#endif
 	int window_w, window_h;
 	SDL_GetWindowSize(Window, &window_w, &window_h);
 
@@ -1199,7 +1473,44 @@ float CIrrDeviceSDL::getDisplayDensity() const
 
 void CIrrDeviceSDL::SwapWindow()
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// Context was created with emscripten_webgl_create_context +
+	// explicitSwapControl. SDL_GL_SwapWindow does not present that path;
+	// emscripten_webgl_commit_frame must blit the default framebuffer.
+	const auto webgl = reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context);
+	if (webgl)
+		emscripten_webgl_make_context_current(webgl);
+
+	// Render pipeline steps may leave an intermediate FBO bound. Commit only
+	// presents the default canvas framebuffer.
+	if (VideoDriver)
+		VideoDriver->setRenderTargetEx(nullptr, video::ECBF_NONE);
+
+	const EMSCRIPTEN_RESULT rc = emscripten_webgl_commit_frame();
+	if (rc != EMSCRIPTEN_RESULT_SUCCESS) {
+		static bool logged = false;
+		if (!logged) {
+			logged = true;
+			os::Printer::log("emscripten_webgl_commit_frame failed", ELL_ERROR);
+		}
+	}
+
+	// Yield so the browser main thread can composite OFFSCREEN_FRAMEBUFFER
+	// and run launcher status hooks. Keep this short — the game loop already
+	// runs on the application worker.
+	emscripten_thread_sleep(1);
+
+	// Only the launcher decides when to hide the loading shell (after the
+	// first gameplay frame). Do not force opacity here — that hid load
+	// progress and fought prepareCompositor.
+	MAIN_THREAD_EM_ASM({
+		var launcher = Module["luantiLauncher"];
+		if (launcher && typeof launcher["notifyFramePresented"] === "function")
+			launcher["notifyFramePresented"]();
+	});
+#else
 	SDL_GL_SwapWindow(Window);
+#endif
 }
 
 //! pause execution temporarily
@@ -1373,7 +1684,17 @@ bool CIrrDeviceSDL::setFullscreen(bool fullscreen)
 
 bool CIrrDeviceSDL::isWindowVisible() const
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// SDL's background events are unreliable in browsers and can leave
+	// IsInBackground set while the tab is still visible. Game::run() skips
+	// all drawing when this returns false, which leaves a blank canvas.
+	EmscriptenVisibilityChangeEvent emVisibility;
+	if (emscripten_get_visibility_status(&emVisibility) == EMSCRIPTEN_RESULT_SUCCESS)
+		return !emVisibility.hidden;
+	return true;
+#else
 	return !IsInBackground;
+#endif
 }
 
 //! Checks if the Irrlicht device supports touch events.
@@ -1416,11 +1737,26 @@ bool CIrrDeviceSDL::isWindowMinimized() const
 
 bool CIrrDeviceSDL::showErrorMessageBox(SDL_Window *window, const char *title, const char *message)
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// PROXY_TO_PTHREAD runs the engine off the browser UI thread. SDL's
+	// Emscripten message box ends up calling alert(), which is missing in
+	// workers and aborts the process after the real error is logged.
+	MAIN_THREAD_EM_ASM({
+		const title = UTF8ToString($0);
+		const message = UTF8ToString($1);
+		const text = title + "\n\n" + message;
+		console.error(text);
+		if (typeof alert === "function")
+			alert(text);
+	}, title, message);
+	return true;
+#else
 	auto ret = SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message, window);
 #ifdef _IRR_USE_SDL3_
 	return ret;
 #else
 	return ret == 0;
+#endif
 #endif
 }
 
