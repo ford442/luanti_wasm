@@ -430,6 +430,110 @@ step(1.0)
 lw_amps.stop()
 core.sound_play = sound_play
 
+--------------------------------------------------------------------------
+-- Stages, playlists, and songs that are not join-time media
+--------------------------------------------------------------------------
+
+assert_eq(#lw_amps.playlist("cabaret"), 0, "the cabaret ships with no songs")
+assert_eq(lw_amps.register_song("cabaret_missing", {length = 10,
+	media_dir = "cabaret", playlist = "cabaret"}), nil,
+	"a cabaret song whose files are missing is left out")
+assert_eq(lw_amps.get_song("cabaret_missing"), nil, "and is not playable")
+
+-- A pair dropped into the cabaret folder (made here, removed at the end,
+-- and never touching a real pair of the same name).
+local CABARET_DIR = MODPATH .. "/cabaret/"
+local made = {}
+for _, side in ipairs({"l", "r"}) do
+	local path = CABARET_DIR .. "lw_amps_cabaret_test_" .. side .. ".ogg"
+	local existing = io.open(path, "rb")
+	if existing then
+		existing:close()
+	else
+		local file = io.open(path, "wb")
+		if file then
+			file:write("OggS")
+			file:close()
+			made[#made + 1] = path
+		end
+	end
+end
+local cabaret_song = lw_amps.register_song("cabaret_test", {length = 20, bpm = 112,
+	media_dir = "cabaret", playlist = "cabaret"})
+assert_true(cabaret_song ~= nil, "a cabaret song with both files registers")
+assert_eq(cabaret_song and cabaret_song.files.left,
+	CABARET_DIR .. "lw_amps_cabaret_test_l.ogg", "its left file is in the cabaret folder")
+assert_eq(lw_amps.playlist("cabaret")[1], "cabaret_test", "and is in the cabaret playlist")
+assert_eq(lw_amps.default_song, "around_happy_hard", "the default song is still Around")
+
+local stage = lw_amps.register_stage({left = {x = 100, y = 11, z = 0},
+	right = {x = 106, y = 11, z = 0}, playlist = "cabaret"})
+assert_eq(lw_amps.stage_at_cab({x = 100, y = 10, z = 0}), stage,
+	"a stage knows its cab by the node under the source")
+assert_eq(lw_amps.stage_at_cab({x = 0, y = 10, z = 0}), nil, "and not anyone else's")
+assert_eq(lw_amps.stage_for_song("cabaret_test"), stage, "a playlist song has a home stage")
+assert_eq(lw_amps.stage_for_song("around_happy_hard"), nil,
+	"Around plays from whatever cabs a visitor sets up")
+assert_eq(lw_amps.stage_song(stage), "cabaret_test", "the stage plays its first song")
+
+-- Punching a stage cab plays its song from its own cabs; the pair is pushed
+-- to a listener first and started once their client has both files.
+local media = {}
+core.dynamic_add_media = function(options, callback)
+	media[#media + 1] = {options = options, callback = callback}
+	return true
+end
+players.host.set_pos(nil, {x = 103, y = 10, z = 4})
+played = {}
+cab.on_punch({x = 106, y = 10, z = 0}, {name = "lw_amps:cab"}, host)
+assert_eq(lw_amps.now_playing(), "cabaret_test", "punching a stage cab plays its song")
+local stage_left = lw_amps.get_amps()
+assert_eq(stage_left and stage_left.x, 100, "from that stage's cabs")
+local function for_host(list, field)
+	local out = {}
+	for _, item in ipairs(list) do
+		if item[field].to_player == "host" then
+			out[#out + 1] = item
+		end
+	end
+	return out
+end
+assert_eq(#for_host(played, "params"), 0, "nothing plays before the client has the files")
+local pushes = for_host(media, "options")
+assert_eq(#pushes, 2, "both files are pushed to the listener")
+assert_eq(pushes[1] and pushes[1].options.client_cache, false, "without a cached copy")
+assert_true(pushes[1] and not pushes[1].options.ephemeral,
+	"not ephemeral, so the next listener can be sent the same file")
+step(1.0)
+assert_eq(#for_host(media, "options"), 2, "a pending push is not repeated every sweep")
+assert_eq(#for_host(played, "params"), 0, "and still nothing plays")
+for _, push in ipairs(pushes) do
+	push.callback("host")
+end
+step(1.0)
+local pair = for_host(played, "params")
+assert_eq(#pair, 2, "once both have arrived, the sweep starts the pair")
+assert_eq(pair[1] and pair[1].spec.name, "lw_amps_cabaret_test_l", "the left file...")
+assert_eq(pair[1] and pair[1].params.pos.x, 100, "...from the stage's left cab")
+assert_near(pair[1] and pair[1].params.start_time, 2.0, 1e-6, "in time with the song")
+cab.on_punch({x = 106, y = 10, z = 0}, {name = "lw_amps:cab"}, host)
+assert_eq(lw_amps.now_playing(), nil, "punching the stage cab again stops it")
+lw_amps.play("cabaret_test")
+step(1.0)
+assert_eq(#for_host(media, "options"), 2, "a listener is sent a song once")
+lw_amps.stop()
+
+-- A stage with nothing in its playlist stays quiet when punched.
+lw_amps.register_stage({left = {x = 200, y = 11, z = 0},
+	right = {x = 206, y = 11, z = 0}, playlist = "nothing_yet"})
+cab.on_punch({x = 200, y = 10, z = 0}, {name = "lw_amps:cab"}, host)
+assert_eq(lw_amps.now_playing(), nil, "an empty stage plays nothing")
+
+for _, path in ipairs(made) do
+	os.remove(path)
+end
+core.dynamic_add_media = nil
+
 if failures > 0 then
 	io.stderr:write(("%d check(s) failed\n"):format(failures))
 	os.exit(1)
