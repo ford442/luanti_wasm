@@ -789,6 +789,12 @@ function S.start_routine(id, opts)
 	-- The amps then announce it and `attach_song` slaves this clock to it.
 	-- Started *by* the song, there is nothing to do: it is already playing.
 	if routine.songs and not opts.from_song and lw_amps then
+		-- A song that belongs to a stage (a playlist song, like the cabaret's)
+		-- plays from that stage's cabs, not wherever the amps last pointed.
+		local home = lw_amps.stage_for_song and lw_amps.stage_for_song(routine.songs[1])
+		if home then
+			lw_amps.set_amps(home.left, home.right)
+		end
 		local left, right = lw_amps.get_amps()
 		if left and right then
 			lw_amps.play(routine.songs[1])

@@ -575,8 +575,8 @@ Bundle:
   peaks at about 290 bytes a cell (12.6 MiB for the 44,800-cell snow mountain)
   until the engine's `read_schematic` table is collected.
   `util/content/test_luanti_web_maps.py` repeats that measurement and fails
-  past 9 MiB kept, a 16 MiB load peak, 235,000 cells in total, or a second map
-  over 32,768 cells. The earlier 120k-cell cap predated the measurement; 8 MiB
+  past 9.5 MiB kept, a 16 MiB load peak, 241,000 cells in total, or a second
+  map over 32,768 cells. The earlier 120k-cell cap predated the measurement; 8 MiB
   is eight small maps against the 256 MB initial heap. With the rainbow storm
   (12,288 cells, 0.5 MiB) the seven maps kept 7.5 MiB and filled 198,616 of
   the then 200,000 cells. The Around arena is 7,500 cells, under 8,192, so it
@@ -586,10 +586,13 @@ Bundle:
   The thunder chapel (`halloween_storm`) is the Halloween lane's box, 25,920
   cells, so it keeps a full 1.0 MiB and peaks at 7.0 MiB while it loads
   (measured). Both caps were raised for it on purpose: 8 → 9 MiB kept,
-  210,000 → 235,000 cells. The nine maps keep 8.75 MiB, still peak at
-  12.6 MiB (the mountain), and fill 232,036 cells, so another 0.25 MiB map
-  fits and anything bigger needs the caps raised again. See
-  `games/luanti_web/docs/maps.md`.
+  210,000 → 235,000 cells. The cabaret club is 8,019 cells, under 8,192, so
+  it keeps 0.25 MiB and peaks at 2.1 MiB while it loads (measured). It did
+  not fit the 9 MiB cap after all: each map carries a few KiB of table
+  overhead on top of its arrays, and the ten maps keep 9.02 MiB (9,232 KiB).
+  So the caps were raised again, on purpose: 9 → 9.5 MiB kept and
+  235,000 → 241,000 cells. The ten maps still peak at 12.6 MiB (the
+  mountain) and fill 240,055 cells. See `games/luanti_web/docs/maps.md`.
 * Short sound effects as mono Vorbis under a few KiB each: the lighthouse horn
   and the thunder chapel's three thunder rolls
   (`games/luanti_web/mods/lw_maps/sounds/lw_thunder.{1,2,3}.ogg`, under
@@ -600,6 +603,16 @@ Bundle:
   visitors of the chapel only. It is still inside the `games/luanti_web`
   preload, though, so a committed track grows `luanti.data` by its size. Keep
   it a short mono loop, or leave it out of the repository (see that folder's
+  README).
+* The cabaret club's songs: an empty slot in
+  `games/luanti_web/mods/lw_amps/cabaret/`, for mono Ogg pairs registered in
+  `songs.lua` there with `media_dir = "cabaret"`. Like the organ, they are
+  outside the join-time media: `lw_amps` pushes each pair with
+  `core.dynamic_add_media` (`client_cache = false`) to listeners of the
+  cabaret's cabs only. Also like the organ, anything committed there is
+  inside the `games/luanti_web` preload, so it grows `luanti.data` by its
+  size. With `luanti.data` at about 38 of its ~40 MB, add a few small pairs
+  at most, or keep the files out of the repository (see that folder's
   README).
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.

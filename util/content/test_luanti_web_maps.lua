@@ -571,9 +571,13 @@ local arena = lw_maps.by_id["around_arena"]
 assert_true(arena ~= nil and arena.amps ~= nil and arena.lasers ~= nil,
 	"the arena has a stage and lasers")
 -- For the Python half, which checks there is a cab under each source.
-print(("AMPS %s %d %d %d %d %d %d"):format(arena.id,
-	arena.amps.left.x, arena.amps.left.y, arena.amps.left.z,
-	arena.amps.right.x, arena.amps.right.y, arena.amps.right.z))
+for _, map in ipairs(lw_maps.maps) do
+	if map.amps then
+		print(("AMPS %s %d %d %d %d %d %d"):format(map.id,
+			map.amps.left.x, map.amps.left.y, map.amps.left.z,
+			map.amps.right.x, map.amps.right.y, map.amps.right.z))
+	end
+end
 local truss = arena.lasers.track
 print(("TRACK %s %d %d %d %d %d"):format(arena.id, truss.x0, truss.z0,
 	truss.x1, truss.z1, truss.y))
@@ -1320,6 +1324,46 @@ if made then
 end
 core.dynamic_add_media = nil
 core.sound_play, core.sound_fade = saved_play, saved_fade
+
+--------------------------------------------------------------------------
+-- The cabaret club: a stage waiting for its songs
+--------------------------------------------------------------------------
+
+local cabaret = lw_maps.by_id["cabaret"]
+assert_true(cabaret ~= nil and cabaret.amps ~= nil, "the cabaret has a stage")
+assert_eq(cabaret.amps.playlist, "cabaret", "it plays the cabaret playlist")
+assert_eq(#lw_amps.playlist("cabaret"), 0, "which ships empty")
+local cabaret_left = lw_maps.to_world(cabaret, cabaret.amps.left)
+local cabaret_stage = lw_amps.stage_at_cab(vector.offset(cabaret_left, 0, -1, 0))
+assert_true(cabaret_stage ~= nil and cabaret_stage.playlist == "cabaret",
+	"lw_amps knows the cabaret's cabs as a stage")
+assert_true(lw_amps.stage_at_cab(vector.offset(lw_maps.to_world(arena, arena.amps.left),
+	0, -1, 0)) ~= nil, "and the arena's")
+
+lw_amps.stop()
+player:set_pos(cabaret.spawn)
+step(1.0)
+assert_eq(lw_amps.now_playing(), nil, "the cabaret plays nothing until it has songs")
+assert_eq(player:_ratio(), cabaret.day_night_ratio, "it is late night at the cabaret")
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+
+-- With a song in the playlist, walking in plays it from the cabaret's cabs,
+-- even straight from the arena: the arena's song stops before it starts.
+lw_amps.register_song("cabaret_harness", {length = 30, playlist = "cabaret"})
+player:set_pos(arena.spawn)
+step(1.0)
+assert_eq(lw_amps.now_playing(), arena.amps.song, "the arena plays Around")
+player:set_pos(cabaret.spawn)
+step(1.0)
+assert_eq(lw_amps.now_playing(), "cabaret_harness",
+	"walking straight from the arena into the cabaret plays the cabaret's song")
+local now_left = lw_amps.get_amps()
+assert_true(now_left and now_left.x == cabaret_left.x and now_left.z == cabaret_left.z,
+	"from the cabaret's own cabs")
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+assert_eq(lw_amps.now_playing(), nil, "leaving the cabaret stops its song")
 
 --------------------------------------------------------------------------
 -- Node list, for the Python half

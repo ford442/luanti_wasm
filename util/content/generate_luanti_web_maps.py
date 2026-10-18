@@ -31,7 +31,8 @@ Layout, in the atlas the hub plaza sits in the middle of::
 
 and the Around arena north-east of the hub, beyond the gallery, with the
 thunder chapel mirroring it north-west, beyond the library. The diagonal four,
-the arena and the chapel are reached by causeways that turn in the open water;
+the arena and the chapel are reached by causeways that turn in the open water,
+and the cabaret club, west of the lighthouse, by one that turns twice;
 lw_world/maps.lua has the legs, and games/luanti_web/docs/maps.md the recipe
 for adding a map.
 
@@ -2143,6 +2144,137 @@ def build_halloween_storm() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 10. Cabaret club
+# --------------------------------------------------------------------------
+
+# A dim, warm room for Rubella and Lillith: a proscenium stage with velvet
+# wings and chasing bulbs, a dance floor in front of it, candlelit tables and
+# a bar. Indoors, so the night outside is the sky and fog over the roof and
+# the room is lit by its own lamps.
+#
+# 27 x 11 x 27 is 8,019 cells, under 8,192, so lw_world keeps it in a quarter
+# of a MiB like the Around arena (see Budget in docs/maps.md).
+CABARET_SIZE = (27, 11, 27)
+# The causeway lands on the east face, under the awning, level with the door.
+CABARET_SPAWN = (26, FLOOR, 14)
+
+CLUB = dict(x0=2, x1=24, z0=2, z1=24)
+CLUB_ROOF = 10                      # the top layer of the box
+CLUB_DOOR_Z = (13, 15)
+# The stage runs along the west wall and faces east, down the room. Its deck
+# is one node up; the front of it is CABARET_STAGE["x1"].
+CABARET_STAGE = dict(x0=3, x1=8, z0=4, z1=22)
+# The two cabs on the stage's front corners, twelve nodes apart. Facing the
+# stage from the floor (looking west), the audience's left is south.
+CABARET_CABS = ((8, 7), (8, 19))    # (x, z): audience-left first
+CABARET_BULBS_X = 9                 # the chasing bulbs hang in front of the header
+CABARET_BULBS_Y = FLOOR + 4
+CABARET_FLOOR = dict(x0=10, x1=15, z0=8, z1=18)
+CABARET_TABLES = ((18, 5), (22, 5), (18, 9), (22, 9), (18, 17), (22, 17))
+CABARET_BAR = dict(x0=16, x1=22, z=21)
+# Where the Stage Director stands, on the floor south of the stage stair.
+CABARET_DIRECTOR = (11, FLOOR, 4)
+LANTERN_NODE = "lw_maps:lantern"
+LANTERN_NODE_OFF = "lw_maps:lantern_off"
+
+
+def build_cabaret_stage(build: Build) -> None:
+	s = CABARET_STAGE
+	x0, x1, z0, z1 = s["x0"], s["x1"], s["z0"], s["z1"]
+	velvet = CURTAIN
+	# The deck, with a gold lip along its front.
+	build.box(x0, FLOOR, z0, x1, FLOOR, z1, PLANKS)
+	build.box(x1, FLOOR, z0, x1, FLOOR, z1, GOLD)
+	# Backdrop and wings of velvet, and a velvet valance under the header.
+	build.box(x0, FLOOR + 1, z0, x0, CLUB_ROOF - 1, z1, velvet)
+	for z in (z0, z1):
+		build.box(x0, FLOOR + 1, z, x1 - 1, CLUB_ROOF - 1, z, velvet)
+	build.box(x1 - 1, CLUB_ROOF - 1, z0, x1 - 1, CLUB_ROOF - 1, z1, velvet)
+	# The proscenium: gold posts at the front corners, a gold header.
+	for z in (z0, z1):
+		build.box(x1, FLOOR + 1, z, x1, CLUB_ROOF - 1, z, GOLD)
+	build.box(x1, CLUB_ROOF - 1, z0, x1, CLUB_ROOF - 1, z1, GOLD)
+	# Footlights along the lip, clear of where the band stands.
+	for z in (10, 16):
+		build.set(x1, FLOOR + 1, z, UPLIGHT)
+	# The cabs, grilles to the room (facedir 3 turns the front to +x).
+	for x, z in CABARET_CABS:
+		build.set(x, FLOOR + 1, z, AMP_CAB, WEST)
+	# A stair up at each end of the front, climbing west.
+	for z in (z0 + 1, z1 - 1):
+		build.set(x1 + 1, FLOOR, z, BRICK_STAIR_NODE, WEST)
+	# Chasing bulbs across the front of the header: a lantern every other
+	# cell, each with a chase controller over it carrying its place.
+	for index, z in enumerate(range(z0 + 2, z1 - 1, 2)):
+		build.set(CABARET_BULBS_X, CABARET_BULBS_Y, z, LANTERN_NODE_OFF)
+		build.set(CABARET_BULBS_X, CABARET_BULBS_Y + 1, z, CHASE, index % 8)
+
+
+def build_cabaret_room(build: Build) -> None:
+	c = CLUB
+	x0, x1, z0, z1 = c["x0"], c["x1"], c["z0"], c["z1"]
+	build.box(x0 + 1, SURFACE, z0 + 1, x1 - 1, SURFACE, z1 - 1, PLANKS)
+	build.walls(x0, FLOOR, z0, x1, CLUB_ROOF - 1, z1, BRICK)
+	build.box(x0, CLUB_ROOF, z0, x1, CLUB_ROOF, z1, wool("black"))
+	# The door, on the east face.
+	dz0, dz1 = CLUB_DOOR_Z
+	build.clear(x1, FLOOR, dz0, x1, FLOOR + 2, dz1)
+	build.box(x1, FLOOR + 3, dz0 - 1, x1, FLOOR + 3, dz1 + 1, GOLD)
+	# Sconces: warm lanterns set into the side walls, high up.
+	for x in (12, 18):
+		build.set(x, FLOOR + 3, z0, LANTERN_NODE)
+		build.set(x, FLOOR + 3, z1, LANTERN_NODE)
+	build.set(x1, FLOOR + 3, 6, LANTERN_NODE)
+	build.set(x1, FLOOR + 3, 20, LANTERN_NODE)
+
+	# The dance floor: a two-node checker of black and red.
+	f = CABARET_FLOOR
+	for x in range(f["x0"], f["x1"] + 1):
+		for z in range(f["z0"], f["z1"] + 1):
+			dark = (x // 2 + z // 2) % 2 == 0
+			build.set(x, SURFACE, z, wool("black") if dark else wool("red"))
+
+	# Tables: a pedestal with a candle on it, a chair either side facing in.
+	for x, z in CABARET_TABLES:
+		build.set(x, FLOOR, z, PEDESTAL)
+		build.set(x, FLOOR + 1, z, TORCH)
+		build.set(x - 1, FLOOR, z, SEAT, WEST)
+		build.set(x + 1, FLOOR, z, SEAT, EAST)
+
+	# The bar along the north wall: a counter, stools on the room side, and
+	# a lit back bar of glass shelves against the wall.
+	b = CABARET_BAR
+	build.box(b["x0"], FLOOR, b["z"], b["x1"], FLOOR, b["z"], PLANKS)
+	build.box(b["x0"], FLOOR + 1, b["z"], b["x1"], FLOOR + 1, b["z"], BRICK_SLAB)
+	for x in range(b["x0"] + 1, b["x1"], 2):
+		build.set(x, FLOOR, b["z"] - 1, SEAT, SOUTH)
+	build.box(b["x0"], FLOOR + 1, z1 - 1, b["x1"], FLOOR + 2, z1 - 1, GLASS)
+	build.set((b["x0"] + b["x1"]) // 2, FLOOR + 3, z1 - 1, LANTERN_NODE)
+	build.set(b["x0"], FLOOR, z1 - 1, PLANKS)
+	build.set(b["x1"], FLOOR, z1 - 1, PLANKS)
+
+
+def build_cabaret() -> Build:
+	sx, sy, sz = CABARET_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(PAVING)
+	build_cabaret_room(build)
+	build_cabaret_stage(build)
+
+	# Outside: an awning over the door on gold posts, and a lantern either
+	# side, so the club reads from the causeway in the dark.
+	dz0, dz1 = CLUB_DOOR_Z
+	x1 = CLUB["x1"]
+	for z in (dz0 - 1, dz1 + 1):
+		build.box(x1 + 2, FLOOR, z, x1 + 2, FLOOR + 3, z, GOLD)
+	build.box(x1 + 1, FLOOR + 4, dz0 - 1, sx - 1, FLOOR + 4, dz1 + 1, wool("red"))
+	for z in (dz0 - 3, dz1 + 3):
+		build.set(x1 + 1, FLOOR, z, PEDESTAL)
+		build.set(x1 + 1, FLOOR + 1, z, LANTERN_NODE)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -2181,6 +2313,7 @@ SPECS = [
 	MapSpec("map_around_arena", ARENA_SIZE, ARENA_SPAWN, build_arena),
 	MapSpec("map_halloween_storm", STORM_CHAPEL_SIZE, STORM_CHAPEL_SPAWN,
 		build_halloween_storm),
+	MapSpec("map_cabaret", CABARET_SIZE, CABARET_SPAWN, build_cabaret),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}
@@ -2203,8 +2336,10 @@ SPAWNS = {spec.name: spec.spawn for spec in SPECS}
 # it keeps 0.25 MiB and the pack 7.75 MiB. Raised again, to 235,000, for the
 # thunder chapel: 25,920 cells, the Halloween lane's own box, so 1 MiB, and
 # the heap cap went from 8 to 9 MiB with it. The heap measurement is the cap
-# that bites; this one only stops the volume creeping up unnoticed.
-NODE_BUDGET = 235_000
+# that bites; this one only stops the volume creeping up unnoticed. Raised to
+# 241,000 for the cabaret club: 8,019 cells, under 8,192, so a quarter of a
+# MiB, which fits the 9 MiB heap cap as it stands (9.0 MiB for ten maps).
+NODE_BUDGET = 241_000
 CHEAP_VOLUME = 32_768
 
 

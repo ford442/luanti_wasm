@@ -18,8 +18,8 @@
 --         Halloween lane /  snow    giant fruit
 --              (west)   / mountain     garden
 --                      /  (south)     (east)
---          lighthouse tide                 \
---            (southwest)                 rainbow storm
+--   cabaret club   lighthouse tide         \
+--  (west-southwest)  (southwest)         rainbow storm
 --                                        (southeast)
 --
 -- Each map is one island with its own beach, in one sea, joined to the plaza
@@ -141,7 +141,9 @@ function maps.causeways(api)
 				{x0 = -40, z0 = -30, x1 = -5, z1 = -28},
 				{x0 = -40, z0 = -45, x1 = -38, z1 = -28},
 			},
-			gate = {x = -10, z = PLAZA.z0 + 1},
+			-- East of the deck, not west: the cabaret's causeway leaves the
+			-- plaza's west face at its south-west corner, next to it.
+			gate = {x = -3, z = PLAZA.z0 + 1},
 			post = "lw_nodes:lamp",
 			sign = "Southwest: the lighthouse tide. Climb the spiral stair to " ..
 				"the lamp, walk the jetty over its glass-bottomed tide pools, " ..
@@ -236,6 +238,24 @@ function maps.causeways(api)
 				"organ loft, a graveyard and a mausoleum under a Halloween " ..
 				"thunderstorm: lightning strikes the spire, the dead oak and " ..
 				"the tomb, and the thunder follows. It is night over there.",
+		},
+		{
+			-- Out of the plaza's west face at its south-west corner, south of
+			-- the Halloween causeway, west across the lawn and the moat, south
+			-- down the channel between the lane's island and the lighthouse's
+			-- causeway, then west along the lighthouse's north beach onto the
+			-- club's door.
+			map = "cabaret",
+			legs = {
+				{x0 = -49, z0 = -17, x1 = PLAZA.x0, z1 = -15},
+				{x0 = -49, z0 = -42, x1 = -47, z1 = -15},
+				{x0 = -73, z0 = -42, x1 = -47, z1 = -40},
+			},
+			gate = {x = PLAZA.x0 + 4, z = -13},
+			post = "lw_maps:lantern",
+			sign = "West-southwest: the cabaret club. A velvet stage with " ..
+				"chasing bulbs where Rubella and Lillith perform, a dance " ..
+				"floor, candlelit tables and a bar. It is late night over there.",
 		},
 	}
 end
@@ -430,6 +450,22 @@ function maps.build(api)
 			sign = "Dome director: punch for the theater's chorus line, up on " ..
 				"the glass. It is the theater's own routine, so one of the two " ..
 				"stages dances it at a time. /routine join dances along.",
+		},
+		{
+			-- The cabaret's revue: Rubella and Lillith on the deck between the
+			-- cabs, the fans on the dance floor below. The director is on the
+			-- floor south of the stage stair, so it puts the band on stage
+			-- even before any cabaret song has been added; with songs, the
+			-- cabs start the same routine on the song's clock.
+			routine = "cabaret_revue",
+			map = "cabaret",
+			pos = {7, 5, 13},
+			node = {11, 4, 4},
+			facing = {x = 1, y = 0, z = 0},
+			marks = {},
+			sign = "Cabaret director: punch to bring Rubella and Lillith on " ..
+				"stage, and again to send them off. With cabaret songs " ..
+				"installed it plays the first one from the stage cabs.",
 		},
 	}
 

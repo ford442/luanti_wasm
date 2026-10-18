@@ -6,7 +6,7 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Nine authored maps ship with the showcase pack, as islands around the hub
+Ten authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
@@ -23,6 +23,9 @@ in about three minutes.
                              |       south         |
        [ lighthouse ]--------'                     '--[ rainbow storm ]
          southwest                                       southeast
+
+  [ cabaret club ]  west of the lighthouse: its causeway leaves the plaza's
+   west-southwest   south-west corner, south of the Halloween lane's
 ```
 
 Every causeway is walkable. Fly, fast and noclip are on for everyone, but the
@@ -41,6 +44,7 @@ tour never needs them.
 | Rainbow storm | `rainbow_storm` | `map_rainbow_storm.mts` | 64 × 8 × 24 | `(40, 5, -120)` | `(41, 9, -109)` | thunderstorm (`0.45`, slate sky, fog at 90, rain and lightning) |
 | Around arena | `around_arena` | `map_around_arena.mts` | 25 × 12 × 25 | `(29, 5, 76)` | `(41, 9, 76)` | night (`0.1`, violet sky, light fog at 120) |
 | Thunder chapel | `halloween_storm` | `map_halloween_storm.mts` | 36 × 20 × 36 | `(-60, 5, 77)` | `(-41, 9, 77)` | stormy Halloween night (`0.1`, bruised violet sky, close fog at 64, rain, lightning and thunder) |
+| Cabaret club | `cabaret` | `map_cabaret.mts` | 27 × 11 × 27 | `(-100, 5, -55)` | `(-74, 9, -41)` | late night (`0.06`, deep red sky, close fog at 56); indoors, lit by its own lamps |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -381,6 +385,76 @@ copy it into the build that should have it.
 [`mods/lw_maps/organ/README.md`](../mods/lw_maps/organ/README.md) has the
 encoding command, the size guidance and the details.
 
+### Cabaret club
+
+A dim, warm club for Lace Waterfall's Rubella and Lillith, on its own island
+west of the lighthouse. It is the Around arena's stage idea indoors, at a
+smaller scale and lower volume. The box is 27 × 11 × 27 (8,019 cells, under
+8,192, so a quarter of a MiB like the arena). The causeway comes in from the
+east, under a red awning on gold posts, with a lantern on a pedestal either
+side of the door.
+
+* **The room** is a brick box with a black roof. Inside, the light is its own:
+  warm lanterns set high in the walls, a candle on every table, a lit back
+  bar and the stage's footlights. Outside, the sky is a deep red night with
+  close fog (`day_night_ratio = 0.06`).
+* **The stage** runs along the west wall and faces east, down the room. It
+  has a plank deck one node up with a gold lip, a velvet backdrop and wings,
+  and a velvet valance under a gold proscenium header. A stair goes up at
+  each end of the front. Eight lanterns hang in a row in front of the header,
+  each with a `chase` controller above it, so the bulbs chase along the
+  proscenium two at a time, like the bazaar's stall lanterns.
+* **The cabs.** Two `lw_amps:cab`s stand on the front corners of the deck,
+  twelve nodes apart, with their grilles to the room (`facedir` 3). Facing
+  the stage means looking west, so the audience-left cab is the south one,
+  at local `(8, 5, 7)`. The audience-right cab is at `(8, 5, 19)`. The sound
+  sources are one node above each.
+* **The floor** is a two-node checker of black and red wool in front of the
+  stage. Beyond it are six candlelit tables with a chair either side, and a
+  bar along the north wall with stools. An aisle runs clear from the door to
+  the dance floor.
+* **A Stage Director** (`lw_dance:director`) stands on the floor south of the
+  stage stair. Punch it and Rubella and Lillith come on stage with four fans
+  on the dance floor, dancing the placeholder `cabaret_revue` routine on its
+  own clock. Punch it again to send them off. It works before any song has
+  been added.
+
+**The songs.** The cabaret ships with no audio. Its `amps` row names a
+playlist, not a song:
+
+```lua
+amps = {
+	left = {x = 8, y = 6, z = 7},       -- audience-left (south) source
+	right = {x = 8, y = 6, z = 19},     -- audience-right (north) source
+	playlist = "cabaret",
+	empty = "The cabaret has no songs yet: ...",
+},
+```
+
+`lw_maps` registers the pair with `lw_amps` as a stage. So:
+
+* walking in plays the first song in the `cabaret` playlist from these cabs,
+  if nothing else is playing anywhere;
+* punching either cab stops it, or plays the first song again, from these
+  cabs, even if the amps last pointed at the arena's;
+* when the last visitor leaves, the song stops.
+
+While the playlist is empty, walking in plays nothing and punching a cab
+says so. The playlist is filled from `mods/lw_amps/cabaret/songs.lua`. Each
+song there is a mono Ogg pair in that folder and one `cabaret(...)` line.
+[`amps.md`](amps.md#the-cabaret-club) has the exact steps. When a cabaret
+song plays, the `cabaret_revue` routine follows its clock: the band and
+fans come on with the song, and leave the stage when it stops.
+
+The songs are not join-time media. They are pushed to each visitor with
+`core.dynamic_add_media` the first time that visitor comes within earshot of
+the cabaret's cabs, so nobody who never visits downloads them.
+
+The map adds no nodes or textures. Going straight from the arena to the
+cabaret with `/maps` stops "Around" before the cabaret's song starts: `lw_maps`
+stops the songs on stages nobody is on before it starts the one a visitor
+has just arrived at.
+
 ## Getting there
 
 * Walk. A causeway leaves the plaza for every map, each with a gate whose
@@ -388,7 +462,7 @@ encoding command, the size guidance and the details.
   says what is over there. The islands sit in one sea, so between them there is
   water rather than a view of the void.
 * `/maps` lists the maps; `/maps <id>` travels to one (`/maps halloween_storm`
-  for the thunder chapel). It emerges the area
+  for the thunder chapel, `/maps cabaret` for the cabaret club). It emerges the area
   around the spawn first and moves the visitor only once that is done, because
   the islands are far enough out that a visitor moved straight away can arrive
   before the chunk does and fall through the place it will be.
@@ -453,7 +527,8 @@ has to learn about it. In order:
    Thunder chapel). An optional looping soundtrack that is not join-time
    media is `organ = {at, sound}` (see Thunder chapel). A
    stage is `amps = {left, right, song}`, the two sound sources one node above
-   its cabs, and racing lights are `lasers = {track, target, colors, ...}`
+   its cabs, or `amps = {left, right, playlist}` for a stage whose songs are
+   added later (see Cabaret club), and racing lights are `lasers = {track, target, colors, ...}`
    (see Around arena). The schematic defaults to `map_<id>`.
 4. **Causeway.** A `maps.causeways()` entry in `mods/lw_world/maps.lua`: a list
    of legs from the plaza's edge to the map's, a gate inside the plaza, a post
@@ -569,7 +644,8 @@ halloween (25,920 cells), the fruit garden (32,000), the lighthouse (31,104),
 the bazaar (20,736), the caldera (31,768) and the thunder chapel (25,920)
 cost 1 MiB each, the snow mountain (44,800) costs 2 MiB, the rainbow storm
 (12,288) is under 16,384 cells and so costs half of one, and the Around arena
-(7,500) is under 8,192 and costs a quarter — 8.75 MiB for the nine. While a map loads, the
+(7,500) and the cabaret club (8,019) are under 8,192 and cost a quarter each
+— 9.0 MiB for the ten. While a map loads, the
 engine's `read_schematic` table exists alongside it — one small table per cell,
 about 290 bytes each — and that peaks at 12.6 MiB for the mountain before the
 collector takes it back.
@@ -579,9 +655,9 @@ own loader over every committed map under Lua 5.1
 (`measure_luanti_web_maps_heap.lua`; a TValue is sixteen bytes on wasm32 as on
 x86-64, so the arrays weigh the same in the browser). It fails when:
 
-* the maps keep more than **9 MiB** between them, or loading one peaks past
+* the maps keep more than **9.5 MiB** between them, or loading one peaks past
   **16 MiB**;
-* the pack's total box volume passes **235,000** cells;
+* the pack's total box volume passes **241,000** cells;
 * more than one map is over 32,768 cells. The snow mountain is the pack's one
   dense map; a new map fits in 32,768 or it costs what two do.
 
@@ -593,12 +669,20 @@ It is now set from the measurement: eight maps' worth of 1 MiB against a
 next decision: it is the lane's own 36 × 20 × 36 box, so a full 1 MiB, and
 the caps were raised for it on purpose, the kept-heap cap from 8 to 9 MiB and
 the volume cap from 210,000 to 235,000 (measured: it keeps 1.0 MiB and peaks
-at 7.0 MiB while it loads, under the mountain's 12.6). The pack is at
-8.75 MiB and 232,036 cells, so one more quarter-MiB map fits and anything
-bigger needs the caps raised again. Raise them on purpose, with a new
-measurement in `wasm_porting.md`, rather than squeeze a map to fit. The
-schematics themselves are 17.1 KiB on disk and the fifteen textures under
+at 7.0 MiB while it loads, under the mountain's 12.6). The cabaret club came
+next, sized under 8,192 cells for a quarter of a MiB. The measurement showed
+that "one more quarter-MiB map fits" was optimistic: each map carries a few
+KiB of table overhead on top of its power-of-two arrays, and ten maps keep
+9.02 MiB (9,232 KiB), 16 KiB over the 9 MiB cap. So the kept-heap cap was
+raised again, to 9.5 MiB, and the volume cap to 241,000. The cabaret keeps
+0.25 MiB and peaks at 2.1 MiB while it loads (measured). The pack is at
+9.02 MiB and 240,055 cells, so another quarter-MiB map would still fit the
+heap cap, but not the volume cap. Anything bigger needs the caps raised
+again. Raise them on purpose, with a new measurement in `wasm_porting.md`,
+rather than squeeze a map to fit. The schematics themselves are 18.0 KiB on
+disk and the fifteen textures under
 8 KiB. The sounds are the lighthouse horn (4 KiB) and the chapel's three
-thunder rolls (24 KiB). The chapel's organ slot is empty and costs nothing
-until a track is dropped into it (see Thunder chapel).
+thunder rolls (24 KiB). The chapel's organ slot and the cabaret's song slot
+are empty and cost nothing until files are dropped into them (see Thunder
+chapel and Cabaret club).
 See the content budget in `wasm_porting.md`.

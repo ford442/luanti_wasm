@@ -30,12 +30,16 @@ QA sandbox and this game is not a replacement for it.
                      |    (south)            |
  lighthouse tide ----'                       '--- rainbow storm
   (southwest)                                     (southeast)
+
+ cabaret club (west-southwest): west of the lighthouse, by its own causeway
+ from the plaza's south-west corner
 ```
 
-The plaza is the hub. The showcase tour runs north from it; nine causeways
+The plaza is the hub. The showcase tour runs north from it; ten causeways
 leave it for the [themed maps](docs/maps.md) — straight out west, south and
-east, and turning in the open water for the four diagonals, the arena and the
-chapel, so none of them crosses the tour.
+east, and turning in the open water for the four diagonals, the arena, the
+chapel and the cabaret club (west of the lighthouse, by a causeway from the
+plaza's south-west corner), so none of them crosses the tour.
 
 1. **Spawn plaza** — fountain, colonnade, and a gate whose banner spells
    `LUANTI WEB` out of wool. Walk north through the arch.
@@ -56,7 +60,8 @@ chapel, so none of them crosses the tour.
    Lace Waterfall's arena, where "Around" starts as you walk in, lights race
    round the truss and lasers sweep the floor, and a ruined chapel under a
    Halloween thunderstorm, where lightning strikes the spire and thunder rolls
-   after it. Walk a causeway or use
+   after it, and a cabaret club with a velvet stage where Rubella and Lillith
+   perform. Walk a causeway or use
    `/maps`. Full
    footprints, spawns and intended time of day are in
    [`docs/maps.md`](docs/maps.md).
@@ -68,7 +73,7 @@ chapel, so none of them crosses the tour.
 | `lw_nodes` | the 45-node core palette (the theater adds 6 more) and the mapgen aliases |
 | `lw_core` | the hand, privileges, the palette inventory, the starter kit |
 | `lw_dance` | the player character mesh, dance mode, the six-move dance pad, the stage hint, the routine director that dances NPCs to the same catalog, and the Lace Waterfall band and crowd rigs |
-| `lw_amps` | stage amp cabs that play a song as a left/right pair of positional mono sources, `/amp`, and the song events the director dances to (see `docs/amps.md`) |
+| `lw_amps` | stage amp cabs that play a song as a left/right pair of positional mono sources, `/amp`, the song events the director dances to, map stages and playlists, and the cabaret's song slot (see `docs/amps.md`) |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
 | `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere and storms (rain, lightning, thunder), the optional organ slot, `/maps` |
 | `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |

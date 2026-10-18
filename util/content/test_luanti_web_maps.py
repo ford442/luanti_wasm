@@ -255,6 +255,21 @@ def storm_chapel_landmarks() -> dict:
 	}
 
 
+def cabaret_landmarks() -> dict:
+	s = maps.CABARET_STAGE
+	f = maps.CABARET_FLOOR
+	b = maps.CABARET_BAR
+	return {
+		"door, under the awning": maps.CABARET_SPAWN,
+		"dance floor": ((f["x0"] + f["x1"]) // 2, maps.FLOOR, (f["z0"] + f["z1"]) // 2),
+		"stage deck, between the cabs": (s["x1"] - 1, maps.FLOOR + 1, 13),
+		"stage, south wing": (s["x0"] + 1, maps.FLOOR + 1, s["z0"] + 1),
+		"stage, north wing": (s["x0"] + 1, maps.FLOOR + 1, s["z1"] - 1),
+		"at the bar": (b["x0"] + 2, maps.FLOOR, b["z"] - 2),
+		"the Stage Director": maps.CABARET_DIRECTOR,
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -268,6 +283,7 @@ LANDMARKS = {
 	"map_rainbow_storm": lambda schem: rainbow_landmarks(),
 	"map_around_arena": lambda schem: arena_landmarks(),
 	"map_halloween_storm": lambda schem: storm_chapel_landmarks(),
+	"map_cabaret": lambda schem: cabaret_landmarks(),
 }
 
 
@@ -650,6 +666,47 @@ def test_arena_stage_hosts_the_band() -> None:
 			assert_true(world.standable(*cell), f"the crowd has nowhere to stand at {cell}")
 
 
+def test_cabaret_stage_hosts_the_band() -> None:
+	"""The cabaret's cabs face the room, far enough apart for stereo, and the
+	band and fans have somewhere to stand, the same way as at the arena, on a
+	stage that faces east instead of south."""
+	world = World(maps.schematics()["map_cabaret"])
+	schem = maps.schematics()["map_cabaret"]
+	harness = run_lua_harness()
+	sources = harness["amps"]["cabaret"] if harness else tuple(
+		(x, maps.FLOOR + 2, z) for x, z in maps.CABARET_CABS)
+	left, right = sources
+	for source in sources:
+		x, y, z = source
+		cab = world.at(x, y - 1, z)
+		assert_true(cab == maps.AMP_CAB, f"no amp cab under the cabaret source {source}: {cab}")
+		index = node_index(world.sx, world.sy, x, y - 1, z)
+		assert_true(schem.param2[index] == maps.WEST,
+			f"the cabaret cab at {(x, y - 1, z)} does not face the room")
+		assert_true(not world.solid(*source), f"the sound source {source} is inside a node")
+	# Facing the stage from the floor means looking west, so the audience's
+	# left is south (smaller z).
+	assert_true(left[0] == right[0] and left[2] < right[2],
+		"the left source is not on the audience's left of a stage facing east")
+	assert_true(abs(right[2] - left[2]) >= 6,
+		"the cabaret's cabs are too close together for the stereo to survive")
+	# Facing east, `forward` is +x, so the band is one node west of the line.
+	band_x = left[0] - 1
+	band_y = left[1] - 1
+	mid = (left[2] + right[2]) // 2
+	for dz in (-2, -1, 0, 1, 2):
+		assert_true(world.standable(band_x, band_y, mid + dz),
+			f"the band has nowhere to stand at {(band_x, band_y, mid + dz)}")
+	for dz in range(-3, 4):
+		cell = (band_x + 5, maps.FLOOR, mid + dz)
+		assert_true(world.standable(*cell), f"the fans have nowhere to stand at {cell}")
+	# The dance floor is clear all the way to the door.
+	for x in range(band_x + 3, maps.CABARET_SPAWN[0] + 1):
+		for z in range(maps.CLUB_DOOR_Z[0], maps.CLUB_DOOR_Z[1] + 1):
+			assert_true(world.standable(x, maps.FLOOR, z),
+				f"something blocks the aisle from the door at {(x, maps.FLOOR, z)}")
+
+
 def test_arena_banners_are_whole_and_face_the_floor() -> None:
 	world = World(maps.schematics()["map_around_arena"])
 	schem = maps.schematics()["map_around_arena"]
@@ -786,8 +843,10 @@ def test_param2_survives() -> None:
 # lw_world's loader under Lua 5.1 (measure_luanti_web_maps_heap.lua), and the
 # high-water mark while the largest map loads. See wasm_porting.md: raised
 # from 8 MiB for the thunder chapel, the ninth map and the second at 1 MiB
-# that the eight before it left no room for.
-HEAP_BUDGET_KIB = 9 * 1024
+# that the eight before it left no room for, then to 9.5 MiB for the cabaret
+# club: ten maps keep 9.02 MiB, because each one carries a few KiB of table
+# overhead on top of its power-of-two arrays.
+HEAP_BUDGET_KIB = 9 * 1024 + 512
 LOAD_PEAK_BUDGET_KIB = 16 * 1024
 
 
@@ -859,11 +918,11 @@ def test_budget() -> None:
 	for name, (volume, map_kept, map_peak) in per_map.items():
 		print(f"  {name}: {volume} nodes, keeps {map_kept / 1024:.1f} MiB, "
 			f"peaks at {map_peak / 1024:.1f} MiB while loading")
-	print(f"  heap: keeps {kept / 1024:.1f} MiB of {HEAP_BUDGET_KIB / 1024:.0f}, "
+	print(f"  heap: keeps {kept / 1024:.1f} MiB of {HEAP_BUDGET_KIB / 1024:.1f}, "
 		f"load peak {peak / 1024:.1f} MiB of {LOAD_PEAK_BUDGET_KIB / 1024:.0f}")
 	assert_true(kept <= HEAP_BUDGET_KIB,
 		f"the loaded maps keep {kept / 1024:.1f} MiB of Lua heap; the budget is "
-		f"{HEAP_BUDGET_KIB / 1024:.0f} MiB (see wasm_porting.md)")
+		f"{HEAP_BUDGET_KIB / 1024:.1f} MiB (see wasm_porting.md)")
 	assert_true(peak <= LOAD_PEAK_BUDGET_KIB,
 		f"loading one map peaks at {peak / 1024:.1f} MiB of Lua heap; the budget is "
 		f"{LOAD_PEAK_BUDGET_KIB / 1024:.0f} MiB (see wasm_porting.md)")

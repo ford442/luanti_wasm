@@ -12,7 +12,9 @@ Waterfall's "Around", in seven mixes. The quickest way to hear it is the
 **Around arena** (`/maps around_arena`, or the causeway north-east of the
 plaza): it has a stage with the two cabs already on it, and the song starts
 when you walk in (see [maps.md](maps.md#around-arena)). Two cabs on any
-other floor work too, as below.
+other floor work too, as below. The **cabaret club** (`/maps cabaret`) is a
+second stage, built and wired the same way, waiting for its own songs (see
+[The cabaret club](#the-cabaret-club)).
 
 ## Trying it
 
@@ -102,6 +104,85 @@ clock slaved to the song. The details are in
 All seven mixes share this one map. A new song only needs its pair in
 `mods/lw_amps/sounds/`, a `register_song` line with the length measured from
 the files, and a routine naming it in `songs`. It can reuse the same cast.
+
+## Map stages
+
+A map with `amps` in its `lw_maps` row registers its two cabs with
+`lw_amps.register_stage`, together with what that stage plays: a `song`
+(the arena: `around_happy_hard`), or a `playlist` (the cabaret: `cabaret`,
+meaning the first song registered with `playlist = "cabaret"`). Punching one
+of a stage's cabs while nothing is playing points the amps at that stage and
+plays its song, wherever `/amp left` and `/amp right` last pointed. Cabs you
+place yourself are not a stage, and behave as described under
+[Trying it](#trying-it).
+
+`lw_amps.stage_song(stage)` is what a stage plays: its `song` if that is
+registered, else the first song in its `playlist`, else nothing. A stage with
+nothing to play stays quiet, and punching its cab says why.
+
+## The cabaret club
+
+The cabaret (`/maps cabaret`, or the causeway from the plaza's south-west
+corner) has a proscenium stage with two cabs on its front corners, twelve
+nodes apart. It is built for Rubella and Lillith but ships with **no songs**:
+the slot is `mods/lw_amps/cabaret/`.
+
+### Adding a cabaret song
+
+1. Cut the stereo master into a mono pair, 44.1 kHz Ogg Vorbis, named
+   `lw_amps_<name>_l.ogg` (the original left channel) and
+   `lw_amps_<name>_r.ogg` (the right channel). Use a `<name>` of lowercase
+   letters, digits and `_`, for example `cabaret_velvet`:
+
+   ```sh
+   ffmpeg -i velvet.wav -af "pan=mono|c0=c0" -ar 44100 -c:a libvorbis -q:a 4 lw_amps_cabaret_velvet_l.ogg
+   ffmpeg -i velvet.wav -af "pan=mono|c0=c1" -ar 44100 -c:a libvorbis -q:a 4 lw_amps_cabaret_velvet_r.ogg
+   ```
+
+2. Put both files in `games/luanti_web/mods/lw_amps/cabaret/`, **not**
+   `mods/lw_amps/sounds/`.
+3. Measure the length:
+   `ffprobe -v error -show_entries format=duration -of csv=p=0 lw_amps_cabaret_velvet_l.ogg`.
+4. Add one line at the bottom of `mods/lw_amps/cabaret/songs.lua`:
+
+   ```lua
+   cabaret("cabaret_velvet", {title = "Velvet", length = 183.42, bpm = 112})
+   ```
+
+   `cabaret()` calls `lw_amps.register_song` with `media_dir = "cabaret"` and
+   `playlist = "cabaret"`. If either file is missing, the song is skipped with
+   a warning in the log.
+5. Restart the server (on the web: rebuild and reload).
+
+From then on, walking into the cabaret plays the first song in `songs.lua`,
+punching a cab stops or restarts it, and `/amp play <name>` plays any of
+them. The dance is `routines/cabaret_revue.lua`. It takes every song in the
+`cabaret` playlist when the server starts, so it needs no edit: Rubella and
+Lillith go on the cabaret stage with four fans on the dance floor and follow
+the song's clock, and leave the stage when it stops. Its moves are a
+placeholder revue at a nominal 112 bpm, the routine's own tempo. Retime its
+sections against the real songs, or copy it per song if their tempos differ
+a lot. The Stage Director on the cabaret floor runs the same routine by
+hand, before any song is added or with one.
+
+### Why the songs are not join-time media
+
+A `sounds/` folder is part of the media list. Every client downloads that
+list and checks its hashes before the world loads; the "Around" pairs there
+are already about 26 MiB of it. `cabaret/` is not a media folder. Instead,
+`lw_amps` sends each cabaret pair with `core.dynamic_add_media`
+(`to_player`, not ephemeral, `client_cache = false`), once per visitor, when
+that visitor first comes within earshot of the cabaret's cabs. Until a
+listener's client has both files, that listener is not started. The next
+once-a-second sweep starts them at `start_time = elapsed % length`, in time
+with the song and the band.
+
+That keeps the songs out of the engine's join-time media, but not out of
+the web build's download. `src/CMakeLists.txt` preloads all of
+`games/luanti_web` into `luanti.data`, so committed songs grow it by their
+size, and it is already at about 38 of its ~40 MB. Keep cabaret pairs few
+and small, or keep them out of the repository and add them only where they
+should play. `mods/lw_amps/cabaret/README.md` has the details.
 
 ## Cost
 

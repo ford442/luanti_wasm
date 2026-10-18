@@ -483,6 +483,8 @@ lw_maps.by_id = {}
 -- `amps = {left = <local>, right = <local>, song = <name>}` plays a song out
 -- of the map's own amp cabs when someone walks onto it, and `lasers = {...}`
 -- races lights and lasers round a track while anyone is there. See "Shows".
+-- `playlist = <name>` in place of `song` plays the first song lw_amps has in
+-- that playlist, and nothing while it has none.
 function lw_maps.register(def)
 	assert(def.id and def.origin and def.size and def.spawn,
 		"lw_maps.register needs id, origin, size and spawn")
@@ -496,6 +498,18 @@ function lw_maps.register(def)
 	def.entities = def.entities or {}
 	for _, entity in ipairs(def.entities) do
 		entity.pos = lw_maps.to_world(def, entity.at)
+	end
+	-- A stage tells lw_amps which cabs are its own, so punching one of them
+	-- plays this map's song from this map, wherever the amps last pointed.
+	local amps = rawget(_G, "lw_amps")
+	if def.amps and amps and amps.register_stage then
+		amps.register_stage({
+			left = lw_maps.to_world(def, def.amps.left),
+			right = lw_maps.to_world(def, def.amps.right),
+			song = def.amps.song,
+			playlist = def.amps.playlist,
+			empty = def.amps.empty,
+		})
 	end
 	lw_maps.maps[#lw_maps.maps + 1] = def
 	lw_maps.by_id[def.id] = def
@@ -756,6 +770,39 @@ lw_maps.register({
 	},
 })
 
+lw_maps.register({
+	id = "cabaret",
+	title = "Cabaret club",
+	blurb = "A dim, warm club at night: a velvet proscenium stage with " ..
+		"chasing bulbs, where Rubella and Lillith perform, a dance floor, " ..
+		"candlelit tables and a bar.",
+	size = {x = 27, y = 11, z = 27},
+	origin = {x = -100, y = BASE, z = -55},
+	spawn = {x = -74, y = BASE + 4, z = -41},
+	-- Late night under a deep red sky and close, warm fog: from the causeway
+	-- the club is a dark box with a lit door, and inside it is its own lamps.
+	day_night_ratio = 0.06,
+	sky = lw_maps.sky({
+		sky = "#2a0a12", horizon = "#5a1420",
+		night_sky = "#16050a", night_horizon = "#3a0c14", indoors = "#1a0608",
+		sun_tint = "#c0402a", moon_tint = "#7a2a3a",
+		fog = 56, fog_start = 0.3,
+	}),
+	-- The sound sources, one node above the cabs on the stage's front
+	-- corners, audience-left (south) first. There are no songs here yet: the
+	-- cabaret plays whatever is in lw_amps' "cabaret" playlist, which is
+	-- empty until songs are dropped into mods/lw_amps/cabaret/ (see the
+	-- README there). Until then walking in plays nothing, and punching a cab
+	-- says why.
+	amps = {
+		left = {x = 8, y = 6, z = 7},
+		right = {x = 8, y = 6, z = 19},
+		playlist = "cabaret",
+		empty = "The cabaret has no songs yet: see " ..
+			"games/luanti_web/mods/lw_amps/cabaret/README.md.",
+	},
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------
@@ -999,13 +1046,27 @@ local function playing_here(map)
 	return same_pos(left, want_left) and same_pos(right, want_right)
 end
 
+-- What a stage plays: its song, or the first in its playlist; nil when a
+-- playlist has nothing in it yet, and then the stage stays quiet.
+local function stage_song(map)
+	local amps = amps_mod()
+	if amps and amps.stage_song then
+		return amps.stage_song(map.amps)
+	end
+	return map.amps.song
+end
+
 local function start_song(map)
 	local amps = amps_mod()
 	if not (amps and amps.play) or amps.now_playing() then
 		return
 	end
+	local song = stage_song(map)
+	if not song then
+		return
+	end
 	amps.set_amps(stage_sources(map))
-	amps.play(map.amps.song)
+	amps.play(song)
 end
 
 local function stop_song(map)
@@ -1325,6 +1386,7 @@ core.register_globalstep(function(dtime)
 	end
 	elapsed = 0
 	local visitors = {}
+	local arrived = {}
 	for _, player in ipairs(core.get_connected_players()) do
 		local was = current[player:get_player_name()]
 		local map = lw_maps.at(player:get_pos())
@@ -1337,11 +1399,16 @@ core.register_globalstep(function(dtime)
 			-- starts a stage's song: staying does not restart one a visitor
 			-- stopped by punching a cab.
 			if map.amps and map.id ~= was then
-				start_song(map)
+				arrived[#arrived + 1] = map
 			end
 		end
 	end
+	-- Songs on stages nobody is on any more stop first, so a visitor who
+	-- goes straight from one stage to another (by /maps) hears the new one.
 	update_shows(visitors)
+	for _, map in ipairs(arrived) do
+		start_song(map)
+	end
 end)
 
 core.register_on_leaveplayer(function(player)
