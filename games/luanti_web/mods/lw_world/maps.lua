@@ -8,8 +8,8 @@
 -- atmosphere it wants. This file owns where it sits relative to the plaza and
 -- how a visitor walks there:
 --
---                                                Around arena
---                                              (north-northeast)
+--           thunder chapel                      Around arena
+--         (north-northwest)                  (north-northeast)
 --          smoke caldera                   crystal bazaar
 --           (northwest)                     (northeast)
 --                   \                         /
@@ -170,14 +170,17 @@ function maps.causeways(api)
 		{
 			-- Out of the plaza's west side north of the Halloween causeway,
 			-- north up the channel between the showcase island and the lane,
-			-- then west onto the caldera's trailhead.
+			-- then west onto the caldera's trailhead. It leaves one row south
+			-- of the plaza's north-west corner, which the thunder chapel's
+			-- causeway leaves by, and its gate stands back from the edge: the
+			-- crystal bazaar's causeway and gate, mirrored.
 			map = "smoke_caldera",
 			legs = {
-				{x0 = -47, z0 = -3, x1 = PLAZA.x0, z1 = -1},
-				{x0 = -47, z0 = -3, x1 = -45, z1 = 42},
+				{x0 = -47, z0 = -4, x1 = PLAZA.x0, z1 = -2},
+				{x0 = -47, z0 = -4, x1 = -45, z1 = 42},
 				{x0 = -57, z0 = 40, x1 = -45, z1 = 42},
 			},
-			gate = {x = PLAZA.x0 + 1, z = 1},
+			gate = {x = PLAZA.x0 + 5, z = -5},
 			post = "lw_maps:lava",
 			sign = "Northwest: the smoke caldera. A ring trail up the cone, a " ..
 				"glass lip over the glowing crater, a switchback down into it, " ..
@@ -215,6 +218,24 @@ function maps.causeways(api)
 				"night: the song starts as you walk in, the band plays on the " ..
 				"deck, lights race round the truss and lasers sweep the floor. " ..
 				"Punch an amp cab to stop or restart it.",
+		},
+		{
+			-- The Around arena's causeway, mirrored: out of the plaza's west
+			-- face at its north-west corner, along the library's south wall,
+			-- then north up the channel west of the hub tour — two rows east
+			-- of the caldera's, past the library and the theater — onto the
+			-- chapel's path, under its arch.
+			map = "halloween_storm",
+			legs = {
+				{x0 = -42, z0 = 1, x1 = PLAZA.x0, z1 = 3},
+				{x0 = -42, z0 = 1, x1 = -40, z1 = 76},
+			},
+			gate = {x = PLAZA.x0 + 3, z = 1},
+			post = "lw_maps:jack_o_lantern",
+			sign = "North-west: the thunder chapel. A ruined chapel with an " ..
+				"organ loft, a graveyard and a mausoleum under a Halloween " ..
+				"thunderstorm: lightning strikes the spire, the dead oak and " ..
+				"the tomb, and the thunder follows. It is night over there.",
 		},
 	}
 end

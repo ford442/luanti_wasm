@@ -575,16 +575,32 @@ Bundle:
   peaks at about 290 bytes a cell (12.6 MiB for the 44,800-cell snow mountain)
   until the engine's `read_schematic` table is collected.
   `util/content/test_luanti_web_maps.py` repeats that measurement and fails
-  past 8 MiB kept, a 16 MiB load peak, 210,000 cells in total, or a second map
+  past 9 MiB kept, a 16 MiB load peak, 235,000 cells in total, or a second map
   over 32,768 cells. The earlier 120k-cell cap predated the measurement; 8 MiB
   is eight small maps against the 256 MB initial heap. With the rainbow storm
   (12,288 cells, 0.5 MiB) the seven maps kept 7.5 MiB and filled 198,616 of
   the then 200,000 cells. The Around arena is 7,500 cells, under 8,192, so it
   keeps 0.25 MiB and peaks at 2.0 MiB while it loads (measured). The eight maps
   keep 7.75 MiB, still peak at 12.6 MiB (the mountain), and fill 206,116 cells.
-  The volume cap was raised to 210,000 for it and the heap caps were not:
-  another 0.25 MiB map fits, and anything bigger needs them raised. See
+  The volume cap was raised to 210,000 for it and the heap caps were not.
+  The thunder chapel (`halloween_storm`) is the Halloween lane's box, 25,920
+  cells, so it keeps a full 1.0 MiB and peaks at 7.0 MiB while it loads
+  (measured). Both caps were raised for it on purpose: 8 → 9 MiB kept,
+  210,000 → 235,000 cells. The nine maps keep 8.75 MiB, still peak at
+  12.6 MiB (the mountain), and fill 232,036 cells, so another 0.25 MiB map
+  fits and anything bigger needs the caps raised again. See
   `games/luanti_web/docs/maps.md`.
+* Short sound effects as mono Vorbis under a few KiB each: the lighthouse horn
+  and the thunder chapel's three thunder rolls
+  (`games/luanti_web/mods/lw_maps/sounds/lw_thunder.{1,2,3}.ogg`, under
+  24 KiB together, each under 3 s, so decoded whole rather than streamed).
+  The chapel also has an empty slot for an optional pipe-organ loop in
+  `games/luanti_web/mods/lw_maps/organ/`. That folder is outside the engine's
+  join-time media: the track is pushed with `core.dynamic_add_media` to
+  visitors of the chapel only. It is still inside the `games/luanti_web`
+  preload, though, so a committed track grows `luanti.data` by its size. Keep
+  it a short mono loop, or leave it out of the repository (see that folder's
+  README).
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.
 * The Lace Waterfall songs for the stage amps

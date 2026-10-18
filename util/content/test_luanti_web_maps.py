@@ -241,6 +241,20 @@ def arena_landmarks() -> dict:
 	}
 
 
+def storm_chapel_landmarks() -> dict:
+	c = maps.CHAPEL
+	m = maps.MAUSOLEUM
+	return {
+		"path at the causeway": maps.STORM_CHAPEL_SPAWN,
+		"graveyard": (6, maps.FLOOR, 15),
+		"pumpkin patch": (25, maps.FLOOR, 5),
+		"chapel nave": (19, maps.FLOOR, c["z0"] + 4),
+		"under the loft, at the altar": (19, maps.FLOOR, c["z1"] - 3),
+		"organ loft": (19, maps.CHAPEL_LOFT + 1, c["z1"] - 4),
+		"inside the mausoleum": (m["x0"] + 2, maps.FLOOR, (m["z0"] + m["z1"]) // 2),
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -253,6 +267,7 @@ LANDMARKS = {
 	"map_smoke_caldera": lambda schem: caldera_landmarks(),
 	"map_rainbow_storm": lambda schem: rainbow_landmarks(),
 	"map_around_arena": lambda schem: arena_landmarks(),
+	"map_halloween_storm": lambda schem: storm_chapel_landmarks(),
 }
 
 
@@ -389,6 +404,28 @@ def test_rainbow_arches_are_a_walk_under_open_sky() -> None:
 			f"the rod at ({x}, {crest}, {z}) is not one node proud of the crest")
 		assert_true(not (maps.DECK_Z0 <= z <= maps.DECK_Z1),
 			f"the rod at ({x}, {z}) stands on the deck")
+
+
+def test_storm_rods_stand_under_open_sky() -> None:
+	"""Every rod lw_maps aims a bolt at is a post with nothing over it."""
+	harness = run_lua_harness()
+	if harness is None:
+		return
+	built = maps.schematics()
+	assert_true("halloween_storm" in harness["rods"],
+		"the thunder chapel has no lightning rods in lw_maps")
+	for map_id, rods in harness["rods"].items():
+		world = World(built["map_" + map_id])
+		for x, y, z in rods:
+			assert_true(world.at(x, y, z) == maps.FENCE,
+				f"{map_id}: the rod at {(x, y, z)} is {world.at(x, y, z)!r}, not a post")
+			for above in range(y + 1, world.sy):
+				assert_true(world.at(x, above, z) == "air",
+					f"{map_id}: {world.at(x, above, z)} over the rod at {(x, y, z)}; "
+					"the bolt would come down through it")
+	assert_true(sorted(harness["rods"]["halloween_storm"])
+		== sorted(maps.STORM_CHAPEL_RODS),
+		"lw_maps' thunder chapel rods are not the generator's STORM_CHAPEL_RODS")
 
 
 def test_lighthouse_stair_climbs_every_turn() -> None:
@@ -747,8 +784,10 @@ def test_param2_survives() -> None:
 
 # What the pack may cost the Lua heap for the session, measured by running
 # lw_world's loader under Lua 5.1 (measure_luanti_web_maps_heap.lua), and the
-# high-water mark while the largest map loads. See wasm_porting.md.
-HEAP_BUDGET_KIB = 8 * 1024
+# high-water mark while the largest map loads. See wasm_porting.md: raised
+# from 8 MiB for the thunder chapel, the ninth map and the second at 1 MiB
+# that the eight before it left no room for.
+HEAP_BUDGET_KIB = 9 * 1024
 LOAD_PEAK_BUDGET_KIB = 16 * 1024
 
 
@@ -915,7 +954,8 @@ def run_lua_harness():
 			continue
 		if result.returncode != 0:
 			raise SystemExit(result.stdout + result.stderr)
-		report = {"nodes": set(), "maps": [], "entities": [], "amps": {}, "tracks": {}}
+		report = {"nodes": set(), "maps": [], "entities": [], "amps": {}, "tracks": {},
+			"rods": {}}
 		for line in result.stdout.splitlines():
 			fields = line.split()
 			if not fields:
@@ -927,6 +967,9 @@ def run_lua_harness():
 			elif fields[0] == "AMPS":
 				values = [int(v) for v in fields[2:8]]
 				report["amps"][fields[1]] = (tuple(values[:3]), tuple(values[3:]))
+			elif fields[0] == "ROD":
+				report["rods"].setdefault(fields[1], []).append(
+					tuple(int(v) for v in fields[2:5]))
 			elif fields[0] == "TRACK":
 				report["tracks"][fields[1]] = tuple(int(v) for v in fields[2:7])
 			elif fields[0] == "ENTITY":

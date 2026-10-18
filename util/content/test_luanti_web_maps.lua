@@ -358,6 +358,12 @@ for _, map in ipairs(lw_maps.maps) do
 		print(("ENTITY %s %s %d %d %d"):format(map.id, entity.name,
 			entity.at.x, entity.at.y, entity.at.z))
 	end
+	-- And the rods its storm aims at, which have to be posts under open sky.
+	if map.storm then
+		for _, rod in ipairs(map.storm.rods) do
+			print(("ROD %s %d %d %d"):format(map.id, rod.x, rod.y, rod.z))
+		end
+	end
 	print(("MAP %s"):format(map.id))
 end
 
@@ -1166,6 +1172,154 @@ core.sound_play = nil
 local ok_silent = pcall(punch, lamp_pos, "lw_nodes:lamp")
 assert_true(ok_silent, "punching the lamp with sound off does not error")
 core.sound_play = real_sound
+
+--------------------------------------------------------------------------
+-- The thunder chapel: thunder after every strike, and the organ slot
+--------------------------------------------------------------------------
+
+local chapel = lw_maps.by_id["halloween_storm"]
+assert_true(chapel ~= nil and chapel.storm ~= nil, "the thunder chapel has a storm")
+assert_eq(chapel.storm.thunder, "lw_thunder", "the chapel's storm has thunder")
+assert_eq(storm.storm.thunder, nil, "the rainbow storm stays silent")
+assert_eq(lw_maps.thunder_delay(0), 0.25, "thunder at the rod follows the flash closely")
+assert_true(lw_maps.thunder_delay(20) > lw_maps.thunder_delay(0),
+	"thunder lags farther from the strike")
+assert_eq(lw_maps.thunder_delay(1000), 1.5, "and never by more than a second and a half")
+
+local sounds = {}
+local saved_play, saved_fade = core.sound_play, core.sound_fade
+core.sound_play = function(name, spec, ephemeral)
+	sounds[#sounds + 1] = {name = name, spec = spec, ephemeral = ephemeral}
+	return #sounds
+end
+local faded = {}
+core.sound_fade = function(handle) faded[#faded + 1] = handle end
+
+local function count_sounds(name)
+	local count = 0
+	for _, sound in ipairs(sounds) do
+		if sound.name == name then
+			count = count + 1
+		end
+	end
+	return count
+end
+
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+run_afters()
+player:set_pos(chapel.spawn)
+core._gametime = 64
+step(1.0)
+run_afters()
+sounds = {}
+
+-- A strike: the bolt now, the thunder a beat later, at the rod it hit.
+core._gametime = 69
+core._particles = {}
+step(0.05)
+assert_true(#core._particles > 0, "lightning strikes the chapel")
+assert_eq(count_sounds("lw_thunder"), 0, "the thunder waits for the flash")
+run_afters()
+assert_eq(count_sounds("lw_thunder"), 1, "one roll of thunder per strike")
+local roll = sounds[1]
+local hit = lw_maps.to_world(chapel, chapel.storm.rods[
+	lw_maps.storm_flash(69) % #chapel.storm.rods + 1])
+assert_true(roll ~= nil and roll.spec.pos.x == hit.x and roll.spec.pos.z == hit.z
+	and roll.spec.pos.y == hit.y + 0.5, "the thunder comes from the rod that was hit")
+assert_eq(roll and roll.spec.to_player, "visitor", "the thunder is for the visitor only")
+assert_eq(roll and roll.ephemeral, true, "the thunder is fire-and-forget")
+
+-- Walking off between the flash and its thunder: no thunder at the hub.
+sounds = {}
+core._gametime = 77
+step(0.05)
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+run_afters()
+assert_eq(count_sounds("lw_thunder"), 0, "thunder does not follow the visitor home")
+
+-- The rainbow storm's strikes stay silent.
+player:set_pos(storm.spawn)
+core._gametime = 85
+step(1.0)
+run_afters()
+sounds = {}
+core._gametime = 90
+step(0.05)
+run_afters()
+assert_eq(count_sounds("lw_thunder"), 0, "no thunder on the rainbow storm")
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+run_afters()
+
+-- The organ slot ships empty. A missing track is quiet, and so is an engine
+-- with no dynamic media at all (this stub has none, and the registry walk
+-- above already stood on the chapel).
+assert_true(chapel.organ ~= nil, "the chapel has an organ slot")
+assert_eq(lw_maps.organ_file({organ = {sound = "lw_maps_no_such_track"}}), nil,
+	"no file, no organ")
+
+-- With a track dropped in: pushed to the visitor on arrival, played when
+-- their client has it, faded when they leave, and not pushed twice.
+local organ_path = MODS .. "/lw_maps/organ/" .. chapel.organ.sound .. ".ogg"
+local existing = io.open(organ_path, "rb")
+local made = false
+if existing then
+	existing:close()
+else
+	local file = io.open(organ_path, "wb")
+	if file then
+		file:write("OggS")
+		file:close()
+		made = true
+	end
+end
+local media = {}
+core.dynamic_add_media = function(options, callback)
+	media[#media + 1] = {options = options, callback = callback}
+	return true
+end
+sounds = {}
+core._gametime = 64
+player:set_pos(chapel.spawn)
+step(1.0)
+assert_eq(#media, 1, "the organ track is pushed to a visitor on arrival")
+local push = media[1] and media[1].options or {}
+assert_eq(push.filepath, organ_path, "the track comes from lw_maps/organ/")
+assert_eq(push.to_player, "visitor", "only to the visitor on the chapel")
+assert_true(not push.ephemeral, "the same file can go to the next visitor too")
+assert_eq(push.client_cache, false, "a browser does not keep a second copy")
+assert_eq(count_sounds(chapel.organ.sound), 0, "the organ waits for the client")
+step(1.0)
+assert_eq(#media, 1, "one push per visitor, not one per tick")
+if media[1] then
+	media[1].callback("visitor")
+end
+assert_eq(count_sounds(chapel.organ.sound), 1, "the organ plays once the client has it")
+local organ = sounds[#sounds] or {spec = {}}
+assert_eq(organ.spec.loop, true, "the organ loops")
+assert_eq(organ.spec.to_player, "visitor", "the organ is for the visitor only")
+local loft = lw_maps.to_world(chapel, chapel.organ.at)
+assert_true(organ.spec.pos and organ.spec.pos.x == loft.x and organ.spec.pos.y == loft.y
+	and organ.spec.pos.z == loft.z, "the organ plays from the loft")
+step(1.0)
+assert_eq(count_sounds(chapel.organ.sound), 1, "staying does not start a second organ")
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+assert_eq(#faded, 1, "the organ fades when the visitor leaves")
+player:set_pos(chapel.spawn)
+step(1.0)
+assert_eq(#media, 1, "coming back does not push the track again")
+assert_eq(count_sounds(chapel.organ.sound), 2, "coming back starts the organ again")
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+run_afters()
+if made then
+	os.remove(organ_path)
+end
+core.dynamic_add_media = nil
+core.sound_play, core.sound_fade = saved_play, saved_fade
 
 --------------------------------------------------------------------------
 -- Node list, for the Python half

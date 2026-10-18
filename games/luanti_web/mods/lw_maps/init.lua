@@ -473,7 +473,12 @@ lw_maps.by_id = {}
 --
 -- `storm = {rods = {<map-local position>, ...}}` gives a map rain and
 -- lightning while someone is on it; each rod is a node the bolts land on top
--- of. See "Storms" below.
+-- of. Add `thunder = <sound>` and every strike is followed by that sound,
+-- played at the rod. See "Storms" below.
+--
+-- `organ = {at = <local>, sound = <name>}` loops an optional soundtrack from
+-- `at` for whoever is on the map, if its file has been dropped into
+-- lw_maps/organ/. It is never part of the join-time media. See "Organ".
 --
 -- `amps = {left = <local>, right = <local>, song = <name>}` plays a song out
 -- of the map's own amp cabs when someone walks onto it, and `lasers = {...}`
@@ -710,6 +715,47 @@ lw_maps.register({
 	},
 })
 
+lw_maps.register({
+	id = "halloween_storm",
+	title = "Thunder chapel",
+	blurb = "A roofless chapel with an organ loft, a graveyard and a " ..
+		"mausoleum on a stormy Halloween night: lightning strikes the " ..
+		"spire, the dead oak and the tomb, and thunder rolls after it.",
+	size = {x = 36, y = 20, z = 36},
+	origin = {x = -60, y = BASE, z = 77},
+	spawn = {x = -41, y = BASE + 4, z = 77},
+	-- Storm at night: darker than the lane's dusk, so a flash turns the whole
+	-- island white, and fogged close, so the spire is a silhouette from the
+	-- causeway until the lightning finds it.
+	day_night_ratio = 0.1,
+	sky = lw_maps.sky({
+		sky = "#1c1626", horizon = "#3a2a3a",
+		night_sky = "#0e0a16", night_horizon = "#241a26", indoors = "#140f1c",
+		sun_tint = "#a05a2a", moon_tint = "#4a5a6a",
+		fog = 64, fog_start = 0.3,
+	}),
+	-- The rainbow storm's rain and lightning, plus thunder. The rods are the
+	-- fence posts on the spire, the dead oak in the graveyard and the
+	-- mausoleum roof (STORM_CHAPEL_RODS in the generator), in that order.
+	storm = {
+		rods = {{x = 19, y = 19, z = 32}, {x = 5, y = 13, z = 26},
+			{x = 30, y = 11, z = 21}},
+		-- lw_thunder.1.ogg to .3.ogg in sounds/: a random group, so strikes
+		-- do not all sound alike. Remove this line for a silent storm.
+		thunder = "lw_thunder",
+	},
+	-- The soundtrack slot: a looping pipe-organ track out of the loft, over
+	-- the console in front of the pipes. Ships empty: drop a mono Ogg Vorbis
+	-- at lw_maps/organ/lw_maps_halloween_storm_organ.ogg and it plays; see
+	-- organ/README.md. Nothing else in the pack knows the file exists.
+	organ = {
+		at = {x = 19, y = 12, z = 28},
+		sound = "lw_maps_halloween_storm_organ",
+		gain = 0.6,
+		max_hear_distance = 48,
+	},
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------
@@ -757,6 +803,12 @@ for _, gap in ipairs(lw_maps.STORM_GAPS) do
 end
 -- How long the sky stays white, and the bolt with it.
 local FLASH_TIME = 0.12
+-- Thunder lags the flash the way it does outdoors, by distance: this long at
+-- the rod, a little more for every node between the visitor and the strike,
+-- and never more than the cap, so it still belongs to its own flash.
+local THUNDER_DELAY = 0.25
+local THUNDER_LAG = 0.02
+local THUNDER_DELAY_MAX = 1.5
 -- The bolt: this many two-node particles stacked up from the rod's top.
 local BOLT_SEGMENTS = 9
 
@@ -844,11 +896,40 @@ local function bolt(name, top, k)
 	end
 end
 
+function lw_maps.thunder_delay(distance)
+	return math.min(THUNDER_DELAY + distance * THUNDER_LAG, THUNDER_DELAY_MAX)
+end
+
+-- One short, mono, positional sample at the strike, for the one player who
+-- saw it. It is ephemeral (a couple of seconds, never stopped), so leaving
+-- needs no cleanup beyond the check that they are still on the map when it is
+-- due. Sound is optional, as everywhere in the pack: no sound_play, or a
+-- missing file, is a silent storm.
+local function thunder(player, map, top)
+	if type(core.sound_play) ~= "function" then
+		return
+	end
+	local name = player:get_player_name()
+	local delay = lw_maps.thunder_delay(vector.distance(player:get_pos(), top))
+	core.after(delay, function()
+		if current[name] ~= map.id or type(core.sound_play) ~= "function" then
+			return
+		end
+		pcall(core.sound_play, map.storm.thunder, {
+			pos = top, to_player = name, gain = 0.7, max_hear_distance = 80,
+		}, true)
+	end)
+end
+
 local function flash(player, map, k)
 	local name = player:get_player_name()
 	local rods = map.storm.rods
 	local rod = rods[k % #rods + 1]
-	bolt(name, vector.offset(lw_maps.to_world(map, rod), 0, 0.5, 0), k)
+	local top = vector.offset(lw_maps.to_world(map, rod), 0, 0.5, 0)
+	bolt(name, top, k)
+	if map.storm.thunder then
+		thunder(player, map, top)
+	end
 	-- Straight at the player, not through apply(): apply() does nothing when
 	-- the map has not changed, and its reset would drop the storm's own sky.
 	player:set_sky(FLASH_SKY)
@@ -1117,6 +1198,121 @@ local function update_shows(visitors)
 	end
 end
 
+--------------------------------------------------------------------------
+-- Organ
+--------------------------------------------------------------------------
+
+-- A map with `organ` loops one optional track from one place while a visitor
+-- is on it: the thunder chapel's slot for a pipe-organ soundtrack. The pack
+-- ships the slot, not the music.
+--
+-- The file lives in lw_maps/organ/, not lw_maps/sounds/. The engine only
+-- collects media from a mod's textures, sounds, models and media folders, so
+-- a track in organ/ is not in the media every client downloads and checksums
+-- when it joins. Instead it is pushed to one visitor with
+-- core.dynamic_add_media the first time they walk onto the map, and played
+-- once their client says it has it. Nobody who never visits pays for it.
+--
+-- Per player, like the storm: each visitor gets their own looping handle,
+-- started on arrival and faded out when they leave. No file, no sound_play,
+-- or no dynamic_add_media, and the chapel is simply quiet.
+local ORGAN_DIR = core.get_modpath("lw_maps") .. "/organ/"
+
+local organ_files = {}   -- sound -> path, or false when it is not there
+local organ_sent = {}    -- player name -> {[sound] = "pending" | true}
+local organ_playing = {} -- player name -> {map = id, handle = sound handle}
+
+-- The track's path, or nil. Looked for once: a file dropped in later is
+-- picked up on the next server start, the same as any other media.
+function lw_maps.organ_file(map)
+	local sound = map.organ.sound
+	if organ_files[sound] == nil then
+		local path = ORGAN_DIR .. sound .. ".ogg"
+		local file = io.open(path, "rb")
+		if file then
+			file:close()
+		end
+		organ_files[sound] = file and path or false
+	end
+	return organ_files[sound] or nil
+end
+
+local function play_organ(name, map)
+	if current[name] ~= map.id or organ_playing[name]
+			or type(core.sound_play) ~= "function" then
+		return
+	end
+	local organ = map.organ
+	local ok, handle = pcall(core.sound_play, organ.sound, {
+		pos = lw_maps.to_world(map, organ.at),
+		to_player = name,
+		gain = organ.gain or 0.6,
+		max_hear_distance = organ.max_hear_distance or 48,
+		loop = true,
+	})
+	if ok and handle then
+		organ_playing[name] = {map = map.id, handle = handle}
+	end
+end
+
+local function start_organ(player, map)
+	if type(core.dynamic_add_media) ~= "function" then
+		return
+	end
+	local name, sound = player:get_player_name(), map.organ.sound
+	local sent = organ_sent[name] or {}
+	organ_sent[name] = sent
+	if sent[sound] == true then
+		play_organ(name, map)
+		return
+	end
+	if sent[sound] == "pending" then
+		return
+	end
+	local path = lw_maps.organ_file(map)
+	if not path then
+		return
+	end
+	sent[sound] = "pending"
+	-- Not ephemeral, so the same file can go to every visitor in turn; not
+	-- cached, so a browser does not write a second copy of it to IndexedDB.
+	local ok, accepted = pcall(core.dynamic_add_media, {
+		filepath = path, to_player = name, client_cache = false,
+	}, function(who)
+		if organ_sent[who] then
+			organ_sent[who][sound] = true
+			play_organ(who, map)
+		end
+	end)
+	if not (ok and accepted) then
+		sent[sound] = nil
+	end
+end
+
+local function stop_organ(name)
+	local playing = organ_playing[name]
+	if not playing then
+		return
+	end
+	organ_playing[name] = nil
+	if type(core.sound_fade) == "function" then
+		pcall(core.sound_fade, playing.handle, 1.5, 0)
+	elseif type(core.sound_stop) == "function" then
+		pcall(core.sound_stop, playing.handle)
+	end
+end
+
+local function update_organ(player, map)
+	local name = player:get_player_name()
+	local playing = organ_playing[name]
+	if playing and not (map and map.id == playing.map) then
+		stop_organ(name)
+	end
+	if map and map.organ and not organ_playing[name] then
+		start_organ(player, map)
+	end
+end
+
 local ATMOSPHERE_INTERVAL = 0.5
 local elapsed = 0
 
@@ -1134,6 +1330,7 @@ core.register_globalstep(function(dtime)
 		local map = lw_maps.at(player:get_pos())
 		apply(player, map)
 		update_rain(player, map)
+		update_organ(player, map)
 		if map then
 			visitors[map.id] = (visitors[map.id] or 0) + 1
 			-- Arriving, by causeway, by /maps or by joining there, is what
@@ -1155,6 +1352,8 @@ core.register_on_leaveplayer(function(player)
 		rain[name] = nil
 	end
 	last_flash[name] = nil
+	stop_organ(name)
+	organ_sent[name] = nil
 end)
 
 --------------------------------------------------------------------------

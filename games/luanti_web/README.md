@@ -16,12 +16,12 @@ QA sandbox and this game is not a replacement for it.
 ## The tour
 
 ```
-                                                                 Around arena
-                                                                (north-northeast)
- smoke caldera         [ theater ]                 z = 34..62    |    crystal bazaar
-  (northwest)               |                                    |     (northeast)
-      |    [ library ]--[ courtyard ]--[ gallery ]   z = 4..32   |          |
-      '----------------.    |    .-------------------------------'          |
+ thunder chapel                                                  Around arena
+ (north-northwest)                                              (north-northeast)
+  | smoke caldera      [ theater ]                 z = 34..62    |    crystal bazaar
+  |  (northwest)            |                                    |     (northeast)
+  |   |    [ library ]--[ courtyard ]--[ gallery ]   z = 4..32   |          |
+  '---+----------------.    |    .-------------------------------'          |
                        |    |    |  .---------------------------------------'
  Halloween --------------[ plaza ]-------------- fruit garden
    (west)            |       |     |                (east)
@@ -32,10 +32,10 @@ QA sandbox and this game is not a replacement for it.
   (southwest)                                     (southeast)
 ```
 
-The plaza is the hub. The showcase tour runs north from it; eight causeways
+The plaza is the hub. The showcase tour runs north from it; nine causeways
 leave it for the [themed maps](docs/maps.md) — straight out west, south and
-east, and turning in the open water for the four diagonals and the arena, so
-none of them crosses the tour.
+east, and turning in the open water for the four diagonals, the arena and the
+chapel, so none of them crosses the tour.
 
 1. **Spawn plaza** — fountain, colonnade, and a gate whose banner spells
    `LUANTI WEB` out of wool. Walk north through the arch.
@@ -54,7 +54,9 @@ none of them crosses the tour.
    night with a dome you walk onto, a volcano you climb, look into and
    leave through its far side, a walk over rainbows in a thunderstorm, and
    Lace Waterfall's arena, where "Around" starts as you walk in, lights race
-   round the truss and lasers sweep the floor. Walk a causeway or use
+   round the truss and lasers sweep the floor, and a ruined chapel under a
+   Halloween thunderstorm, where lightning strikes the spire and thunder rolls
+   after it. Walk a causeway or use
    `/maps`. Full
    footprints, spawns and intended time of day are in
    [`docs/maps.md`](docs/maps.md).
@@ -68,7 +70,7 @@ none of them crosses the tour.
 | `lw_dance` | the player character mesh, dance mode, the six-move dance pad, the stage hint, the routine director that dances NPCs to the same catalog, and the Lace Waterfall band and crowd rigs |
 | `lw_amps` | stage amp cabs that play a song as a left/right pair of positional mono sources, `/amp`, and the song events the director dances to (see `docs/amps.md`) |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
-| `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere, `/maps` |
+| `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere and storms (rain, lightning, thunder), the optional organ slot, `/maps` |
 | `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
 | `lw_world` | the authored world and its schematics, stamped onto a singlenode mapgen; `/lw_schem` authoring tools |
 
