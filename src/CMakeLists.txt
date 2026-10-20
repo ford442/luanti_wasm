@@ -837,7 +837,14 @@ if(BUILD_CLIENT)
 			-sOFFSCREEN_FRAMEBUFFER=1
 			-sALLOW_MEMORY_GROWTH=1
 			-sINITIAL_MEMORY=268435456  # 256 MB
-			-sMAXIMUM_MEMORY=1073741824 # 1 GB
+			# Just over 2 GiB on purpose: with the default minimum Firefox,
+			# emcc's link.py turns WEBGL_USE_GARBAGE_FREE_APIS off past 2^31
+			# (it is an internal setting; -sWEBGL_USE_GARBAGE_FREE_APIS=0 is
+			# rejected). Those APIs hand WebGL whole-heap views, which on a
+			# growable shared heap throw "ArrayBuffer value must not be
+			# resizable" (see client/web/webgl_compat.js, kept as a backstop
+			# for the large-count paths that still pass heap subarrays).
+			-sMAXIMUM_MEMORY=2147549184 # 2 GiB + 64 KiB
 			-pthread
 			-sSHARED_MEMORY=1
 			-sFETCH=1
@@ -853,6 +860,8 @@ if(BUILD_CLIENT)
 			-lidbfs.js
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/webgl_compat.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/audio_unlock.js"
 			"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/client/web/shell.html"
 			# Asset preloading — paths are relative to CMAKE_SOURCE_DIR at build
 			# time. Everything listed here lands in luanti.data, which every
@@ -876,6 +885,8 @@ if(BUILD_CLIENT)
 		set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
 			${CMAKE_SOURCE_DIR}/client/web/network.js
 			${CMAKE_SOURCE_DIR}/client/web/persistence.js
+			${CMAKE_SOURCE_DIR}/client/web/webgl_compat.js
+			${CMAKE_SOURCE_DIR}/client/web/audio_unlock.js
 			${CMAKE_SOURCE_DIR}/client/web/shell.html
 			${CMAKE_SOURCE_DIR}/client/web/launcher.js
 			${CMAKE_SOURCE_DIR}/client/web/launcher.css

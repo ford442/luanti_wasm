@@ -192,6 +192,24 @@ void OpenALSoundManager::playSoundGeneric(sound_handle_t id, const std::string &
 	std::string sound_name = use_local_fallback ?
 			getOrLoadLoadedSoundNameFromGroup(group_name) :
 			getLoadedSoundNameFromGroup(group_name);
+#ifdef __EMSCRIPTEN__
+	{
+		// The first request, and the first few misses, are visible in the
+		// browser console: a silent session is usually either a locked
+		// AudioContext or a game that has no such sound at all.
+		static int requests = 0;
+		static int misses = 0;
+		if (requests++ == 0)
+			actionstream << "Audio: first sound request reached OpenAL: \""
+				<< group_name << "\" (" << (sound_name.empty() ? "not found" : "found")
+				<< "), AudioContext " << getWebAudioState() << std::endl;
+		else if (sound_name.empty() && misses < 8)
+			actionstream << "Audio: no sound named \"" << group_name
+				<< "\" in this game's media" << std::endl;
+		if (sound_name.empty())
+			misses++;
+	}
+#endif
 	if (sound_name.empty()) {
 		infostream << "OpenALSoundManager: \"" << group_name << "\" not found."
 				<< std::endl;
