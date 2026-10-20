@@ -45,6 +45,13 @@ bool SoundManagerSingleton::init()
 	infostream << "Audio: Global Initialized: OpenAL " << alGetString(AL_VERSION)
 		<< ", using " << alcGetString(m_device.get(), ALC_DEVICE_SPECIFIER)
 		<< std::endl;
+#ifdef __EMSCRIPTEN__
+	// infostream is not shown in the browser console; a silent web session
+	// needs this line to tell "no device" from "device, but locked".
+	actionstream << "Audio: OpenAL device and context created ("
+		<< alcGetString(m_device.get(), ALC_DEVICE_SPECIFIER)
+		<< "), AudioContext " << getWebAudioState() << std::endl;
+#endif
 
 	return true;
 }

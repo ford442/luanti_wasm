@@ -739,6 +739,11 @@ bool Game::initSound()
 		infostream << "Using dummy audio." << std::endl;
 		sound_manager = std::make_unique<DummySoundManager>();
 	}
+#ifdef __EMSCRIPTEN__
+	actionstream << "Audio: game sound manager is "
+		<< (dynamic_cast<DummySoundManager *>(sound_manager.get()) ? "dummy (silent)" : "OpenAL")
+		<< std::endl;
+#endif
 
 	soundmaker = std::make_unique<SoundMaker>(sound_manager.get(), nodedef_manager);
 	soundmaker->registerReceiver(eventmgr);
