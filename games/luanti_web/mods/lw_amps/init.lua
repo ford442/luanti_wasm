@@ -26,6 +26,7 @@
 lw_amps = {}
 
 local storage = core.get_mod_storage()
+local MODPATH = core.get_modpath("lw_amps")
 
 --------------------------------------------------------------------------
 -- Tunables
@@ -63,9 +64,29 @@ lw_amps.songs = {}
 lw_amps.song_order = {}
 lw_amps.default_song = nil
 
+local function file_exists(path)
+	local file = io.open(path, "rb")
+	if file then
+		file:close()
+		return true
+	end
+	return false
+end
+
 -- `length` is the duration of the files in seconds, measured from the files
 -- themselves (ffprobe) — it is what `start_time` wraps on, so a guess would
 -- drift a late arriver out of time by the error on every loop.
+--
+-- Two optional fields keep a song out of the media every client downloads
+-- at join (see "Songs that are not join-time media" below):
+--
+-- * `media_dir`: the pair lives in lw_amps/<media_dir>/ instead of sounds/,
+--   and is pushed to each listener with core.dynamic_add_media the first time
+--   they come into range. A song whose two files are not both there is not
+--   registered, so a stage waiting for its songs stays quiet instead of
+--   playing silence.
+-- * `playlist`: the stage it belongs to (`lw_amps.playlist`), so a map can say
+--   "play my songs" without naming files that may not have been added yet.
 function lw_amps.register_song(name, def)
 	assert(type(name) == "string" and name:match("^[a-z0-9_]+$"),
 			"lw_amps.register_song: name has to be lowercase letters, digits and _")
@@ -78,6 +99,18 @@ function lw_amps.register_song(name, def)
 		left = "lw_amps_" .. name .. "_l",
 		right = "lw_amps_" .. name .. "_r",
 	}
+	if def.media_dir then
+		local dir = MODPATH .. DIR_DELIM .. def.media_dir .. DIR_DELIM
+		def.files = {
+			left = dir .. def.sounds.left .. ".ogg",
+			right = dir .. def.sounds.right .. ".ogg",
+		}
+		if not (file_exists(def.files.left) and file_exists(def.files.right)) then
+			core.log("warning", ("lw_amps: %s is registered but %s or %s is " ..
+					"missing; leaving it out"):format(name, def.files.left, def.files.right))
+			return nil
+		end
+	end
 	if not lw_amps.songs[name] then
 		lw_amps.song_order[#lw_amps.song_order + 1] = name
 	end
@@ -88,6 +121,18 @@ end
 
 function lw_amps.get_song(name)
 	return name and lw_amps.songs[name] or nil
+end
+
+-- The songs registered with `playlist = name`, in registration order. Empty,
+-- not nil, when none are: a stage whose songs have not been added yet.
+function lw_amps.playlist(name)
+	local list = {}
+	for _, song in ipairs(lw_amps.song_order) do
+		if name and lw_amps.songs[song].playlist == name then
+			list[#list + 1] = song
+		end
+	end
+	return list
 end
 
 -- Lace Waterfall, "Around": the happy-hard mix and its six alternate takes.
@@ -108,6 +153,75 @@ for _, take in ipairs(AROUND) do
 		length = take[2],
 		bpm = 175,
 	})
+end
+
+-- The cabaret club's songs (lw_maps' `cabaret` map). This is the slot: the
+-- folder ships with no audio and a songs.lua whose register calls are
+-- commented out. See cabaret/README.md for where the Ogg pairs go and the one
+-- line each song needs.
+do
+	local songs = MODPATH .. DIR_DELIM .. "cabaret" .. DIR_DELIM .. "songs.lua"
+	if file_exists(songs) then
+		dofile(songs)
+	end
+end
+
+--------------------------------------------------------------------------
+-- Stages
+--------------------------------------------------------------------------
+
+-- A stage is a pair of cabs that knows what it plays: `song`, or the first
+-- song in its `playlist`. Maps register theirs (lw_maps does it for every map
+-- with `amps`), and punching one of those cabs plays that stage's song from
+-- that stage, wherever the amps were pointed before. Cabs nobody registered
+-- behave as they always have: /amp left, /amp right, and the default song.
+lw_amps.stages = {}
+
+local function same_pos(a, b)
+	return a ~= nil and b ~= nil and a.x == b.x and a.y == b.y and a.z == b.z
+end
+
+function lw_amps.register_stage(def)
+	assert(def.left and def.right, "lw_amps.register_stage needs left and right")
+	def = table.copy(def)
+	def.left, def.right = vector.copy(def.left), vector.copy(def.right)
+	lw_amps.stages[#lw_amps.stages + 1] = def
+	return def
+end
+
+-- The stage whose cab is at `cab` (the node, not the sound source above it).
+function lw_amps.stage_at_cab(cab)
+	local source = vector.new(cab.x, cab.y + 1, cab.z)
+	for _, stage in ipairs(lw_amps.stages) do
+		if same_pos(stage.left, source) or same_pos(stage.right, source) then
+			return stage
+		end
+	end
+	return nil
+end
+
+-- The stage a playlist song belongs to. Only playlist songs have one: a song
+-- like "Around" can be played from any pair of cabs a visitor sets up.
+function lw_amps.stage_for_song(name)
+	local def = lw_amps.get_song(name)
+	if not (def and def.playlist) then
+		return nil
+	end
+	for _, stage in ipairs(lw_amps.stages) do
+		if stage.playlist == def.playlist then
+			return stage
+		end
+	end
+	return nil
+end
+
+-- What a stage (or a map's `amps` table) plays: its `song` if that is
+-- registered, else the first song in its playlist, else nil.
+function lw_amps.stage_song(stage)
+	if stage.song and lw_amps.get_song(stage.song) then
+		return stage.song
+	end
+	return lw_amps.playlist(stage.playlist)[1]
 end
 
 --------------------------------------------------------------------------
@@ -236,6 +350,52 @@ local function nearest_cab(state, pos)
 	return math.min(vector.distance(pos, state.left), vector.distance(pos, state.right))
 end
 
+--------------------------------------------------------------------------
+-- Songs that are not join-time media
+--------------------------------------------------------------------------
+
+-- A song with `media_dir` is not in sounds/, so the engine does not put it in
+-- the media list every client downloads and hashes before the world loads.
+-- Instead each listener is sent the pair, once, when they first come into
+-- range of it, with core.dynamic_add_media. Until both files have arrived the
+-- listener is simply not started; the sweep below tries again every second
+-- and starts them in time with the song once their client has the pair.
+-- Nobody who never goes near the stage downloads its songs.
+local pushed = {}  -- player name -> {[song] = "pending" | true}
+
+local function media_ready(def, name)
+	if not def.files then
+		return true
+	end
+	local mine = pushed[name] or {}
+	pushed[name] = mine
+	if mine[def.name] == true then
+		return true
+	end
+	if mine[def.name] == "pending" or type(core.dynamic_add_media) ~= "function" then
+		return false
+	end
+	mine[def.name] = "pending"
+	local waiting = 2
+	for _, side in ipairs({"left", "right"}) do
+		-- Not ephemeral, so the same file can go to every listener in turn;
+		-- not cached, so a browser does not keep a second copy in IndexedDB.
+		local ok, accepted = pcall(core.dynamic_add_media, {
+			filepath = def.files[side], to_player = name, client_cache = false,
+		}, function(who)
+			waiting = waiting - 1
+			if waiting == 0 and pushed[who] then
+				pushed[who][def.name] = true
+			end
+		end)
+		if not (ok and accepted) then
+			mine[def.name] = nil
+			return false
+		end
+	end
+	return false
+end
+
 local function stop_for(state, name)
 	local handles = state.listeners[name]
 	state.listeners[name] = nil
@@ -253,6 +413,9 @@ end
 -- run either way.
 local function start_for(state, name)
 	if state.listeners[name] or type(core.sound_play) ~= "function" then
+		return false
+	end
+	if not media_ready(state.def, name) then
 		return false
 	end
 	local offset = state.elapsed % state.def.length
@@ -382,9 +545,12 @@ core.register_globalstep(function(dtime)
 end)
 
 core.register_on_leaveplayer(function(player)
+	local name = player:get_player_name()
+	-- Dynamic media goes with the client, so a rejoin is sent it again.
+	pushed[name] = nil
 	if playing then
 		-- The client's sounds went with it; only the handles are left to drop.
-		playing.listeners[player:get_player_name()] = nil
+		playing.listeners[name] = nil
 	end
 end)
 
@@ -397,6 +563,25 @@ end)
 --------------------------------------------------------------------------
 -- The cab node
 --------------------------------------------------------------------------
+
+-- Punching a cab: stop whatever is playing, or play. A registered stage's cab
+-- plays that stage's song from that stage; any other cab plays the default
+-- song from wherever /amp left and /amp right point.
+local function punch_cab(pos)
+	if playing then
+		return lw_amps.stop()
+	end
+	local stage = lw_amps.stage_at_cab(pos)
+	if not stage then
+		return lw_amps.play()
+	end
+	local song = lw_amps.stage_song(stage)
+	if not song then
+		return false, stage.empty or "This stage has no songs yet."
+	end
+	lw_amps.set_amps(stage.left, stage.right)
+	return lw_amps.play(song)
+end
 
 core.register_node("lw_amps:cab", {
 	description = "Amp Cabinet (punch to play / stop the song)",
@@ -417,14 +602,14 @@ core.register_node("lw_amps:cab", {
 		if not puncher or not puncher:is_player() then
 			return
 		end
-		local _, message = lw_amps.toggle()
+		local _, message = punch_cab(pos)
 		core.chat_send_player(puncher:get_player_name(), message)
 	end,
 	on_rightclick = function(pos, node, clicker)
 		if not clicker or not clicker:is_player() then
 			return
 		end
-		local _, message = lw_amps.toggle()
+		local _, message = punch_cab(pos)
 		core.chat_send_player(clicker:get_player_name(), message)
 	end,
 })

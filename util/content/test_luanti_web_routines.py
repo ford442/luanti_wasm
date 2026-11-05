@@ -69,6 +69,9 @@ def node_at(schem, x: int, y: int, z: int) -> str:
 # These mirror maps.lua; the point of the check is that regenerating a map
 # cannot quietly move the floor out from under a dance.
 MAP_STAGES = {
+	"map_cabaret.mts": [
+		(11, 4, 4, "lw_nodes:planks"),     # the director node, by the stage stair
+	],
 	"map_halloween.mts": [
 		(5, 6, 8, "lw_nodes:planks"),      # mark_lead, porch deck
 		(4, 6, 6, "lw_nodes:planks"),      # mark_1

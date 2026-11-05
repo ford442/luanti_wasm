@@ -29,8 +29,10 @@ Layout, in the atlas the hub plaza sits in the middle of::
                          |
     [ lighthouse ]  [ snow mountain ]   [ rainbow storm ]
 
-and the Around arena north-east of the hub, beyond the gallery. The diagonal
-four and the arena are reached by causeways that turn in the open water;
+and the Around arena north-east of the hub, beyond the gallery, with the
+thunder chapel mirroring it north-west, beyond the library. The diagonal four,
+the arena and the chapel are reached by causeways that turn in the open water,
+and the cabaret club, west of the lighthouse, by one that turns twice;
 lw_world/maps.lua has the legs, and games/luanti_web/docs/maps.md the recipe
 for adding a map.
 
@@ -1914,6 +1916,365 @@ def build_arena() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 9. Thunder chapel (halloween_storm)
+# --------------------------------------------------------------------------
+
+# The Halloween lane's props under the rainbow storm's sky: a roofless chapel
+# with an organ loft, a graveyard, a mausoleum and a pumpkin patch, on a night
+# when lightning keeps finding the three tallest things there. The storm is
+# lw_maps' (rain, flashes, thunder); the schematic only carries the rods.
+#
+# 36 x 20 x 36, the lane's own box: 25,920 cells, so it keeps 1 MiB like the
+# lane does (see Budget in docs/maps.md).
+STORM_CHAPEL_SIZE = (36, 20, 36)
+# The causeway comes up from the south, onto the middle of the path.
+STORM_CHAPEL_SPAWN = (19, FLOOR, 0)
+
+# The path from the causeway to the chapel door, and the chapel itself: a
+# brick shell with no roof, a loft across its north end and a tower behind.
+CHAPEL_PATH_X = (18, 20)
+CHAPEL = dict(x0=13, x1=25, z0=14, z1=30)
+CHAPEL_WALL_TOP = FLOOR + 8         # a ruin: some columns stop short of this
+CHAPEL_LOFT = FLOOR + 5             # the loft's floor; you stand one above it
+CHAPEL_LOFT_Z0 = 23
+CHAPEL_STAIR_X = (14, 15)           # up the west wall, climbing north
+CHAPEL_STAIR_Z = CHAPEL_LOFT_Z0 - (CHAPEL_LOFT - FLOOR) - 1
+BELL_TOWER = dict(x0=17, x1=21, z0=30, z1=34)
+BELL_TOWER_TOP = FLOOR + 12              # the tower's cap; the spire stands on it
+# The organ's pipes on the loft, against the north wall. lw_maps plays the
+# optional pipe-organ track from just in front of them (the `organ` row in the
+# registry); the pipes are the place, not the sound.
+ORGAN_PIPES = (16, 22)
+GRAVEYARD = dict(x0=2, x1=11, z0=6, z1=30)
+MAUSOLEUM = dict(x0=27, x1=33, z0=17, z1=25)
+MAUSOLEUM_ROOF = FLOOR + 5
+STORM_PATCH = dict(x0=24, x1=33, z0=2, z1=12)
+# Three lightning rods, each a fence post on the tallest thing in its corner
+# of the map: the chapel's spire, the dead oak in the graveyard and the
+# mausoleum's roof. (x, y, z) of the post itself; the bolt lands on its top.
+STORM_CHAPEL_RODS = (
+	(19, BELL_TOWER_TOP + 3, 32),
+	(5, FLOOR + 9, 26),
+	(30, MAUSOLEUM_ROOF + 2, 21),
+)
+
+
+def build_chapel(build: Build) -> None:
+	c = CHAPEL
+	x0, x1, z0, z1 = c["x0"], c["x1"], c["z0"], c["z1"]
+	build.box(x0, SURFACE, z0, x1, SURFACE, z1, POLISHED)
+	build.walls(x0, FLOOR, z0, x1, CHAPEL_WALL_TOP, z1, BRICK)
+	# The ruin: a fixed pattern of broken wall tops, so every rebuild of the
+	# schematic breaks the same stones. Only the front and the east side of
+	# the nave: the west wall stands whole beside the loft stair, and the
+	# loft's own walls do too, so nobody walks off the side of either.
+	broken = (0, 2, 0, 0, 3, 1, 0, 4, 0, 1, 0, 0, 2)
+	for x in range(x0, x1 + 1):
+		drop = broken[(x - x0) % len(broken)]
+		build.clear(x, CHAPEL_WALL_TOP - drop + 1, z0, x, CHAPEL_WALL_TOP, z0)
+	for z in range(z0 + 1, CHAPEL_LOFT_Z0):
+		drop = broken[(z - z0) % len(broken)]
+		build.clear(x1, CHAPEL_WALL_TOP - drop + 1, z, x1, CHAPEL_WALL_TOP, z)
+	# Tall open windows down both sides of the nave, a jack-o'-lantern on
+	# the sill of each one.
+	for z in range(z0 + 3, CHAPEL_LOFT_Z0, 4):
+		for x in (x0, x1):
+			build.clear(x, FLOOR + 3, z, x, FLOOR + 4, z)
+			build.set(x, FLOOR + 2, z, JACK)
+	# The door, under a pointed head of dead wood, and lanterns either side.
+	px0, px1 = CHAPEL_PATH_X
+	build.clear(px0, FLOOR, z0, px1, FLOOR + 3, z0)
+	build.box(px0 - 1, FLOOR + 4, z0, px1 + 1, FLOOR + 4, z0, DEAD_WOOD)
+	build.set(px0 + 1, FLOOR + 5, z0, DEAD_WOOD)
+	for x in (px0 - 2, px1 + 2):
+		lantern_post(build, x, z0 - 1, flicker=True)
+
+	# Pews either side of the aisle, facing the loft (backs to the south).
+	for z in range(z0 + 3, CHAPEL_LOFT_Z0 - 1, 2):
+		for x in list(range(CHAPEL_STAIR_X[1] + 1, px0)) + list(range(px1 + 1, x1)):
+			build.set(x, FLOOR, z, SEAT, SOUTH)
+	build.set(x1 - 2, FLOOR + 3, z0 + 6, COBWEB)
+	build.set(x0 + 4, FLOOR + 3, z0 + 9, COBWEB)
+
+	# The loft: a plank floor across the north end, railed along its front
+	# except where the stair comes up, reached by a stair up the west wall.
+	build.box(x0 + 1, CHAPEL_LOFT, CHAPEL_LOFT_Z0, x1 - 1, CHAPEL_LOFT, z1 - 1, PLANKS)
+	for x in range(CHAPEL_STAIR_X[1] + 1, x1):
+		build.set(x, CHAPEL_LOFT + 1, CHAPEL_LOFT_Z0, FENCE)
+	stair_run(build, CHAPEL_STAIR_X[0], CHAPEL_STAIR_X[1], CHAPEL_STAIR_Z, 1,
+		FLOOR, CHAPEL_LOFT - FLOOR + 1, PLANK_STAIR, headroom=3)
+	# Under the loft: an altar of bone-white stone, and a lamp nobody sees.
+	build.box(px0, FLOOR, z1 - 2, px1, FLOOR, z1 - 2, BONE)
+	build.set(px0 + 1, FLOOR + 1, z1 - 2, JACK)
+	build.set(px0 + 1, CHAPEL_LOFT - 1, z1 - 4, HIDDEN_LIGHT)
+
+	# The organ: a rank of pipes against the north wall, tallest in the
+	# middle, gold-capped, with a console in front of them.
+	ox0, ox1 = ORGAN_PIPES
+	mid = (ox0 + ox1) // 2
+	for x in range(ox0, ox1 + 1):
+		height = max(2, 5 - abs(x - mid))
+		top = CHAPEL_LOFT + height
+		build.box(x, CHAPEL_LOFT + 1, z1 - 1, x, top, z1 - 1, COLUMN)
+		build.set(x, top + 1, z1 - 1, GOLD)
+	build.set(mid, CHAPEL_LOFT + 1, z1 - 3, PEDESTAL)
+	build.set(mid - 1, CHAPEL_LOFT + 1, z1 - 3, JACK)
+	build.set(mid + 1, CHAPEL_LOFT + 1, z1 - 3, JACK)
+	build.set(mid - 1, CHAPEL_LOFT + 2, z1 - 3, FLICKER)
+
+	# Rafters: what is left of the roof, black beams across the nave.
+	for z in range(z0 + 2, z1, 4):
+		build.box(x0, CHAPEL_WALL_TOP, z, x1, CHAPEL_WALL_TOP, z, BEAM)
+
+
+def build_storm_tower(build: Build) -> None:
+	t = BELL_TOWER
+	x0, x1, z0, z1 = t["x0"], t["x1"], t["z0"], t["z1"]
+	build.box(x0, SURFACE, z0, x1, SURFACE, z1, BRICK)
+	build.walls(x0, FLOOR, z0, x1, BELL_TOWER_TOP, z1, BRICK)
+	build.box(x0, BELL_TOWER_TOP, z0, x1, BELL_TOWER_TOP, z1, BRICK)
+	# The belfry: an arch through every face, and a bell in the middle.
+	cx, cz = (x0 + x1) // 2, (z0 + z1) // 2
+	for y in (BELL_TOWER_TOP - 3, BELL_TOWER_TOP - 2):
+		build.set(cx, y, z0, AIR)
+		build.set(cx, y, z1, AIR)
+		build.set(x0, y, cz, AIR)
+		build.set(x1, y, cz, AIR)
+	build.set(cx, BELL_TOWER_TOP - 1, cz, BEAM)
+	build.set(cx, BELL_TOWER_TOP - 2, cz, GOLD)
+	# The spire, and the rod on top of it.
+	build.box(x0 + 1, BELL_TOWER_TOP + 1, z0 + 1, x1 - 1, BELL_TOWER_TOP + 1, z1 - 1, wool("black"))
+	build.set(cx, BELL_TOWER_TOP + 2, cz, wool("black"))
+	rx, ry, rz = STORM_CHAPEL_RODS[0]
+	build.set(rx, ry, rz, FENCE)
+
+
+def build_storm_graveyard(build: Build) -> None:
+	g = GRAVEYARD
+	x0, x1, z0, z1 = g["x0"], g["x1"], g["z0"], g["z1"]
+	build.box(x0, SURFACE, z0, x1, SURFACE, z1, DIRT)
+	for x in range(x0, x1 + 1, 2):
+		build.set(x, FLOOR, z0, FENCE)
+		build.set(x, FLOOR, z1, FENCE)
+	for z in range(z0, z1 + 1, 2):
+		build.set(x0, FLOOR, z, FENCE)
+		build.set(x1, FLOOR, z, FENCE)
+	# The gate faces the path, with a paved spur out to it, between the
+	# lantern posts that line the path.
+	build.clear(x1, FLOOR, 9, x1, FLOOR, 11)
+	build.box(x1, SURFACE, 9, CHAPEL_PATH_X[0] - 1, SURFACE, 11, PAVING)
+	build.set(x1, FLOOR + 1, 8, JACK)
+	build.set(x1, FLOOR + 1, 12, JACK)
+	build.set(x1, FLOOR + 2, 12, FLICKER)
+	for row, z in enumerate(range(z0 + 3, z1 - 1, 3)):
+		for column, x in enumerate(range(x0 + 2, x1 - 1, 3)):
+			gravestone(build, x, z, tall=(row + column) % 3 == 1)
+	# The dead oak in the far corner carries the second rod.
+	rx, ry, rz = STORM_CHAPEL_RODS[1]
+	dead_tree(build, rx, rz, ry - FLOOR, ((1, 0, 5), (0, -1, 6), (-1, 0, 4)))
+	build.set(rx, ry, rz, FENCE)
+	dead_tree(build, x1 - 2, z0 + 2, 4, ((-1, 0, 3),))
+	build.set(8, FLOOR, z1 - 3, UPLIGHT)
+
+
+def build_mausoleum(build: Build) -> None:
+	m = MAUSOLEUM
+	x0, x1, z0, z1 = m["x0"], m["x1"], m["z0"], m["z1"]
+	build.box(x0, SURFACE, z0, x1, SURFACE, z1, POLISHED)
+	build.walls(x0, FLOOR, z0, x1, MAUSOLEUM_ROOF - 1, z1, BONE)
+	build.box(x0, MAUSOLEUM_ROOF, z0, x1, MAUSOLEUM_ROOF, z1, BRICK)
+	for x, z in ((x0, z0), (x0, z1), (x1, z0), (x1, z1)):
+		build.box(x, FLOOR, z, x, MAUSOLEUM_ROOF, z, COLUMN)
+	# The door faces the chapel, between two lanterns.
+	cz = (z0 + z1) // 2
+	build.clear(x0, FLOOR, cz - 1, x0, FLOOR + 2, cz + 1)
+	build.set(x0 - 1, FLOOR, cz - 2, PUMPKIN)
+	build.set(x0 - 1, FLOOR, cz + 2, JACK)
+	# Inside: a tomb, torches and webs.
+	build.box(x1 - 2, FLOOR, cz - 1, x1 - 1, FLOOR, cz + 1, BONE)
+	build.set(x1 - 1, FLOOR + 2, z0 + 1, TORCH)
+	build.set(x1 - 1, FLOOR + 2, z1 - 1, TORCH)
+	build.set(x0 + 1, FLOOR + 3, z0 + 1, COBWEB)
+	build.set(x0 + 1, FLOOR + 3, z1 - 1, COBWEB)
+	# The third rod, on a gold plinth on the roof.
+	rx, ry, rz = STORM_CHAPEL_RODS[2]
+	build.set(rx, ry - 1, rz, GOLD)
+	build.set(rx, ry, rz, FENCE)
+
+
+def build_storm_patch(build: Build) -> None:
+	p = STORM_PATCH
+	x0, x1, z0, z1 = p["x0"], p["x1"], p["z0"], p["z1"]
+	build.box(x0, SURFACE, z0, x1, SURFACE, z1, DIRT)
+	for row, z in enumerate(range(z0 + 1, z1, 3)):
+		for x in range(x0 + 1, x1, 2):
+			if (x + row) % 3 == 0:
+				continue
+			build.set(x, FLOOR, z, JACK if (x + 2 * row) % 7 == 0 else PUMPKIN)
+			build.set(x, FLOOR, z + 1, VINE, 2)
+	build.box(x1 - 1, FLOOR, z1 - 1, x1, FLOOR + 1, z1, HAY)
+	dead_tree(build, 29, 7, 4, ((-1, 0, 3), (0, 1, 2)))
+
+
+def build_halloween_storm() -> Build:
+	sx, sy, sz = STORM_CHAPEL_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(GRASS)
+
+	# The path, and the arch the causeway lands under.
+	px0, px1 = CHAPEL_PATH_X
+	build.box(px0, SURFACE, 0, px1, SURFACE, CHAPEL["z0"], PAVING)
+	for x in (px0 - 1, px1 + 1):
+		build.box(x, FLOOR, 0, x, FLOOR + 4, 0, DEAD_WOOD)
+	build.box(px0 - 1, FLOOR + 5, 0, px1 + 1, FLOOR + 5, 0, DEAD_WOOD)
+	build.set(px0, FLOOR + 4, 0, COBWEB)
+	build.set(px1, FLOOR + 4, 0, COBWEB)
+	for z in (4, 8, 12):
+		lantern_post(build, px0 - 2, z, flicker=(z % 8 == 4))
+		lantern_post(build, px1 + 2, z, flicker=(z % 8 == 0))
+
+	build_storm_patch(build)
+	build_storm_graveyard(build)
+	build_mausoleum(build)
+	build_chapel(build)
+	build_storm_tower(build)
+	dead_tree(build, 31, 31, 6, ((-1, 0, 4), (0, -1, 5)))
+	dead_tree(build, 2, 2, 5, ((1, 0, 3), (0, 1, 4)))
+	return build
+
+
+# --------------------------------------------------------------------------
+# 10. Cabaret club
+# --------------------------------------------------------------------------
+
+# A dim, warm room for Rubella and Lillith: a proscenium stage with velvet
+# wings and chasing bulbs, a dance floor in front of it, candlelit tables and
+# a bar. Indoors, so the night outside is the sky and fog over the roof and
+# the room is lit by its own lamps.
+#
+# 27 x 11 x 27 is 8,019 cells, under 8,192, so lw_world keeps it in a quarter
+# of a MiB like the Around arena (see Budget in docs/maps.md).
+CABARET_SIZE = (27, 11, 27)
+# The causeway lands on the east face, under the awning, level with the door.
+CABARET_SPAWN = (26, FLOOR, 14)
+
+CLUB = dict(x0=2, x1=24, z0=2, z1=24)
+CLUB_ROOF = 10                      # the top layer of the box
+CLUB_DOOR_Z = (13, 15)
+# The stage runs along the west wall and faces east, down the room. Its deck
+# is one node up; the front of it is CABARET_STAGE["x1"].
+CABARET_STAGE = dict(x0=3, x1=8, z0=4, z1=22)
+# The two cabs on the stage's front corners, twelve nodes apart. Facing the
+# stage from the floor (looking west), the audience's left is south.
+CABARET_CABS = ((8, 7), (8, 19))    # (x, z): audience-left first
+CABARET_BULBS_X = 9                 # the chasing bulbs hang in front of the header
+CABARET_BULBS_Y = FLOOR + 4
+CABARET_FLOOR = dict(x0=10, x1=15, z0=8, z1=18)
+CABARET_TABLES = ((18, 5), (22, 5), (18, 9), (22, 9), (18, 17), (22, 17))
+CABARET_BAR = dict(x0=16, x1=22, z=21)
+# Where the Stage Director stands, on the floor south of the stage stair.
+CABARET_DIRECTOR = (11, FLOOR, 4)
+LANTERN_NODE = "lw_maps:lantern"
+LANTERN_NODE_OFF = "lw_maps:lantern_off"
+
+
+def build_cabaret_stage(build: Build) -> None:
+	s = CABARET_STAGE
+	x0, x1, z0, z1 = s["x0"], s["x1"], s["z0"], s["z1"]
+	velvet = CURTAIN
+	# The deck, with a gold lip along its front.
+	build.box(x0, FLOOR, z0, x1, FLOOR, z1, PLANKS)
+	build.box(x1, FLOOR, z0, x1, FLOOR, z1, GOLD)
+	# Backdrop and wings of velvet, and a velvet valance under the header.
+	build.box(x0, FLOOR + 1, z0, x0, CLUB_ROOF - 1, z1, velvet)
+	for z in (z0, z1):
+		build.box(x0, FLOOR + 1, z, x1 - 1, CLUB_ROOF - 1, z, velvet)
+	build.box(x1 - 1, CLUB_ROOF - 1, z0, x1 - 1, CLUB_ROOF - 1, z1, velvet)
+	# The proscenium: gold posts at the front corners, a gold header.
+	for z in (z0, z1):
+		build.box(x1, FLOOR + 1, z, x1, CLUB_ROOF - 1, z, GOLD)
+	build.box(x1, CLUB_ROOF - 1, z0, x1, CLUB_ROOF - 1, z1, GOLD)
+	# Footlights along the lip, clear of where the band stands.
+	for z in (10, 16):
+		build.set(x1, FLOOR + 1, z, UPLIGHT)
+	# The cabs, grilles to the room (facedir 3 turns the front to +x).
+	for x, z in CABARET_CABS:
+		build.set(x, FLOOR + 1, z, AMP_CAB, WEST)
+	# A stair up at each end of the front, climbing west.
+	for z in (z0 + 1, z1 - 1):
+		build.set(x1 + 1, FLOOR, z, BRICK_STAIR_NODE, WEST)
+	# Chasing bulbs across the front of the header: a lantern every other
+	# cell, each with a chase controller over it carrying its place.
+	for index, z in enumerate(range(z0 + 2, z1 - 1, 2)):
+		build.set(CABARET_BULBS_X, CABARET_BULBS_Y, z, LANTERN_NODE_OFF)
+		build.set(CABARET_BULBS_X, CABARET_BULBS_Y + 1, z, CHASE, index % 8)
+
+
+def build_cabaret_room(build: Build) -> None:
+	c = CLUB
+	x0, x1, z0, z1 = c["x0"], c["x1"], c["z0"], c["z1"]
+	build.box(x0 + 1, SURFACE, z0 + 1, x1 - 1, SURFACE, z1 - 1, PLANKS)
+	build.walls(x0, FLOOR, z0, x1, CLUB_ROOF - 1, z1, BRICK)
+	build.box(x0, CLUB_ROOF, z0, x1, CLUB_ROOF, z1, wool("black"))
+	# The door, on the east face.
+	dz0, dz1 = CLUB_DOOR_Z
+	build.clear(x1, FLOOR, dz0, x1, FLOOR + 2, dz1)
+	build.box(x1, FLOOR + 3, dz0 - 1, x1, FLOOR + 3, dz1 + 1, GOLD)
+	# Sconces: warm lanterns set into the side walls, high up.
+	for x in (12, 18):
+		build.set(x, FLOOR + 3, z0, LANTERN_NODE)
+		build.set(x, FLOOR + 3, z1, LANTERN_NODE)
+	build.set(x1, FLOOR + 3, 6, LANTERN_NODE)
+	build.set(x1, FLOOR + 3, 20, LANTERN_NODE)
+
+	# The dance floor: a two-node checker of black and red.
+	f = CABARET_FLOOR
+	for x in range(f["x0"], f["x1"] + 1):
+		for z in range(f["z0"], f["z1"] + 1):
+			dark = (x // 2 + z // 2) % 2 == 0
+			build.set(x, SURFACE, z, wool("black") if dark else wool("red"))
+
+	# Tables: a pedestal with a candle on it, a chair either side facing in.
+	for x, z in CABARET_TABLES:
+		build.set(x, FLOOR, z, PEDESTAL)
+		build.set(x, FLOOR + 1, z, TORCH)
+		build.set(x - 1, FLOOR, z, SEAT, WEST)
+		build.set(x + 1, FLOOR, z, SEAT, EAST)
+
+	# The bar along the north wall: a counter, stools on the room side, and
+	# a lit back bar of glass shelves against the wall.
+	b = CABARET_BAR
+	build.box(b["x0"], FLOOR, b["z"], b["x1"], FLOOR, b["z"], PLANKS)
+	build.box(b["x0"], FLOOR + 1, b["z"], b["x1"], FLOOR + 1, b["z"], BRICK_SLAB)
+	for x in range(b["x0"] + 1, b["x1"], 2):
+		build.set(x, FLOOR, b["z"] - 1, SEAT, SOUTH)
+	build.box(b["x0"], FLOOR + 1, z1 - 1, b["x1"], FLOOR + 2, z1 - 1, GLASS)
+	build.set((b["x0"] + b["x1"]) // 2, FLOOR + 3, z1 - 1, LANTERN_NODE)
+	build.set(b["x0"], FLOOR, z1 - 1, PLANKS)
+	build.set(b["x1"], FLOOR, z1 - 1, PLANKS)
+
+
+def build_cabaret() -> Build:
+	sx, sy, sz = CABARET_SIZE
+	build = Build(sx, sy, sz)
+	build.ground(PAVING)
+	build_cabaret_room(build)
+	build_cabaret_stage(build)
+
+	# Outside: an awning over the door on gold posts, and a lantern either
+	# side, so the club reads from the causeway in the dark.
+	dz0, dz1 = CLUB_DOOR_Z
+	x1 = CLUB["x1"]
+	for z in (dz0 - 1, dz1 + 1):
+		build.box(x1 + 2, FLOOR, z, x1 + 2, FLOOR + 3, z, GOLD)
+	build.box(x1 + 1, FLOOR + 4, dz0 - 1, sx - 1, FLOOR + 4, dz1 + 1, wool("red"))
+	for z in (dz0 - 3, dz1 + 3):
+		build.set(x1 + 1, FLOOR, z, PEDESTAL)
+		build.set(x1 + 1, FLOOR + 1, z, LANTERN_NODE)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -1950,6 +2311,9 @@ SPECS = [
 	MapSpec("map_smoke_caldera", CALDERA_SIZE, CALDERA_SPAWN, build_smoke_caldera),
 	MapSpec("map_rainbow_storm", RAINBOW_SIZE, RAINBOW_SPAWN, build_rainbow_storm),
 	MapSpec("map_around_arena", ARENA_SIZE, ARENA_SPAWN, build_arena),
+	MapSpec("map_halloween_storm", STORM_CHAPEL_SIZE, STORM_CHAPEL_SPAWN,
+		build_halloween_storm),
+	MapSpec("map_cabaret", CABARET_SIZE, CABARET_SPAWN, build_cabaret),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}
@@ -1969,9 +2333,13 @@ SPAWNS = {spec.name: spec.spawn for spec in SPECS}
 # Budget") and games/luanti_web/docs/maps.md ("Budget").
 #
 # Raised from 200,000 for the Around arena: it is 7,500 cells, under 8,192, so
-# it keeps 0.25 MiB and the pack 7.75 of its 8 MiB. The heap measurement is
-# the cap that bites; this one only stops the volume creeping up unnoticed.
-NODE_BUDGET = 210_000
+# it keeps 0.25 MiB and the pack 7.75 MiB. Raised again, to 235,000, for the
+# thunder chapel: 25,920 cells, the Halloween lane's own box, so 1 MiB, and
+# the heap cap went from 8 to 9 MiB with it. The heap measurement is the cap
+# that bites; this one only stops the volume creeping up unnoticed. Raised to
+# 241,000 for the cabaret club: 8,019 cells, under 8,192, so a quarter of a
+# MiB, which fits the 9 MiB heap cap as it stands (9.0 MiB for ten maps).
+NODE_BUDGET = 241_000
 CHEAP_VOLUME = 32_768
 
 

@@ -378,8 +378,16 @@ assert_eq(lw_dance.MAX_DANCERS, 8, "dancer cap")
 -- The shipped routine files load
 --------------------------------------------------------------------------
 
+-- The cabaret revue takes its songs from lw_amps' "cabaret" playlist, which
+-- ships empty: until songs are added it is a routine on its own clock.
+local revue = lw_dance.get_routine("cabaret_revue")
+assert_true(revue ~= nil and revue.songs == nil,
+	"the cabaret revue loads with no songs while the cabaret playlist is empty")
+assert_eq(revue and revue.dancers[1].model, "rubella", "Rubella leads the revue")
+assert_eq(revue and revue.dancers[2].model, "lillith", "with Lillith")
+
 for _, id in ipairs({"chorus_line_v1", "porch_haunt", "fruit_stomp",
-		"lace_waterfall_around"}) do
+		"lace_waterfall_around", "cabaret_revue"}) do
 	local routine = lw_dance.get_routine(id)
 	assert_true(routine ~= nil, id .. " is registered")
 	if routine then
