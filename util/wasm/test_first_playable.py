@@ -116,7 +116,9 @@ def send_chat(page: Page, console: list[str], command: str) -> None:
 	instead of asserting on a single attempt.
 	"""
 	name = command.split()[0].lstrip("/")
-	marker = f"Caught command '{name}'"
+	# The engine logs this for every game (serverpackethandler / chat handling);
+	# devtest's own "Caught command" line does not exist in luanti_web.
+	marker = f"invoked /{name}"
 	for _ in range(6):
 		start = len(console)
 		page.keyboard.press("t")
@@ -185,8 +187,19 @@ def dig_nodes(page: Page, console: list[str]) -> int:
 		page.wait_for_timeout(600)
 		page.mouse.up(button="left")
 		page.wait_for_timeout(300)
-	page.wait_for_timeout(2000)
-	return count(console, start, "digs ")
+	# The server log trails the input under load (a digs line was seen 7 s
+	# after the click on a busy host), so poll instead of a fixed wait.
+	deadline = time.monotonic() + 30
+	while time.monotonic() < deadline and count(console, start, "digs ") < DIG_TARGET:
+		page.wait_for_timeout(500)
+	dug = count(console, start, "digs ")
+	if dug < DIG_TARGET:
+		quiet = [line[:200] for line in console[start:]
+			if "Loopback UDP" not in line][-25:]
+		print("dig step saw:\n" + "\n".join(quiet))
+		print("pointer lock:", page.evaluate(
+			"document.pointerLockElement === Module.canvas"))
+	return dug
 
 
 def run(page: Page, url: str, console: list[str], screenshots: Path | None,
@@ -326,6 +339,10 @@ def main() -> int:
 				try:
 					result = run(page, url, console, screenshots,
 						args.require_place, args.game)
+				except BaseException:
+					print("console tail at failure:\n" + "\n".join(
+						line[:200] for line in console[-40:]))
+					raise
 				finally:
 					tail = "\n".join(line[:160] for line in console[-20:])
 					browser.close()
