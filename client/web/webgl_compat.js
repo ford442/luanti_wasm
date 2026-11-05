@@ -33,14 +33,15 @@
 		if (typeof original !== "function")
 			return;
 		proto[name] = function() {
+			/** @type {any} */
 			var data = arguments[dataIndex];
 			if (!data || !ArrayBuffer.isView(data) || !isResizable(data.buffer))
 				return original.apply(this, arguments);
 			var offset = arguments[dataIndex + 1] || 0;
 			var length = arguments[dataIndex + 2];
-			var end = length ? offset + length : data.length;
+			var end = length ? offset + length : /** @type {any} */ (data).length;
 			var args = Array.prototype.slice.call(arguments, 0, dataIndex);
-			args.push(data.slice(offset, end));
+			args.push(/** @type {any} */ (data).slice(offset, end));
 			return original.apply(this, args);
 		};
 	}
@@ -70,10 +71,11 @@
 		proto[name] = function() {
 			var copied = null;
 			for (var k = 0; k < arguments.length; k++) {
+				/** @type {any} */
 				var arg = arguments[k];
 				if (arg && ArrayBuffer.isView(arg) && isResizable(arg.buffer)) {
 					copied = copied || Array.prototype.slice.call(arguments);
-					copied[k] = arg.slice();
+					copied[k] = /** @type {any} */ (arg).slice();
 					if (outputs[name])
 						copied.back = [k, arg];
 				}

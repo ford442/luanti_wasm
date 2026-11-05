@@ -105,9 +105,9 @@ export class UDPProxySession {
 		const bytes = Buffer.from(payload);
 		this.consumeRate(bytes.length);
 		this.permittedResponses.add(address + ":" + port);
-		await new Promise((resolve, reject) => {
+		await /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
 			this.udp.send(bytes, port, address, error => error ? reject(error) : resolve());
-		});
+		}));
 	}
 
 	onUDPMessage(message, remote) {

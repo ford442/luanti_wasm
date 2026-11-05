@@ -5,6 +5,7 @@
 (function() {
 	"use strict";
 
+	/** @type {Partial<LuantiWebConfig>} */
 	var config = window.LUANTI_WEB_CONFIG || {};
 	var query = new URLSearchParams(location.search);
 	var runtimeReady = false;
@@ -17,6 +18,12 @@
 	var loadingShellDismissed = false;
 	var logs = [];
 
+	/**
+	 * The launcher markup is fixed (client/web/shell.html), so each element is
+	 * typed `any` rather than guessing HTMLInputElement/HTMLButtonElement/etc.
+	 * @param {string} id
+	 * @returns {any}
+	 */
 	function element(id) {
 		return document.getElementById(id);
 	}

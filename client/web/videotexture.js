@@ -182,7 +182,7 @@
 	}
 
 	if (typeof Module === "undefined")
-		window.Module = {};
+		window.Module = /** @type {LuantiModule} */ ({});
 	Module["luantiVideoTexture"] = {
 		"start": start,
 		"stop": stop
