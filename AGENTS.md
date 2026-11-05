@@ -12,7 +12,7 @@ Most engine code is identical to upstream Luanti; WASM-specific code lives in gu
 ## Project Overview
 
 - **Name**: Luanti (CMake project name: `luanti`)
-- **Version**: 5.16.0-dev (development build)
+- **Version**: 5.18.0-dev (development build; see `VERSION_*` in `CMakeLists.txt`)
 - **License**: LGPL-2.1-or-later
 - **Language**: C++17 (minimum GCC 7.5 or Clang 7.0.1)
 - **Build System**: CMake (minimum 3.12; 3.20 for Android)
@@ -21,7 +21,7 @@ Most engine code is identical to upstream Luanti; WASM-specific code lives in gu
 
 The engine consists of a client and a server. The client target (`luanti`) always includes the server code. A dedicated server binary (`luantiserver`) can be built separately. Modding and game logic are driven by an embedded Lua interpreter.
 
-The WASM port targets a **client-only browser build** (internal server for singleplayer, with multiplayer via WebSocket proxy planned).
+The WASM port targets a **client-only browser build** (internal server for singleplayer; multiplayer via a WebSocket proxy in `util/wasm/proxy/`).
 
 ---
 
@@ -35,6 +35,7 @@ The WASM port targets a **client-only browser build** (internal server for singl
 - SQLite3
 - ZLIB
 - Zstd
+- libzip 1.7.2+ (no Emscripten port — build it with `util/wasm/build_libzip.sh`)
 - Freetype (client builds only)
 
 ### Optional (Native Builds)
@@ -49,13 +50,13 @@ The WASM port targets a **client-only browser build** (internal server for singl
 - **Profiling**: Tracy (`BUILD_WITH_TRACY`)
 
 ### WASM / Emscripten Specifics
-- **Graphics**: GLES2 via `-sFULL_ES2=1`, rendered through WebGL
+- **Graphics**: GLES2 via `-sFULL_ES2=1 -sMAX_WEBGL_VERSION=2`, rendered through WebGL
 - **Windowing / Input**: SDL2 via Emscripten port (`-sUSE_SDL=2`)
-- **Threading**: pthreads (`-pthread -sSHARED_MEMORY=1`), requires COOP/COEP headers
+- **Threading**: pthreads (`-pthread -sSHARED_MEMORY=1`), requires COOP/COEP headers; engine runs off the UI thread via `-sPROXY_TO_PTHREAD=1 -sOFFSCREEN_FRAMEBUFFER=1`
 - **Memory**: 256 MB initial, 1 GB max (`-sALLOW_MEMORY_GROWTH=1`)
 - **File System**: MEMFS for runtime, IDBFS for persistence, `--preload-file` for assets
-- **Networking**: Disabled in current build; WebSocket proxy transport planned (see `wasm_porting.md`)
-- **Sound**: Disabled initially (`ENABLE_SOUND=FALSE`)
+- **Networking**: In-process loopback for singleplayer; remote servers via WebSocket proxy (`src/network/socket.cpp`, `client/web/network.js`, `util/wasm/proxy/`)
+- **Sound**: Enabled (`ENABLE_SOUND=TRUE` in the preset; Emscripten Ogg/Vorbis ports)
 
 ### Bundled Libraries (in `lib/`)
 - `bitop` — Lua bit operations (used when not using LuaJIT)
@@ -96,22 +97,24 @@ The WASM port targets a **client-only browser build** (internal server for singl
 │   ├── async/              # Async environment Lua code
 │   ├── emerge/             # Map generation async Lua
 │   ├── profiler/           # Built-in profiler Lua
-│   ├── sscsM_client/       # Server-Sent Client-Side Mods (client)
-│   └── sscsM_server/       # Server-Sent Client-Side Mods (server)
+│   ├── pause_menu/         # Pause menu Lua code
+│   ├── fstk/               # Formspec toolkit
+│   ├── sscsm_client/       # Server-Sent Client-Side Mods (client)
+│   └── sscsm_server/       # Server-Sent Client-Side Mods (server)
 ├── irr/                    # IrrlichtMt graphics engine (CMake subproject)
 ├── lib/                    # Bundled third-party libraries
-├── games/                  # Bundled games (e.g. devtest)
+├── games/                  # Bundled games: devtest, luanti_web (web default), flower_island, rollercoaster, log_ride, spire_tunnel
 ├── mods/                   # Mod installation directory placeholder
 ├── textures/               # Base textures and texture packs
-├── client/                 # Client data (shaders, serverlist)
+├── client/                 # Client data (shaders, serverlist); client/web/ = browser shell, launcher/PWA, network.js, persistence.js, theater.js
 ├── doc/                    # Documentation (API refs, compiling guides, protocol spec)
 ├── docs/                   # **WASM-specific docs**
 │   ├── wasm-investigation-paradust.md  # Analysis of prior art (paradust7/minetest-wasm)
-│   └── wasm-issues/                    # Roadmap issues (persistence, proxy, async loop, etc.)
+│   └── wasm-issues/                    # Roadmap issues 00–08 (persistence, proxy, async loop, launcher, CI, showcase, theater)
 ├── po/                     # Translation files (gettext)
 ├── android/                # Android build files
 ├── cmake/Modules/          # Custom CMake modules
-├── util/                   # Build scripts, CI helpers, test scripts
+├── util/                   # Build scripts, CI helpers, test scripts (util/wasm/: serve, libzip, packaging, proxy, browser tests)
 ├── .github/workflows/      # GitHub Actions CI definitions
 ├── wasm_porting.md         # **Master living plan for the WASM port**
 └── grok.md                 # Grok AI assistant guide for this repo
@@ -130,20 +133,25 @@ cmake --build build --parallel $(($(nproc) + 1))
 
 ### Emscripten / WebAssembly Build
 ```bash
-# Activate Emscripten SDK first
+# Activate Emscripten SDK first (CI pins 6.0.3)
 source /path/to/emsdk/emsdk_env.sh
 
-# Use the provided preset
-cmake --preset Emscripten -B build-wasm
+# Once per SDK / EM_CACHE: libzip has no Emscripten port
+util/wasm/build_libzip.sh
+
+# Use the provided preset (binaryDir is build-wasm)
+cmake --preset Emscripten
 cmake --build build-wasm --parallel $(($(nproc) + 1))
+# or: npm run build
 ```
+Full guide: `doc/compiling/wasm.md`.
 
 The `Emscripten` preset (defined in `CMakePresets.json`) configures:
-- Client-only (`BUILD_CLIENT=TRUE`, `BUILD_SERVER=FALSE`)
+- Release, client-only (`BUILD_CLIENT=TRUE`, `BUILD_SERVER=FALSE`, `BUILD_UNITTESTS=FALSE`)
 - GLES2 rendering (`ENABLE_GLES2=TRUE`, `ENABLE_OPENGL=FALSE`, `ENABLE_OPENGL3=FALSE`)
-- Disabled features not available in browser: sound, curl, gettext, curses, PostgreSQL, LevelDB, Redis, Prometheus, Spatial, OpenSSL
+- Sound enabled; disabled features not available in browser: curl, gettext, curses, PostgreSQL, LevelDB, Redis, Prometheus, Spatial, OpenSSL
 - pthreads + shared memory
-- Asset preloading (`builtin`, `games/devtest`, `textures`, `fonts`, `client/shaders`, `clientmods`)
+- Asset preloading is set in `src/CMakeLists.txt` (`--preload-file`: `builtin`, all bundled `games/*`, `textures`, `fonts`, `client/shaders`, `clientmods`) — that list is the source of truth
 
 ### Presets (from `CMakePresets.json`)
 - `Debug` — debug symbols, no optimization
@@ -188,6 +196,7 @@ cmake --build build --parallel $(($(nproc) + 1))
 - `build-wasm/bin/luanti.html` — **WASM browser build**
 - `build-wasm/bin/luanti.wasm` — compiled engine
 - `build-wasm/bin/luanti.data` — preloaded asset bundle
+- `build-wasm/bin/{launcher.js,launcher.css,launcher-config.js,theater.js,videotexture.js,manifest.webmanifest,service-worker.js}` — launcher/PWA companions copied from `client/web/`
 
 ---
 
@@ -235,10 +244,20 @@ clientconf="video_driver=opengl3" xvfb-run ./util/test_singleplayer.sh
 ./util/test_error_cases.sh
 ```
 
+### WASM Browser Tests
+Playwright 1.59.0 + Chrome, against a built `build-wasm/bin` (see `.github/workflows/wasm.yml`).
+```bash
+python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
+python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)" --screenshot-dir wasm-gate-screenshots
+python3 util/wasm/test_demo_tools.py        # packaging/deploy tooling
+(cd util/wasm/proxy && npm test)             # WebSocket proxy (node --test)
+```
+Other probes live in `util/wasm/test_*.py` / `test_persistence.mjs`. The root `test_wasm.js` (Puppeteer/Express) is an older ad-hoc smoke test.
+
 ### C++ Linting
 Uses **clang-tidy** (CI uses version 15).
 ```bash
-./util/ci/clang-tidy.sh
+CLANG_TIDY=clang-tidy-15 ./util/ci/clang-tidy.sh
 ```
 
 ---
@@ -279,6 +298,7 @@ Uses **clang-tidy** (CI uses version 15).
   - `busted` unit tests
   - Integration tests via `util/test_multiplayer.sh` and `util/test_singleplayer.sh`
 - **Asset changes** trigger PNG and whitespace checks.
+- **WASM-relevant changes** (`src/`, `irr/`, `builtin/`, `client/`, `games/luanti_web/`, `util/wasm/`, …) trigger `wasm.yml`: Emscripten Release build, browser smoke, first-playable gate, `package_demo.py`, and Cloudflare Pages deploy on the default branch.
 
 Key workflow files:
 - `.github/workflows/linux.yml`
@@ -287,6 +307,7 @@ Key workflow files:
 - `.github/workflows/windows.yml`
 - `.github/workflows/macos.yml`
 - `.github/workflows/android.yml`
+- `.github/workflows/wasm.yml`
 
 ---
 
@@ -304,8 +325,8 @@ Key workflow files:
 - **Persistence**: `porting::emscripten_sync_filesystem()` must be called after world saves, settings changes, or periodically to flush IDBFS to IndexedDB.
 - **Rendering**: Uses GLES2 → WebGL via Emscripten's SDL2 port. IrrlichtMt already contains partial Emscripten support.
 - **Threading**: pthreads are supported but require `SHARED_MEMORY` and correct COOP/COEP headers on the serving page.
-- **Networking (Future)**: Native UDP is unavailable in browsers. The planned approach is a WebSocket proxy that wraps Luanti's UDP protocol. See `wasm_porting.md` Phase 4 and `docs/wasm-issues/02-websocket-proxy-networking.md`.
-- **Main Loop (Future)**: The current native code uses blocking `while` loops. For the browser, this must be refactored to `emscripten_set_main_loop()` or use ASYNCIFY. See `wasm_porting.md` Phase 3 and `docs/wasm-issues/03-async-main-loop.md`.
+- **Networking**: Native UDP is unavailable in browsers. The Emscripten `UDPSocket` delivers singleplayer traffic in-process and sends remote traffic through a WebSocket proxy that wraps Luanti's UDP protocol (`util/wasm/proxy/server.mjs`; run with `npm install && LUANTI_PROXY_ALLOWED_TARGETS=127.0.0.1:30000 npm start`). A deployed WSS proxy is still outstanding. See `docs/wasm-issues/02-websocket-proxy-networking.md`.
+- **Main Loop**: The blocking native loops are kept; the engine runs on a pthread via `-sPROXY_TO_PTHREAD=1` + `-sOFFSCREEN_FRAMEBUFFER=1` (no ASYNCIFY / `emscripten_set_main_loop()`). Do not enable `OFFSCREENCANVAS_SUPPORT` (it blanked the game). See `docs/wasm-issues/03-async-main-loop.md`.
 
 ---
 
@@ -323,19 +344,19 @@ Key workflow files:
 
 ## Known Issues / Blockers
 
-- **The "Networking (Future)" and "Main Loop (Future)" notes above, and the equivalent phase table in `CLAUDE.md`, are stale.** `wasm_porting.md` (last updated 2026-08-15, more recent than this file) shows those phases already implemented and via a different approach than described here: async main loop ships as `-sPROXY_TO_PTHREAD=1` + `-sOFFSCREEN_FRAMEBUFFER=1` (not `emscripten_set_main_loop()`/ASYNCIFY), and networking is a working WebSocket proxy (`client/web/network.js` + `util/wasm/proxy/`), not "planned." Sound (Phase 5) and most of input/browser integration (Phase 6) are implemented too, with a full browser launcher already live in `client/web/`. Read `wasm_porting.md` directly for current WASM-port status before planning work here — this file is behind it.
+- Read `wasm_porting.md` for current WASM-port status before planning work; outstanding items are a deployed TLS proxy / public-server multiplayer and cross-browser persistence acceptance.
 - Recent commit history is dominated by WebGL-specific bugfixes (worker context creation, black wedges when looking down, leftover-vertex-buffer triangle artifacts, a WebGL shutdown crash). The GLES2/WebGL path through IrrlichtMt's Emscripten support is still the most fragile part of the port — expect more of this class of bug.
 - `src/threading/thread.cpp:123` — `FIXME: what if this fails, or if already locked by same thread?` in the lock-acquisition path.
-- **"Sound: Disabled initially (`ENABLE_SOUND=FALSE`)" above is wrong.** `CMakePresets.json`'s `Emscripten` preset sets `ENABLE_SOUND: "TRUE"` (no `ENABLE_SOUND` override for WASM in `src/CMakeLists.txt` either) — sound is compiled in, not disabled, for current WASM builds.
-- `deploy.py` (repo root) and `test_wasm.js` (repo root, Puppeteer-based local server + headless smoke test with the COOP/COEP headers already wired up) are undocumented anywhere in this file, `CLAUDE.md`, or `wasm_porting.md` — the Quick Cheat Sheet below has you hand-write an inline Python COOP/COEP server that `test_wasm.js` already provides.
-- The `elseif(EMSCRIPTEN)` line numbers cited in `CLAUDE.md` (`src/CMakeLists.txt` ~327/512/774) are stale; the actual branches are now at lines 333, 540, and 802.
+- Root-level `deploy.py` uploads `build-wasm/bin` to test.1ink.us via storage.noahcohn.com (token via `DEPLOY_TOKEN`); CI deploys separately to Cloudflare Pages.
 
 ## Useful Reference Files
 
 - `wasm_porting.md` — **Master living plan for the WASM port** (read this first for WASM work)
 - `grok.md` — Grok AI assistant guide tailored for this repo
 - `docs/wasm-investigation-paradust.md` — Deep analysis of prior art (paradust7/minetest-wasm)
-- `docs/wasm-issues/` — Roadmap issue files (persistence, proxy, async loop, launcher, CI)
+- `docs/wasm-issues/` — Roadmap issue files (persistence, proxy, async loop, launcher, CI, showcase, theater)
+- `doc/compiling/wasm.md` — WASM build, smoke tests, packaging, common failures
+- `doc/compiling/wasm-embedding.md` — Deep links, proxy regions, iframe/PWA embedding
 - `doc/lua_api.md` — Server Lua API reference
 - `doc/client_lua_api.md` — Client Lua API reference
 - `doc/menu_lua_api.md` — Main menu Lua API reference
@@ -371,22 +392,16 @@ xvfb-run ./util/test_singleplayer.sh
 
 # WASM: Build with Emscripten preset
 source /path/to/emsdk/emsdk_env.sh
-cmake --preset Emscripten -B build-wasm
+util/wasm/build_libzip.sh   # first time only
+cmake --preset Emscripten
 cmake --build build-wasm --parallel $(($(nproc) + 1))
 
-# WASM: Serve (requires COOP/COEP headers for pthreads)
-python3 -c "
-import http.server, socketserver
-class H(http.server.SimpleHTTPRequestHandler):
-    def end_headers(self):
-        self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
-        self.send_header('Cross-Origin-Embedder-Policy', 'require-corp')
-        super().end_headers()
-with socketserver.TCPServer(('', 8000), H) as httpd:
-    print('Serving at http://localhost:8000')
-    httpd.serve_forever()
-"
-# Then open http://localhost:8000/build-wasm/bin/luanti.html
+# WASM: Serve build-wasm/bin with COOP/COEP headers (required for pthreads)
+python3 util/wasm/serve.py
+# Then open http://127.0.0.1:8000/luanti.html
+
+# WASM: Browser smoke test
+python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
 ```
 
 ---
