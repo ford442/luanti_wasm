@@ -199,7 +199,7 @@
 	}
 
 	if (typeof Module === "undefined")
-		window.Module = {};
+		window.Module = /** @type {LuantiModule} */ ({});
 	Module["luantiTheater"] = {
 		"show": show,
 		"hide": hide,

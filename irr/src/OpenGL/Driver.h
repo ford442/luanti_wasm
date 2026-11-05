@@ -34,6 +34,10 @@ public:
 	//! destructor
 	virtual ~COpenGL3DriverBase();
 
+	//! Uniform buffer objects exist (GL >= 3.0 / GLES >= 3.0). False on ES 2.0
+	//! contexts such as the WebGL1 fallback, where the entry points are missing.
+	bool supportsUniformBlocks() const noexcept { return isVersionAtLeast(3, 0); }
+
 	virtual bool beginScene(u16 clearFlag, SColor clearColor = SColor(255, 0, 0, 0), f32 clearDepth = 1.f, u8 clearStencil = 0,
 			const SExposedVideoData &videoData = SExposedVideoData(), core::rect<s32> *sourceRect = 0) override;
 

@@ -54,6 +54,11 @@ cmake --preset Emscripten
 cmake --build build-wasm --parallel 2
 ```
 
+For diagnosing crashes or profiling use `cmake --preset EmscriptenDebug`
+(`build-wasm-debug`, ASSERTIONS=2 + SAFE_HEAP) or `EmscriptenProfile`
+(`build-wasm-profile`, optimised with source maps). The per-profile flag
+matrix is in `wasm_porting.md` (Appendix: Flag Matrix).
+
 The preload-file list in `src/CMakeLists.txt` is the source of truth for the
 read-only asset bundle. A successful build creates the engine bundle and
 launcher/PWA companions:

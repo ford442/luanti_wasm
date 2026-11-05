@@ -16,7 +16,7 @@
 	var mountPath = "/home/web_user/.luanti";
 	var dependencyName = "luanti-idbfs-hydration";
 	var testOptions = Module["luantiPersistenceTestOptions"] || {};
-	var retryDelays = testOptions["retryDelays"] || [1000, 5000, 30000];
+	var retryDelays = /** @type {number[]} */ (testOptions["retryDelays"] || [1000, 5000, 30000]);
 	var requestedGeneration = 0;
 	var savedGeneration = 0;
 	var latestEngineGeneration = 0;

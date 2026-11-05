@@ -160,7 +160,10 @@ void *ServerThread::run()
 #ifdef __EMSCRIPTEN__
 			// Guarantee a minimum wait so the server thread cannot busy-spin
 			// when socket Receive() returns immediately with dtime≈0.
-			m_server->Receive(std::max(remaining_time, 0.005f));
+			// Tunable (wasm_server_min_receive_ms); 0 disables the floor.
+			static const float min_receive = std::max(0,
+					g_settings->getS32("wasm_server_min_receive_ms")) * 0.001f;
+			m_server->Receive(std::max(remaining_time, min_receive));
 #else
 			m_server->Receive(remaining_time);
 #endif

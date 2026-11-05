@@ -16,7 +16,7 @@ SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parents[1]
 GAME = ROOT / "games/luanti_web"
 AMPS = GAME / "mods/lw_amps"
-SOUNDS = AMPS / "sounds"
+SOUNDS = AMPS / "songs"
 
 # The songs are the one large thing in the web pack. The budget in
 # wasm_porting.md was raised for them; this keeps them from growing past it
@@ -105,7 +105,12 @@ def test_song_files() -> None:
 	assert_true(not extra, f"unregistered sound files: {sorted(extra)}")
 	assert_true(total <= SONG_BUDGET,
 		f"the songs are {total / 2**20:.1f} MiB; the budget is {SONG_BUDGET / 2**20:.0f} MiB")
-	assert_true((SOUNDS / "README.md").is_file(), "lw_amps/sounds has no README")
+	assert_true((SOUNDS / "README.md").is_file(), "lw_amps/songs has no README")
+	# Kept out of the media every client is sent on join (see the top of
+	# lw_amps/init.lua): no song may sit under a media folder of any mod.
+	for folder in ("sounds", "media", "textures", "models"):
+		stray = sorted(p.name for p in (GAME / "mods").glob(f"*/{folder}/**/lw_amps_*.ogg"))
+		assert_true(not stray, f"song files in a {folder}/ folder are sent on join: {stray}")
 
 
 def test_routine_follows_the_songs() -> None:

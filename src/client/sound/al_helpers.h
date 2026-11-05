@@ -29,9 +29,18 @@
 	#endif
 #endif
 
+#include <string>
 #include <utility>
 
 namespace sound {
+
+#ifdef __EMSCRIPTEN__
+// State of the Web Audio contexts behind Emscripten's OpenAL, as reported on
+// the browser main thread ("suspended", "running", comma-separated if there
+// are several, or "none"). For diagnostics only: it is a synchronous round
+// trip to the main thread.
+std::string getWebAudioState();
+#endif
 
 inline const char *getAlErrorString(ALenum err) noexcept
 {

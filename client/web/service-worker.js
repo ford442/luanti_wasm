@@ -4,23 +4,29 @@
 
 "use strict";
 
+/** @type {ServiceWorkerGlobalScope} */
+var swScope = /** @type {any} */ (self);
+
 // Bump on every packaging change. This worker is a cache-buster only:
 // intercepting engine assets previously served stale luanti.wasm after
 // a failed network fetch (and then the old ABM/debug logs came back).
+// The value is never read: changing it changes the worker bytes, which makes
+// the browser install the new worker.
+/* exported CACHE_VERSION */
 var CACHE_VERSION = "5.17.0-dev-20260819c-lookat";
 
-self.addEventListener("install", function(event) {
-	event.waitUntil(self.skipWaiting());
+swScope.addEventListener("install", function(event) {
+	event.waitUntil(swScope.skipWaiting());
 });
 
-self.addEventListener("activate", function(event) {
+swScope.addEventListener("activate", function(event) {
 	event.waitUntil(
 		caches.keys().then(function(keys) {
 			return Promise.all(keys.map(function(key) {
 				return caches.delete(key);
 			}));
 		}).then(function() {
-			return self.clients.claim();
+			return swScope.clients.claim();
 		})
 	);
 });
