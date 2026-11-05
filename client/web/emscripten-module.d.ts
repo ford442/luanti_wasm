@@ -57,6 +57,8 @@ interface LuantiLauncher {
 	reportEngineStatus(message: string, percent: number | null, phase: string | null): void;
 	prepareCompositor(percent: number): void;
 	notifyFramePresented(): void;
+	/** WebGL context-loss counters since page load. */
+	getGLState(): { lost: number; restored: number };
 	getState(): {
 		runtimeReady: boolean;
 		started: boolean;
@@ -116,6 +118,19 @@ interface LuantiModule {
 	luantiResumeAudio?: (reason?: string) => number;
 	/** audio_unlock.js: comma-separated AudioContext states, or "none". */
 	luantiAudioState?: () => string;
+	/** Set from `?webgl=1|2`; read by CIrrDeviceSDL.cpp to force a WebGL version. */
+	luantiWebGL?: { major: 1 | 2 };
+	/** Written by CIrrDeviceSDL.cpp: the attributes of the context actually created. */
+	luantiWebGLInfo?: {
+		version: number;
+		attempt: number;
+		explicitSwap: boolean;
+		alpha: boolean;
+		depth: boolean;
+		stencil: boolean;
+		antialias: boolean;
+		powerPreference: number;
+	};
 	/** Optional `?proxy=` override read by network.js before the launcher runs. */
 	luantiProxyUrl?: string;
 	/** Test hook: tweaks persistence timing (util/wasm/test_persistence_browser.py). */

@@ -122,6 +122,12 @@ input::placeholder { color: #728172; }
  * those need clicks to reach the canvas underneath, not this panel. */
 .resume-panel { position: absolute; z-index: 3; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); display: grid; justify-items: center; gap: .3rem; padding: .55rem; border: 1px solid var(--line); border-radius: 10px; background: rgba(4, 8, 5, .88); }
 .resume-panel[hidden] { display: none; }
+.gl-lost-panel { position: absolute; z-index: 5; inset: 0; margin: auto; width: min(26rem, calc(100% - 32px)); height: fit-content; display: grid; gap: .7rem; padding: 1.2rem; border: 1px solid var(--line); border-radius: 12px; background: rgba(4, 8, 5, .94); color: var(--ink); }
+.gl-lost-panel[hidden] { display: none; }
+.gl-lost-panel h2 { margin: 0; font-size: 1.1rem; }
+.gl-lost-panel p { margin: 0; color: var(--muted); font-size: .9rem; }
+.gl-lost-panel button { padding: .6rem .8rem; border: 0; border-radius: 8px; background: var(--leaf); color: #142016; font-weight: 800; }
+.gl-lost-panel button:disabled { opacity: .6; }
 .resume-panel button { padding: .55rem .72rem; background: var(--leaf); color: #142016; font-weight: 800; }
 .resume-panel p { margin: 0; font-size: .7rem; color: var(--muted); }
 @keyframes breathe { 50% { transform: rotate(35deg) scale(1.08); filter: brightness(1.18); } }

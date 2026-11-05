@@ -127,7 +127,10 @@ def send_chat(page: Page, console: list[str], command: str) -> None:
 		page.wait_for_timeout(3000)
 		if any(marker in line for line in console[start:]):
 			return
-	raise AssertionError(f"the engine never handled the chat command {command}")
+	tail = "\n".join(line[:200] for line in console[-25:])
+	raise AssertionError(
+		f"the engine never handled the chat command {command}\n"
+		f"console tail:\n{tail}")
 
 
 def look(page: Page, yaw: int, pitch: int) -> None:
