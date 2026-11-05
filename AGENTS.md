@@ -250,9 +250,11 @@ Playwright 1.59.0 + Chrome, against a built `build-wasm/bin` (see `.github/workf
 python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
 python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)" --screenshot-dir wasm-gate-screenshots
 python3 util/wasm/test_demo_tools.py        # packaging/deploy tooling
-(cd util/wasm/proxy && npm test)             # WebSocket proxy (node --test)
+npm ci && npm run proxy:install             # once: lint/typecheck tooling + proxy deps
+npm run lint && npm run typecheck           # ESLint + tsc (checkJs) over client/web and util/wasm
+npm test                                    # WebSocket proxy (node --test)
 ```
-Other probes live in `util/wasm/test_*.py` / `test_persistence.mjs`. The root `test_wasm.js` (Puppeteer/Express) is an older ad-hoc smoke test.
+Other probes live in `util/wasm/test_*.py` / `test_persistence.mjs`. Browser automation is Playwright only. The `Module` surface shared between the C++ `EM_ASM` calls and `client/web/*.js` is documented in `client/web/emscripten-module.d.ts`.
 
 ### C++ Linting
 Uses **clang-tidy** (CI uses version 15).
@@ -347,7 +349,7 @@ Key workflow files:
 - Read `wasm_porting.md` for current WASM-port status before planning work; outstanding items are a deployed TLS proxy / public-server multiplayer and cross-browser persistence acceptance.
 - Recent commit history is dominated by WebGL-specific bugfixes (worker context creation, black wedges when looking down, leftover-vertex-buffer triangle artifacts, a WebGL shutdown crash). The GLES2/WebGL path through IrrlichtMt's Emscripten support is still the most fragile part of the port — expect more of this class of bug.
 - `src/threading/thread.cpp:123` — `FIXME: what if this fails, or if already locked by same thread?` in the lock-acquisition path.
-- Root-level `deploy.py` uploads `build-wasm/bin` to test.1ink.us via storage.noahcohn.com (token via `DEPLOY_TOKEN`); CI deploys separately to Cloudflare Pages.
+- `util/wasm/deploy_1ink.py` uploads `build-wasm/bin` to test.1ink.us via storage.noahcohn.com (token via `DEPLOY_TOKEN`); CI deploys separately to Cloudflare Pages. Build output (`build-*/`) and `node_modules/` are git-ignored; never commit them.
 
 ## Useful Reference Files
 

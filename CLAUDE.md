@@ -53,7 +53,9 @@ xvfb-run ./util/test_singleplayer.sh
 python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
 python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)"
 python3 util/wasm/test_demo_tools.py          # packaging/deploy tooling
-(cd util/wasm/proxy && npm test)               # WebSocket proxy
+npm ci && npm run proxy:install               # once: lint/typecheck tooling + proxy deps
+npm run lint && npm run typecheck             # ESLint + tsc (checkJs) over client/web and util/wasm
+npm test                                      # WebSocket proxy (node --test)
 ```
 
 ### C++ Lint
@@ -145,7 +147,8 @@ client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 
 - Recent commit history is dominated by WebGL-specific bugfixes (worker context creation, black wedges when looking down, leftover-vertex-buffer triangle artifacts, a WebGL shutdown crash). The GLES2/WebGL path through IrrlichtMt's Emscripten support is still the most fragile part of the port.
 - `src/threading/thread.cpp:123` — `FIXME: what if this fails, or if already locked by same thread?` in the lock-acquisition path.
-- Root-level `deploy.py` (uploads `build-wasm/bin` to test.1ink.us via storage.noahcohn.com) and `test_wasm.js` (older Puppeteer/Express smoke test, `npm` deps in root `package.json`) predate the `util/wasm/` tooling; CI uses `util/wasm/*.py` and deploys via Cloudflare Pages.
+- `util/wasm/deploy_1ink.py` uploads `build-wasm/bin` to test.1ink.us via storage.noahcohn.com (token via `DEPLOY_TOKEN`); CI deploys separately to Cloudflare Pages.
+- Build output (`build-*/`) and `node_modules/` are git-ignored and must never be committed; the deployable client is produced by CI (`util/wasm/package_demo.py`).
 - Upstream merges land on `master` periodically ("Merge upstream/master into the WASM fork"); keep WASM changes guarded so merges stay clean.
 
 ## Do Not Modify Manually
