@@ -757,6 +757,61 @@ last run, the failures blocking the gate, and the browsers still to cover.
 | `-sSAFE_HEAP=1` | Check for memory errors (debug builds) |
 | `-g` / `-gsource-map` | Debug info / source maps |
 
+## Appendix: Flag Matrix
+
+Link flags live in one place (`src/CMakeLists.txt`, `if(EMSCRIPTEN)`): a shared
+base plus a per-`CMAKE_BUILD_TYPE` profile. Presets: `Emscripten` (Release,
+`build-wasm`), `EmscriptenDebug` (`build-wasm-debug`) and `EmscriptenProfile`
+(RelWithDebInfo, `build-wasm-profile`).
+
+| Flag | Release / MinSizeRel | RelWithDebInfo (`EmscriptenProfile`) | Debug (`EmscriptenDebug`) |
+|------|----------------------|--------------------------------------|---------------------------|
+| `-sASSERTIONS` | `0` | `1` | `2` |
+| `-sSAFE_HEAP=1`, `-sSTACK_OVERFLOW_CHECK=2` | off | off | on |
+| `--profiling-funcs`, `-gsource-map` | off | on | on |
+| `-O3` at link (runs `wasm-opt`) | on | via CMake flags | n/a (`-O0`/`-g`) |
+| `-flto` | opt-in: `-DWASM_ENABLE_LTO=ON` (experimental) | off | off |
+| `-msimd128` | opt-in: `-DWASM_ENABLE_SIMD=ON` | same | same |
+| `-sMALLOC` | opt-in: `-DWASM_MALLOC=mimalloc` | same | same |
+| `-sPTHREAD_POOL_SIZE` | `-DWASM_PTHREAD_POOL_SIZE=10` (integer or JS expression) | same | same |
+
+`-sDISABLE_EXCEPTION_CATCHING=0` was dropped: `-fexceptions` already implies it.
+
+### Thread workarounds
+
+Three `__EMSCRIPTEN__` workarounds predate the pthread pool and are now
+settings (defaults keep the old behaviour until measured):
+
+| Setting | Was | Default |
+|---------|-----|---------|
+| `wasm_mesh_app_thread_items` | `processOnThisThread(4)` every client step (`src/client/client.cpp`) | `4` (`0` = off) |
+| `wasm_mesh_threads` | forced one mesh thread (`mesh_generator_thread.cpp`) | `1` (`0` = normal auto) |
+| `wasm_server_min_receive_ms` | 5 ms `Receive()` floor (`server.cpp`) | `5` (`0` = off) |
+
+Removing one: set it to `0` in `minetest.conf`, run
+`test_async_main_loop.py` and `test_first_playable.py`, and compare frame
+times and mesh latency before flipping the default.
+
+### WebGL context
+
+`CIrrDeviceSDL.cpp` tries WebGL2+explicit swap, WebGL2, WebGL1+explicit swap,
+WebGL1 (`?webgl=1|2` forces one version). Attributes: `powerPreference:
+high-performance`, `preserveDrawingBuffer: false`, `antialias: false` (the
+offscreen back buffer is what is rendered to). The context actually created is
+logged and exposed as `Module.luantiWebGLInfo`. `desynchronized` is not set
+(not available in the pinned Emscripten 6.0.3 attribute struct).
+
+On `webglcontextlost` the engine pauses presenting and the launcher shows an
+overlay, flushes IndexedDB, and offers a reload. The engine has no GL resource
+recreation path, so `webglcontextrestored` does not resume rendering in place.
+
+### Not yet done
+
+Tracked in the originating issue: SIMD second flavour + launcher feature
+detection, `mimalloc` evaluation, Brotli/`wasm-opt` in `package_demo.py`, a
+smaller-heap fallback build with `WebAssembly.Memory` probing, re-enabling
+`enable_post_processing`, and dynamic resolution scaling / perf overlay.
+
 ---
 
 ## Summary Checklist

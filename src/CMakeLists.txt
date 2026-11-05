@@ -809,6 +809,11 @@ if(BUILD_CLIENT)
 	endif()
 
 	if(EMSCRIPTEN)
+		set(WASM_PTHREAD_POOL_SIZE "10" CACHE STRING
+			"Pre-spawned pthread pool size (integer or JS expression, e.g. navigator.hardwareConcurrency)")
+		option(WASM_ENABLE_LTO "Link-time optimisation for the Release WASM build (experimental)" OFF)
+		option(WASM_ENABLE_SIMD "Build with -msimd128 (needs a SIMD-capable browser)" OFF)
+		set(WASM_MALLOC "" CACHE STRING "Emscripten allocator override: dlmalloc, emmalloc or mimalloc (empty = default)")
 		# Emscripten ports and WebAssembly-specific linker flags
 		target_compile_options(${PROJECT_NAME} PRIVATE
 			-pthread
@@ -850,8 +855,14 @@ if(BUILD_CLIENT)
 			-sFETCH=1
 			-sFORCE_FILESYSTEM=1
 			-sEXIT_RUNTIME=0
-			-sASSERTIONS=1
-			-sDISABLE_EXCEPTION_CATCHING=0
+			# Exceptions: -fexceptions already implies DISABLE_EXCEPTION_CATCHING=0,
+			# so the explicit setting that used to live here was redundant.
+			# Pre-spawned worker pool. Luanti starts a dozen+ threads (app,
+			# server, emerge, mesh, sound, async Lua, connection send/recv);
+			# without a pool every std::thread has to round-trip through the
+			# browser main thread, which is also servicing proxied GL.
+			# WASM_PTHREAD_POOL_SIZE may be an integer or a JS expression.
+			-sPTHREAD_POOL_SIZE=${WASM_PTHREAD_POOL_SIZE}
 			# HEAPU8 is for client/web/videotexture.js (Theater Tier C spike):
 			# with ALLOW_MEMORY_GROWTH, listing it here is what keeps
 			# Module.HEAPU8 pointing at the live buffer after a growth instead
@@ -880,6 +891,42 @@ if(BUILD_CLIENT)
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/client/shaders@/client/shaders"
 			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/clientmods@/clientmods"
 		)
+		# Build-type specific profile. See "Appendix: Flag Matrix" in
+		# wasm_porting.md before changing any of these.
+		if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+			# Full runtime checking; slow. For chasing memory/threading bugs.
+			target_link_options(${PROJECT_NAME} PRIVATE
+				-sASSERTIONS=2
+				-sSAFE_HEAP=1
+				-sSTACK_OVERFLOW_CHECK=2
+				--profiling-funcs
+				-gsource-map
+			)
+		elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+			# Release speed with readable stacks and source maps for profiling.
+			target_link_options(${PROJECT_NAME} PRIVATE
+				-sASSERTIONS=1
+				--profiling-funcs
+				-gsource-map
+			)
+		else()
+			# Release / MinSizeRel: shipped build, no runtime assertions.
+			target_link_options(${PROJECT_NAME} PRIVATE
+				-sASSERTIONS=0
+				-O3
+			)
+			if(WASM_ENABLE_LTO)
+				target_compile_options(${PROJECT_NAME} PRIVATE -flto)
+				target_link_options(${PROJECT_NAME} PRIVATE -flto)
+			endif()
+		endif()
+		if(WASM_ENABLE_SIMD)
+			target_compile_options(${PROJECT_NAME} PRIVATE -msimd128)
+			target_link_options(${PROJECT_NAME} PRIVATE -msimd128)
+		endif()
+		if(WASM_MALLOC)
+			target_link_options(${PROJECT_NAME} PRIVATE -sMALLOC=${WASM_MALLOC})
+		endif()
 		# Emit .html shell so the build is directly servable
 		set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
 		set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
