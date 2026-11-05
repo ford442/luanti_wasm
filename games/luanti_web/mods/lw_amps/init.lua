@@ -22,6 +22,14 @@
 -- everyone else. That clock is also what the dance director (lw_dance) reads,
 -- which is how the band on stage stays on the beat of the song coming out of
 -- the cabs.
+--
+-- The files live in `songs/`, not `sounds/`, on purpose. Everything under a
+-- mod's `sounds/` is hashed by the server and announced to every client on
+-- join, which for these is about 26 MiB on every start of the showcase, songs
+-- or not. From `songs/` they are sent with core.dynamic_add_media, one pair at
+-- a time, to a player who is actually in earshot of a song that is playing —
+-- in this pack only on the concert arena (lw_maps), so nothing else pays.
+-- They use the same `media_dir` path as the cabaret's songs (below).
 
 lw_amps = {}
 
@@ -152,6 +160,8 @@ for _, take in ipairs(AROUND) do
 		artist = "Lace Waterfall",
 		length = take[2],
 		bpm = 175,
+		-- songs/, not sounds/: see the note at the top of this file.
+		media_dir = "songs",
 	})
 end
 
@@ -372,7 +382,12 @@ local function media_ready(def, name)
 	if mine[def.name] == true then
 		return true
 	end
-	if mine[def.name] == "pending" or type(core.dynamic_add_media) ~= "function" then
+	if type(core.dynamic_add_media) ~= "function" then
+		-- An engine without it (or a test double): nothing to send, and a
+		-- sound_play for a file the client lacks is just silence.
+		return true
+	end
+	if mine[def.name] == "pending" then
 		return false
 	end
 	mine[def.name] = "pending"

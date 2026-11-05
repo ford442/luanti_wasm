@@ -342,6 +342,12 @@
 	}
 
 	function unlockAudio() {
+		// audio_unlock.js (a --pre-js) owns the OpenAL contexts and logs them.
+		if (typeof Module !== "undefined" && typeof Module["luantiResumeAudio"] === "function") {
+			try {
+				Module["luantiResumeAudio"]("launcher");
+			} catch (_) {}
+		}
 		try {
 			if (typeof window.AudioContext !== "undefined" || typeof window.webkitAudioContext !== "undefined") {
 				if (window.AL && window.AL.contexts) {

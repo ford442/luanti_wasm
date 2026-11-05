@@ -117,10 +117,13 @@ input::placeholder { color: #728172; }
 .console-panel:not([open]) { display: none; }
 .console-panel summary { color: var(--muted); }
 .console-panel pre { min-height: 5rem; white-space: pre-wrap; overflow-wrap: anywhere; color: #b9c7b7; font: .72rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
-.resume-panel { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; background: rgba(2, 5, 3, .45); backdrop-filter: blur(3px); }
+/* A small corner hint, not a full-canvas overlay: the engine releases
+ * pointer lock for its own GUI too (inventory, formspecs, pause menu), and
+ * those need clicks to reach the canvas underneath, not this panel. */
+.resume-panel { position: absolute; z-index: 3; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); display: grid; justify-items: center; gap: .3rem; padding: .55rem; border: 1px solid var(--line); border-radius: 10px; background: rgba(4, 8, 5, .88); }
 .resume-panel[hidden] { display: none; }
-.resume-panel button { padding: .85rem 1.1rem; background: var(--leaf); color: #142016; font-weight: 800; }
-.resume-panel p { font-size: .75rem; color: var(--muted); }
+.resume-panel button { padding: .55rem .72rem; background: var(--leaf); color: #142016; font-weight: 800; }
+.resume-panel p { margin: 0; font-size: .7rem; color: var(--muted); }
 @keyframes breathe { 50% { transform: rotate(35deg) scale(1.08); filter: brightness(1.18); } }
 
 @media (max-width: 860px) {
