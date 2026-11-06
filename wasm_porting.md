@@ -35,7 +35,7 @@ This document describes the current state, blockers, and step-by-step plan for b
 
 ### Remaining Work
 
-- A deployed TLS proxy and public-server multiplayer acceptance are outstanding.
+- The proxy is hardened for public exposure (connection caps, shared rate limit, Origin and port/server-list allowlists, health and metrics, Docker + Caddy recipe). A deployed TLS proxy and public-server multiplayer acceptance are still outstanding.
 - Full world persistence acceptance across Chrome/Edge/Firefox is outstanding.
 - CI and public demo hosting are not yet configured.
 - Sound and complete keyboard, pointer-lock, and touch acceptance remain.
