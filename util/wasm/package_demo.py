@@ -15,11 +15,14 @@ import re
 import shutil
 
 
+# Per-release files. The asset packages are not here: they are
+# content-addressed, shared by every release and published under /assets/.
 REQUIRED_OUTPUTS = (
-	"luanti.html", "luanti.js", "luanti.wasm", "luanti.data",
-	"launcher.js", "launcher.css", "launcher-config.js", "theater.js",
+	"luanti.html", "luanti.js", "luanti.wasm",
+	"launcher.js", "launcher.css", "launcher-config.js", "theater.js", "videotexture.js",
 	"manifest.webmanifest", "service-worker.js", "luanti-web.svg",
 )
+ASSET_NAME_PATTERN = re.compile(r"^assets/[A-Za-z0-9_-]+\.[0-9a-f]{12}\.data$")
 VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -37,9 +40,27 @@ def package_demo(source: Path, destination: Path, version: str) -> dict[str, obj
 	if destination.exists():
 		raise FileExistsError(f"destination already exists: {destination}")
 
-	missing = [name for name in REQUIRED_OUTPUTS if not (source / name).is_file()]
+	missing = [name for name in (*REQUIRED_OUTPUTS, "asset-manifest.json")
+		if not (source / name).is_file()]
 	if missing:
 		raise FileNotFoundError(f"missing generated WASM outputs: {', '.join(missing)}")
+
+	source_manifest = json.loads((source / "asset-manifest.json").read_text(encoding="utf-8"))
+	for name, package in source_manifest["packages"].items():
+		if not ASSET_NAME_PATTERN.fullmatch(package["url"]):
+			raise ValueError(f"package {name} has an unexpected url: {package['url']}")
+		asset = source / package["url"]
+		if not asset.is_file():
+			raise FileNotFoundError(f"missing asset package {asset}")
+		if asset.stat().st_size != package["bytes"] or digest(asset) != package["sha256"]:
+			raise ValueError(f"asset package {asset.name} does not match asset-manifest.json")
+
+	# The service worker precaches exactly the manifest's shell, so a file it
+	# lists that the release does not ship would make every install fail.
+	unshipped = [name for name in source_manifest["shell"] if name not in REQUIRED_OUTPUTS]
+	if unshipped:
+		raise ValueError("asset-manifest.json lists shell files the release does not "
+			"ship: " + ", ".join(unshipped))
 
 	release = destination / "releases" / version
 	release.mkdir(parents=True)
@@ -49,10 +70,29 @@ def package_demo(source: Path, destination: Path, version: str) -> dict[str, obj
 		shutil.copy2(source / name, target)
 		files[name] = {"bytes": target.stat().st_size, "sha256": digest(target)}
 
+	# The release manifest points at the shared, immutable /assets/ directory
+	# two levels up. Names are already content hashes, so unchanged packages
+	# keep their URL (and their browser/service-worker cache entry) across
+	# releases.
+	assets = destination / "assets"
+	assets.mkdir()
+	for name, package in source_manifest["packages"].items():
+		shutil.copy2(source / package["url"], assets / Path(package["url"]).name)
+		package["url"] = "../../" + package["url"]
+	manifest_text = json.dumps(source_manifest, indent="\t", sort_keys=True) + "\n"
+	(release / "asset-manifest.json").write_text(manifest_text, encoding="utf-8")
+	files["asset-manifest.json"] = {
+		"bytes": len(manifest_text.encode("utf-8")),
+		"sha256": hashlib.sha256(manifest_text.encode("utf-8")).hexdigest(),
+	}
+
 	manifest: dict[str, object] = {
 		"version": version,
 		"entrypoint": f"releases/{version}/luanti.html",
+		"buildId": source_manifest["buildId"],
 		"files": files,
+		"assets": {Path(p["url"]).name: {"bytes": p["bytes"], "sha256": p["sha256"]}
+			for p in source_manifest["packages"].values()},
 	}
 	(destination / "version.json").write_text(
 		json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -100,8 +140,11 @@ def package_demo(source: Path, destination: Path, version: str) -> dict[str, obj
 /releases/:version/luanti.wasm
   Cache-Control: public, max-age=31536000, immutable
 
-/releases/:version/luanti.data
+/assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+/releases/:version/asset-manifest.json
+  Cache-Control: no-cache
 
 /releases/:version/launcher.js
   Cache-Control: public, max-age=31536000, immutable
@@ -113,6 +156,9 @@ def package_demo(source: Path, destination: Path, version: str) -> dict[str, obj
   Cache-Control: public, max-age=31536000, immutable
 
 /releases/:version/theater.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/releases/:version/videotexture.js
   Cache-Control: public, max-age=31536000, immutable
 
 /releases/:version/manifest.webmanifest

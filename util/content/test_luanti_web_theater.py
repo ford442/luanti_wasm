@@ -148,7 +148,7 @@ def test_reel_ogg() -> None:
 	data = path.read_bytes()
 	assert_true(data[:4] == b"OggS", "lw_reel.ogg is not an Ogg bitstream")
 	assert_true(b"vorbis" in data[:256], "lw_reel.ogg is not Vorbis")
-	# Keep the sting tiny: it is preloaded into luanti.data for every visitor.
+	# Keep the sting tiny: it is in the luanti_web package every showcase start downloads.
 	assert_true(path.stat().st_size < 12 * 1024, "lw_reel.ogg is over the 12 KiB budget")
 
 

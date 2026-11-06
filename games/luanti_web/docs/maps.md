@@ -376,9 +376,9 @@ The engine collects join-time media only from a mod's `textures`, `sounds`,
 `models` and `media` folders. A track in `organ/` is therefore not in the
 media list and hashes that every client downloads before the world loads, and
 nobody who never walks onto the chapel receives it. The web build is a
-separate cost. Everything under `games/luanti_web` is preloaded into
-`luanti.data`, so a committed track still adds its size to that first
-download. Keep it to a short mono loop, or keep it out of the repository and
+separate cost. Everything under `games/luanti_web` except the Around songs
+is in the `luanti_web` package, so a committed track still adds its size to
+every showcase start. Keep it to a short mono loop, or keep it out of the repository and
 copy it into the build that should have it.
 [`mods/lw_maps/organ/README.md`](../mods/lw_maps/organ/README.md) has the
 encoding command, the size guidance and the details.
@@ -387,8 +387,8 @@ encoding command, the size guidance and the details.
 
 A dim, warm club for Lace Waterfall's Rubella and Lillith, on its own island
 west of the lighthouse. It is the Around arena's stage idea indoors, at a
-smaller scale and lower volume. The box is 27 × 11 × 27 (8,019 cells, under
-8,192, so a quarter of a MiB like the arena). The causeway comes in from the
+smaller scale and lower volume. The box is 27 × 11 × 27 (8,019 cells, a small box
+like the arena's). The causeway comes in from the
 east, under a red awning on gold posts, with a lantern on a pedestal either
 side of the door.
 
@@ -553,8 +553,8 @@ has to learn about it. In order:
    `util/content/generate_luanti_web_maps.py` and add a `MapSpec` for it to
    `SPECS` with its size and local spawn. Build from `lw_nodes` tiles and the
    `lw_maps` props; a new node goes in `lw_maps`, never in the `lw_palette`
-   group (see below). Keep the box at or under 32,768 cells unless it is the
-   one dense map the pack can afford (see Budget).
+   group (see below). Keep the box at or under 65,536 cells (see Budget); a
+   map of a few tens of thousands is the norm.
 2. **Schematic.** Run the generator and commit `map_<id>.mts`. Rerunning it on
    an unchanged tree must be an empty diff.
 3. **Registry.** One `lw_maps.register` row in `mods/lw_maps/init.lua`, in the
@@ -582,7 +582,8 @@ has to learn about it. In order:
    every place a visitor has to be able to walk to from the spawn. The test
    refuses a map without one.
 7. **Budget.** `python3 util/content/test_luanti_web_maps.py` prints the pack's
-   nodes and the Lua heap it keeps, and fails past the budget.
+   cells and the Lua heap it keeps, checks that every cell reads back through
+   the loader's encoding, and fails past the budget.
 8. **Docs.** A row in the table above and a walkthrough.
 
 The harness `util/content/test_luanti_web_maps.lua` then checks the registry
@@ -602,7 +603,7 @@ Carts and flowing water are whole-system demos. A plaza island made of either
 one would fight the three rules these maps are built to:
 
 * the authored-node budget — about 120,000 cells when this boundary was set;
-  Budget below is the cap that applies now
+  Budget below is the cap that applies now (512,000)
 * a walk of about three minutes
 * no new system on an island
 
@@ -677,57 +678,55 @@ out.
 
 ## Budget
 
-A map's cost is its box, not its nodes. `lw_world` loads each schematic into two
-Lua arrays — node and `param2` — with a slot for every cell, air included, and
-keeps them in the WASM heap for the session. Lua sizes an array to a power of
-two, so a map keeps **1 MiB up to 32,768 cells and 2 MiB up to 65,536**:
-halloween (25,920 cells), the fruit garden (32,000), the lighthouse (31,104),
-the bazaar (20,736), the caldera (31,768), the thunder chapel (25,920) and
-the concert arena (31,213) cost 1 MiB each, the snow mountain (44,800) costs
-2 MiB, the rainbow storm (12,288) is under 16,384 cells and so costs half of
-one, and the Around arena (7,500) and the cabaret club (8,019) are under 8,192
-and cost a quarter each — 10.0 MiB for the eleven. While a map loads, the
-engine's `read_schematic` table exists alongside it — one small table per cell,
-about 290 bytes each — and that peaks at 12.6 MiB for the mountain before the
-collector takes it back.
+`lw_world` keeps each schematic **run-length encoded**, one X row at a time,
+in two Lua strings (`lw_world/schems.lua`): three bytes per run (node,
+`param2`, length) and three bytes per row to find it. A map is mostly air and
+runs of the same block, so it costs its runs, not its box. A string costs its
+bytes, where the two arrays this replaced (node and `param2`, one slot per cell,
+air included, sixteen bytes a slot, rounded up to a power of two) cost
+**1 MiB up to 32,768 cells and 2 MiB up to 65,536**. Measured with the real
+loader under Lua 5.1:
+
+| | arrays (before) | run-length (now) |
+|---|---|---|
+| eleven maps kept for the session | 10.0 MiB | **110 KiB** |
+| busiest map (halloween, 25,920 cells) | 1.0 MiB | 17 KiB |
+| snow mountain (44,800 cells) | 2.0 MiB | 16 KiB |
+| concert arena (31,213 cells) | 1.0 MiB | 9 KiB |
+| Around arena (7,500 cells) | 0.25 MiB | 5 KiB |
+| load peak, snow mountain | 12.6 MiB | 10.9 MiB |
+
+What is left of the load peak is the engine's: while a map loads,
+`read_schematic` hands the loader one small table per cell (about 250 bytes
+each), and that exists in full for a moment before the loader packs it and the
+collector takes it back. It is now the ceiling on how big one map can be.
 
 `util/content/test_luanti_web_maps.py` measures both, by running `lw_world`'s
 own loader over every committed map under Lua 5.1
-(`measure_luanti_web_maps_heap.lua`; a TValue is sixteen bytes on wasm32 as on
-x86-64, so the arrays weigh the same in the browser). It fails when:
+(`measure_luanti_web_maps_heap.lua`), and first checks that every cell of
+every map reads back through the encoding as the node and `param2` it was
+saved with (plus a synthetic piece with runs past 255 cells, never-place and
+`ignore` cells). It fails when:
 
-* the maps keep more than **10.5 MiB** between them, or loading one peaks past
-  **16 MiB**;
-* the pack's total box volume passes **272,000** cells;
-* more than one map is over 32,768 cells. The snow mountain is the pack's one
-  dense map; a new map fits in 32,768 or it costs what two do.
+* the maps keep more than **512 KiB** between them, or one keeps more than
+  **64 KiB** (a map that does not compress, like noise, would);
+* loading one map peaks past **16 MiB**;
+* one map's box passes **65,536** cells (`MAX_MAP_VOLUME`);
+* the pack's total box volume passes **512,000** cells (`NODE_BUDGET`). This
+  is a creep guard on how much world has to be generated and meshed, no longer
+  a heap figure: the eleven maps are 271,268 cells, room for about eight more
+  the size of the concert arena.
 
-The cap used to be 120,000 cells of volume, set before the cost was measured.
-It is now set from the measurement: eight maps' worth of 1 MiB against a
-256 MiB initial heap. The arena was a budget decision: it was sized under
-8,192 cells to keep a quarter of a MiB, and the volume cap was raised from
-200,000 to 210,000 for it; the heap caps were not. The thunder chapel was the
-next decision: it is the lane's own 36 × 20 × 36 box, so a full 1 MiB, and
-the caps were raised for it on purpose, the kept-heap cap from 8 to 9 MiB and
-the volume cap from 210,000 to 235,000 (measured: it keeps 1.0 MiB and peaks
-at 7.0 MiB while it loads, under the mountain's 12.6). The cabaret club came
-next, sized under 8,192 cells for a quarter of a MiB. The measurement showed
-that "one more quarter-MiB map fits" was optimistic: each map carries a few
-KiB of table overhead on top of its power-of-two arrays, and ten maps keep
-9.02 MiB (9,232 KiB), 16 KiB over the 9 MiB cap. So the kept-heap cap was
-raised again, to 9.5 MiB, and the volume cap to 241,000. The cabaret keeps
-0.25 MiB and peaks at 2.1 MiB while it loads (measured). The pack is at
-9.02 MiB and 240,055 cells at that point. The concert arena came next: it
-takes the songs off every other map, and it was sized under 32,768 cells so
-it costs 1 MiB rather than 2 (it keeps 1.0 MiB and peaks at 8.2 MiB while it
-loads, measured). The caps went to 10.5 MiB kept and 272,000 cells for it.
-The pack is at 10.0 MiB and 271,268 cells, so a quarter-MiB map still fits
-the heap cap, but not the volume cap. Anything bigger needs the caps raised
-again. Raise them on purpose, with a new measurement in `wasm_porting.md`,
-rather than squeeze a map to fit. The schematics themselves are 20.0 KiB on
-disk and the fifteen textures under
-8 KiB. The sounds are the lighthouse horn (4 KiB) and the chapel's three
-thunder rolls (24 KiB). The chapel's organ slot and the cabaret's song slot
-are empty and cost nothing until files are dropped into them (see Thunder
-chapel and Cabaret club).
+The limits used to be set by the box: a 120,000-cell cap before the cost was
+measured, then 200,000 to 272,000 cells against an 8 to 10.5 MiB kept-heap cap,
+raised one map at a time (the Around arena, thunder chapel, cabaret club and
+concert arena each took a MiB or a quarter of one). With run-length storage the
+heap stopped being the constraint, so the heap cap was re-based on the
+measurement (110 KiB, capped at 512) and the cell cap at 512,000. Raise them on
+purpose, with a new measurement in `wasm_porting.md`, rather than squeeze a map
+to fit. The schematics themselves are 20.0 KiB on disk and the fifteen textures
+under 8 KiB. The sounds are the lighthouse horn (4 KiB) and the chapel's three
+thunder rolls (24 KiB). The chapel's organ slot and the cabaret's song slot are
+empty and cost nothing until files are dropped into them (see Thunder chapel
+and Cabaret club).
 See the content budget in `wasm_porting.md`.

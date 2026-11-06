@@ -22,6 +22,7 @@ Requirements:
 from __future__ import annotations
 
 import io
+import json
 import os
 import shutil
 import sys
@@ -58,7 +59,7 @@ REQUIRED_FILES = (
 	"luanti.html",
 	"luanti.js",
 	"luanti.wasm",
-	"luanti.data",
+	"asset-manifest.json",
 	"launcher.js",
 	"launcher.css",
 	"launcher-config.js",
@@ -108,6 +109,14 @@ def stage_deploy_tree(source: Path) -> Path:
 			src = source / name
 			if src.is_file():
 				shutil.copy2(src, staging / name)
+		# Content-addressed asset packages named by asset-manifest.json.
+		manifest = json.loads((source / "asset-manifest.json").read_text(encoding="utf-8"))
+		(staging / "assets").mkdir()
+		for package in manifest["packages"].values():
+			package_file = source / package["url"]
+			if not package_file.is_file():
+				raise FileNotFoundError(f"missing asset package {package_file}")
+			shutil.copy2(package_file, staging / package["url"])
 
 		# UTF-8 launcher as index.html. Do not publish it as 1ink.1ink — that
 		# extension is served as charset=UTF-16 on this host.

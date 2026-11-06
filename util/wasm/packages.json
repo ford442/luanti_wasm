@@ -1,0 +1,72 @@
+{
+	"schema": 1,
+	"packages": {
+		"core": {
+			"label": "Engine data",
+			"eager": true,
+			"mounts": [
+				{"src": "builtin", "dest": "/builtin"},
+				{"src": "textures", "dest": "/textures"},
+				{"src": "fonts", "dest": "/fonts"},
+				{"src": "client/shaders", "dest": "/client/shaders"},
+				{"src": "clientmods", "dest": "/clientmods"}
+			]
+		},
+		"luanti_web": {
+			"label": "Luanti Web Showcase",
+			"mounts": [
+				{"src": "games/luanti_web", "dest": "/games/luanti_web", "exclude": ["mods/lw_amps/songs/*.ogg"]}
+			]
+		},
+		"luanti_web_songs_main": {
+			"label": "Showcase songs",
+			"mounts": [
+				{"src": "games/luanti_web/mods/lw_amps/songs", "dest": "/games/luanti_web/mods/lw_amps/songs",
+					"include": ["lw_amps_around_happy_hard_l.ogg", "lw_amps_around_happy_hard_r.ogg"]}
+			]
+		},
+		"luanti_web_songs_takes": {
+			"label": "Showcase song takes",
+			"mounts": [
+				{"src": "games/luanti_web/mods/lw_amps/songs", "dest": "/games/luanti_web/mods/lw_amps/songs",
+					"include": ["lw_amps_around_happy_hard_[1-9]_[lr].ogg"]}
+			]
+		},
+		"flower_island": {
+			"label": "Flower Island",
+			"mounts": [{"src": "games/flower_island", "dest": "/games/flower_island"}]
+		},
+		"rollercoaster": {
+			"label": "Rollercoaster Park",
+			"mounts": [{"src": "games/rollercoaster", "dest": "/games/rollercoaster"}]
+		},
+		"log_ride": {
+			"label": "Log Ride Flume",
+			"mounts": [{"src": "games/log_ride", "dest": "/games/log_ride"}]
+		},
+		"spire_tunnel": {
+			"label": "Spire Tunnel",
+			"mounts": [{"src": "games/spire_tunnel", "dest": "/games/spire_tunnel"}]
+		},
+		"devtest": {
+			"label": "Development Test",
+			"mounts": [{"src": "games/devtest", "dest": "/games/devtest"}]
+		}
+	},
+	"games": {
+		"luanti_web": {"packages": ["luanti_web"], "background": ["luanti_web_songs_main", "luanti_web_songs_takes"]},
+		"flower_island": {"packages": ["flower_island"]},
+		"rollercoaster": {"packages": ["rollercoaster"]},
+		"log_ride": {"packages": ["log_ride"]},
+		"spire_tunnel": {"packages": ["spire_tunnel"]},
+		"devtest": {"packages": ["devtest"]}
+	},
+	"shell": [
+		"luanti.html", "luanti.js", "luanti.wasm", "launcher.js", "launcher.css",
+		"launcher-config.js", "theater.js", "videotexture.js", "manifest.webmanifest",
+		"luanti-web.svg"
+	],
+	"shellOptional": ["luanti.worker.js"],
+	"verified": ["luanti.js", "luanti.wasm"],
+	"serviceWorker": "client/web/service-worker.js"
+}

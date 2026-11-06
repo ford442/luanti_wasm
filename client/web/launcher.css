@@ -110,6 +110,9 @@ input::placeholder { color: #728172; }
 #luanti-persistence-status, #luanti-persistence-error { padding: .55rem .8rem; border-radius: 9px; background: rgba(7,13,9,.85); font-size: .75rem; }
 #luanti-persistence-status[data-state="saved"] { color: var(--leaf); }
 #luanti-persistence-error { margin-top: .5rem; background: #61231f; color: var(--danger); white-space: pre-wrap; }
+.update-toast { position: fixed; z-index: 20; left: 50%; transform: translateX(-50%); top: max(12px, env(safe-area-inset-top)); display: flex; align-items: center; gap: .7rem; padding: .55rem .8rem; border: 1px solid var(--line); border-radius: 9px; background: rgba(7,13,9,.92); font-size: .8rem; }
+.update-toast[hidden] { display: none; }
+.update-toast button { padding: .4rem .65rem; border: 1px solid var(--line); border-radius: 8px; background: rgba(7,13,9,.82); color: var(--ink); }
 .game-tools { position: absolute; z-index: 5; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); display: flex; gap: .45rem; opacity: .42; transition: opacity .2s; }
 .game-tools:hover, .game-tools:focus-within { opacity: 1; }
 .game-tools button, .console-panel button, .resume-panel button { padding: .55rem .72rem; border: 1px solid var(--line); border-radius: 8px; background: rgba(7,13,9,.82); color: var(--ink); }

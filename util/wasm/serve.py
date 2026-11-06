@@ -10,7 +10,11 @@ import argparse
 import functools
 import http.server
 from pathlib import Path
+import re
 import socketserver
+
+# Content-addressed packages (build_packages.py) never change under their name.
+IMMUTABLE_ASSET = re.compile(r"/assets/[A-Za-z0-9_-]+\.[0-9a-f]{12}\.data$")
 
 
 class CrossOriginIsolatedHandler(http.server.SimpleHTTPRequestHandler):
@@ -32,7 +36,10 @@ class CrossOriginIsolatedHandler(http.server.SimpleHTTPRequestHandler):
 		# The demo is intentionally embeddable from an isolated parent origin.
 		# Its own COEP still protects every nested resource load.
 		self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
-		self.send_header("Cache-Control", "no-store")
+		if IMMUTABLE_ASSET.search(self.path.split("?", 1)[0]):
+			self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+		else:
+			self.send_header("Cache-Control", "no-store")
 		self.send_header("X-Content-Type-Options", "nosniff")
 		super().end_headers()
 
