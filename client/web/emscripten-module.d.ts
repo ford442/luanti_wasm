@@ -51,6 +51,38 @@ interface LuantiPersistence {
 	_requestGeneration(options: { generation: number; reason: string; urgent: boolean }): void;
 }
 
+/** One entry of asset-manifest.json (written by util/wasm/build_packages.py). */
+interface LuantiAssetPackage {
+	url: string;
+	bytes: number;
+	sha256: string;
+	files: number;
+	label: string;
+	eager: boolean;
+}
+
+interface LuantiAssetManifest {
+	schema: number;
+	buildId: string;
+	packages: Record<string, LuantiAssetPackage>;
+	games: Record<string, { packages: string[]; background?: string[] }>;
+	shell: Record<string, { bytes: number; sha256: string; verify: boolean }>;
+}
+
+/** Streamed asset packages (client/web/packages.js, a --pre-js file). */
+interface LuantiPackages {
+	manifest(): Promise<LuantiAssetManifest>;
+	/** Download, verify and mount the named packages; progress is summed bytes. */
+	load(names: string[], onProgress?: (loaded: number, total: number) => void): Promise<unknown>;
+	loadCore(onProgress?: (loaded: number, total: number) => void): Promise<unknown>;
+	loadGame(game: string, onProgress?: (loaded: number, total: number) => void): Promise<unknown>;
+	/** The game's optional packages (songs), one at a time. */
+	loadBackground(game: string): Promise<unknown>;
+	/** Resolves when the eager `core` packages are mounted. */
+	core: Promise<unknown>;
+	getStates(): Record<string, { state: string; loaded: number; total: number }>;
+}
+
 /** Launcher hooks the engine calls back into (client/web/launcher.js). */
 interface LuantiLauncher {
 	/** `percent` is -1 or null when unknown; `phase` is null when unset. */
@@ -65,6 +97,8 @@ interface LuantiLauncher {
 		phase: string;
 		mode: string;
 		loadingDismissed: boolean;
+		coreReady: boolean;
+		packages: Record<string, { state: string; loaded: number; total: number }>;
 	};
 }
 
@@ -112,6 +146,9 @@ interface LuantiModule {
 	luantiNetwork?: LuantiNetwork;
 	luantiPersistence?: LuantiPersistence;
 	luantiLauncher?: LuantiLauncher;
+	luantiPackages?: LuantiPackages;
+	/** Override for the asset manifest location (default: asset-manifest.json). */
+	luantiAssetManifestUrl?: string;
 	luantiTheater?: LuantiTheater;
 	luantiVideoTexture?: LuantiVideoTexture;
 	/** audio_unlock.js: resume suspended OpenAL contexts; returns how many. */

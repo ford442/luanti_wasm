@@ -93,6 +93,11 @@ end
 --   they come into range. A song whose two files are not both there is not
 --   registered, so a stage waiting for its songs stays quiet instead of
 --   playing silence.
+-- * `lazy_media`: the files may not exist yet when the song is registered.
+--   The web build streams the Around songs in after the world is up (see
+--   client/web/packages.js), so the check moves from registration to the
+--   moment a listener needs the pair: until both files are there that
+--   listener is simply not started, and the sweep tries again every second.
 -- * `playlist`: the stage it belongs to (`lw_amps.playlist`), so a map can say
 --   "play my songs" without naming files that may not have been added yet.
 function lw_amps.register_song(name, def)
@@ -113,7 +118,8 @@ function lw_amps.register_song(name, def)
 			left = dir .. def.sounds.left .. ".ogg",
 			right = dir .. def.sounds.right .. ".ogg",
 		}
-		if not (file_exists(def.files.left) and file_exists(def.files.right)) then
+		if not def.lazy_media and
+				not (file_exists(def.files.left) and file_exists(def.files.right)) then
 			core.log("warning", ("lw_amps: %s is registered but %s or %s is " ..
 					"missing; leaving it out"):format(name, def.files.left, def.files.right))
 			return nil
@@ -162,6 +168,8 @@ for _, take in ipairs(AROUND) do
 		bpm = 175,
 		-- songs/, not sounds/: see the note at the top of this file.
 		media_dir = "songs",
+		-- The web build downloads these after the world has started.
+		lazy_media = true,
 	})
 end
 
@@ -388,6 +396,11 @@ local function media_ready(def, name)
 		return true
 	end
 	if mine[def.name] == "pending" then
+		return false
+	end
+	if def.lazy_media and not (file_exists(def.files.left) and file_exists(def.files.right)) then
+		-- Still downloading (web build). Nothing is pending yet, so the next
+		-- sweep looks again; the clock and the dancers run either way.
 		return false
 	end
 	mine[def.name] = "pending"

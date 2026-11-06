@@ -527,32 +527,61 @@ must trust its operator or self-host it.
 ## File System Strategy
 
 ### Read-Only Assets
-Use `--preload-file` or `--embed-file` at link time.
 
-| Asset | Mount Point | Method |
-|-------|-------------|--------|
-| `builtin/` | `/builtin` | `--preload-file` |
-| `games/luanti_web/` | `/games/luanti_web` | `--preload-file` |
-| `games/devtest/` | `/games/devtest` | `--preload-file` |
-| `games/flower_island/` etc. | `/games/<id>` | `--preload-file` |
-| `textures/` | `/textures` | `--preload-file` |
-| `fonts/` | `/fonts` | `--preload-file` |
-| `client/shaders/` | `/client/shaders` | `--preload-file` |
-| `clientmods/` | `/clientmods` | `--preload-file` |
+Read-only data is **not** preloaded into the engine. `util/wasm/packages.json`
+lists the packages, `util/wasm/build_packages.py` (the `luanti_packages`
+target, run by every build) writes each one as a content-addressed
+`assets/<name>.<sha256[:12]>.data` plus `asset-manifest.json`, and
+`client/web/packages.js` downloads, hash-checks and mounts them into MEMFS on
+demand. `core` is eager (the launcher waits for it); a game's package is
+fetched when that game is chosen; a game's `background` packages (the showcase
+songs) are fetched once its world is running.
+
+| Package | Mount point(s) | When it is fetched |
+|---------|----------------|--------------------|
+| `core`: `builtin/`, `textures/`, `fonts/`, `client/shaders/`, `clientmods/` | `/builtin`, `/textures`, `/fonts`, `/client/shaders`, `/clientmods` | first visit, in parallel with compiling `luanti.wasm` |
+| `luanti_web`: `games/luanti_web/` without the songs | `/games/luanti_web` | when "Luanti Web Showcase" is started |
+| `luanti_web_songs_main`, `luanti_web_songs_takes`: `lw_amps/songs/*.ogg` | `/games/luanti_web/mods/lw_amps/songs` | in the background, after that world is running (the default song first) |
+| `flower_island`, `rollercoaster`, `log_ride`, `spire_tunnel`, `devtest` | `/games/<id>` | when that game is started |
 | `client/web/media/` | served at `media/` | copied next to `luanti.html`, fetched at runtime |
+
+`devtest` is deliberately not in `core` (it is 1.4 MB and only used for engine
+work). A remote server brings its own content, so joining one fetches no game
+package.
+
+Package format ("LWP1", described in `build_packages.py`): the file bodies,
+then a JSON index, a little-endian u32 index length and the magic. Output is
+deterministic, so an unchanged tree keeps its hash, its URL and its cache entry
+from one release to the next. `package_demo.py` publishes the packages once in
+`/assets/` (`immutable`) and points each release's `asset-manifest.json` at
+them; only the manifest is revalidated.
+
+The service worker (`client/web/service-worker.js`) precaches the shell and
+`core` for offline use, serves packages cache-first and the shell network-first
+(see the header comment there for the rules, and
+`util/wasm/test_service_worker_browser.py` for the stale-`luanti.wasm`
+regression test). A new build installs next to the old one and waits for the
+launcher's "new version available" button.
 
 ### Content Budget
 
-Everything in the `--preload-file` list ends up in `luanti.data`, which every
-visitor downloads *before* the engine starts. That file is the demo's time to
-first frame, so growing it is a deliberate decision, not a side effect.
+`luanti.data` no longer exists, so there are two budgets: what every visitor
+pays before the first frame, and what one game costs when it is chosen.
 
-| Budget | Limit | Why |
-|--------|-------|-----|
-| `luanti.data` | keep under ~40 MB (currently ~38 MB: ~11 MB of engine and game data plus ~26 MB of `lw_amps` songs) | first-visit download on a phone |
-| Heap | 256 MB initial, 1 GB maximum | `-sINITIAL_MEMORY` / `-sMAXIMUM_MEMORY` |
+| Budget | Limit | Measured (2026-11-06) |
+|--------|-------|-----------------------|
+| **First visit**: `core` (builtin, fonts, textures, shaders, clientmods) | **≤ 12 MB**, enforced by `test_demo_tools.py` | 9.33 MB (4.39 MB gzipped) |
+| First frame of the default game: `core` + `luanti_web` | follows from the two rows | 10.1 MB, down from the 39.1 MB `luanti.data` it replaced (about 4.7 MB gzipped) |
+| **Per game**: one game's package | small demo games under ~100 KB; `luanti_web` under ~1 MB; `devtest` is the exception at 1.5 MB | `luanti_web` 0.77 MB, `devtest` 1.50 MB, the four demos 14–38 KB each |
+| **Streamed optional content**: the showcase songs | under 30 MiB in total (`test_luanti_web_amps.py`) | 27.5 MB, in two packages that never delay the first frame |
+| Engine: `luanti.wasm` + `luanti.js` | not budgeted yet | 10.2 MB + 0.4 MB |
+| Heap | 256 MB initial, 2 GiB maximum | `-sINITIAL_MEMORY` / `-sMAXIMUM_MEMORY` |
 | Texture size | 16 or 32 px tiles; no single texture over 2048 px | GLES2 limits and atlas pressure |
-| Runtime media | unbounded, but fetched on demand | `client/web/media/`, never preloaded |
+| Runtime media | unbounded, but fetched on demand | `client/web/media/`, never packaged |
+
+Growing `core` is a deliberate decision: every visitor pays for it. Content
+for one game belongs in that game's package; anything big and optional belongs
+in a `background` package (or runtime media).
 
 Bundle:
 
@@ -560,43 +589,28 @@ Bundle:
 * Small, purpose-built demo games under a few hundred KB each — currently
   `games/flower_island`, `games/rollercoaster`, `games/log_ride`, and
   `games/spire_tunnel` (84–184 KB apiece). Each new demo game added to the
-  `--preload-file` list in `src/CMakeLists.txt` counts against the
-  `luanti.data` budget above like any other asset.
+  package in `util/wasm/packages.json` counts against the per-game budget
+  above, and costs nothing for visitors who never pick it.
 * Showcase art as small generated PNGs — the whole `luanti_web` palette,
   theater filmstrips, map-pack props and menu art is under 90 KB, regenerated
   by `util/content/generate_luanti_web_textures.py`.
 * Authored themed maps as committed `.mts` schematics in
   `games/luanti_web/mods/lw_world/schems/map_*.mts` — a few KB each on disk.
-  What they cost is heap: `lw_world` loads each schematic into two Lua arrays
-  with a slot per cell of its box, air included, and keeps them for the
-  session. Measured with `lw_world`'s own loader under Lua 5.1 (a TValue is 16
-  bytes on wasm32 and x86-64 alike), a map keeps 1 MiB up to 32,768 cells and
-  2 MiB up to 65,536, because Lua sizes arrays to powers of two; loading one
-  peaks at about 290 bytes a cell (12.6 MiB for the 44,800-cell snow mountain)
-  until the engine's `read_schematic` table is collected.
-  `util/content/test_luanti_web_maps.py` repeats that measurement and fails
-  past 10.5 MiB kept, a 16 MiB load peak, 272,000 cells in total, or a second
-  map over 32,768 cells. The earlier 120k-cell cap predated the measurement; 8 MiB
-  is eight small maps against the 256 MB initial heap. With the rainbow storm
-  (12,288 cells, 0.5 MiB) the seven maps kept 7.5 MiB and filled 198,616 of
-  the then 200,000 cells. The Around arena is 7,500 cells, under 8,192, so it
-  keeps 0.25 MiB and peaks at 2.0 MiB while it loads (measured). The eight maps
-  keep 7.75 MiB, still peak at 12.6 MiB (the mountain), and fill 206,116 cells.
-  The volume cap was raised to 210,000 for it and the heap caps were not.
-  The thunder chapel (`halloween_storm`) is the Halloween lane's box, 25,920
-  cells, so it keeps a full 1.0 MiB and peaks at 7.0 MiB while it loads
-  (measured). Both caps were raised for it on purpose: 8 → 9 MiB kept,
-  210,000 → 235,000 cells. The cabaret club is 8,019 cells, under 8,192, so
-  it keeps 0.25 MiB and peaks at 2.1 MiB while it loads (measured). It did
-  not fit the 9 MiB cap after all: each map carries a few KiB of table
-  overhead on top of its arrays, and the ten maps keep 9.02 MiB (9,232 KiB).
-  So the caps were raised again, on purpose: 9 → 9.5 MiB kept and
-  235,000 → 241,000 cells. The ten maps still peak at 12.6 MiB (the
-  mountain) and fill 240,055 cells. See `games/luanti_web/docs/maps.md`.
-  The concert arena (31,213 cells, 1 MiB, 8.2 MiB load peak, measured) took
-  the songs off every other map; the heap cap went to 10.5 MiB and the volume
-  cap to 272,000 for it. The eleven maps keep 10.0 MiB and fill 271,268
-  cells. See `games/luanti_web/docs/maps.md`.
+  `lw_world` keeps each loaded schematic run-length encoded, a row at a time,
+  in two Lua strings (three bytes per run, three per row), so a map costs its
+  runs rather than its box. Measured with `lw_world`'s own loader under Lua 5.1,
+  the eleven maps keep **110 KiB** between them (17 KiB for the busiest, the
+  Halloween lane; 16 KiB for the 44,800-cell snow
+  mountain), where the previous one-slot-per-cell arrays (node and `param2`,
+  air included, 16 bytes a slot, rounded to a power of two) kept 10.0 MiB.
+  Loading one still peaks at about 250 bytes a cell (10.9 MiB for the
+  mountain) until the engine's `read_schematic` table is collected; that is
+  now what limits a single map. `util/content/test_luanti_web_maps.py`
+  repeats the measurement, round-trips every cell through the encoding, and
+  fails past 512 KiB kept (64 KiB for one map), a 16 MiB load peak, 65,536
+  cells in one map, or 512,000 cells in the pack (a creep guard; the eleven
+  maps are 271,268). The history of the old caps is in
+  `games/luanti_web/docs/maps.md` ("Budget").
 * Short sound effects as mono Vorbis under a few KiB each: the lighthouse horn
   and the thunder chapel's three thunder rolls
   (`games/luanti_web/mods/lw_maps/sounds/lw_thunder.{1,2,3}.ogg`, under
@@ -604,8 +618,8 @@ Bundle:
   The chapel also has an empty slot for an optional pipe-organ loop in
   `games/luanti_web/mods/lw_maps/organ/`. That folder is outside the engine's
   join-time media: the track is pushed with `core.dynamic_add_media` to
-  visitors of the chapel only. It is still inside the `games/luanti_web`
-  preload, though, so a committed track grows `luanti.data` by its size. Keep
+  visitors of the chapel only. It is still inside the `luanti_web` package,
+  though, so a committed track grows that package (every showcase start) by its size. Keep
   it a short mono loop, or leave it out of the repository (see that folder's
   README).
 * The cabaret club's songs: an empty slot in
@@ -614,29 +628,32 @@ Bundle:
   outside the join-time media: `lw_amps` pushes each pair with
   `core.dynamic_add_media` (`client_cache = false`) to listeners of the
   cabaret's cabs only. Also like the organ, anything committed there is
-  inside the `games/luanti_web` preload, so it grows `luanti.data` by its
-  size. With `luanti.data` at about 38 of its ~40 MB, add a few small pairs
-  at most, or keep the files out of the repository (see that folder's
-  README).
+  inside the `luanti_web` package, so it grows that package by its size. Add
+  a few small pairs at most, or give a large set its own `background`
+  package in `util/wasm/packages.json` the way the Around songs have (see
+  that folder's README).
 * Short, same-origin theater clips dropped into `client/web/media/` and fetched
   at runtime.
 * The Lace Waterfall songs for the stage amps
   (`games/luanti_web/mods/lw_amps/songs/`). That is seven mixes of "Around",
-  each a pair of mono Vorbis files (~26 MiB in all). This is the one deliberate
-  exception to "small": the budget above was raised from ~16 MB to ~40 MB for
-  them. The amps can only place the song on the stage if it is game media, so
-  it cannot be a runtime fetch from `client/web/media/`; but it does not have
-  to be *startup* media. The files sit in `songs/`, outside every media
-  folder, so the server no longer hashes ~26 MiB on each start or announces it
-  on join, and `lw_amps` pushes a pair with `core.dynamic_add_media` only when
-  it plays for a listener (only on the concert arena, in the pack). They are
-  still in `luanti.data`, since the whole game folder is preloaded. Long sounds
-  are streamed, not decoded whole (`SOUND_DURATION_MAX_SINGLE` is 3 s in
-  `src/client/sound/sound_constants.h`). The cost is the download, plus a
-  second copy: the client caches received media under `path_cache`, which on
-  the web is inside the IDBFS-backed `path_user`. The songs are sent with
-  `client_cache = false`, so they no longer add a copy there. `util/content/test_luanti_web_amps.py` fails past 30 MiB of
-  songs.
+  each a pair of mono Vorbis files (27.5 MB in all) — the one deliberate
+  exception to "small". They are no longer part of anything a visitor must
+  download before playing: `util/wasm/packages.json` puts them in two
+  `background` packages (the default mix first, then the six alternate takes)
+  that the launcher fetches one at a time once the showcase world is running.
+  The amps can only place the song on the stage if it is game media, so it is
+  written into the game's `songs/` folder rather than fetched by the engine;
+  `lw_amps` registers these songs with `lazy_media = true`, checks for the
+  files when a listener needs them, stays quiet until they exist and then
+  starts the pair in step with the clock. The files sit in `songs/`, outside
+  every media folder, so the server never hashes them at start-up or announces
+  them on join, and `lw_amps` pushes a pair with `core.dynamic_add_media` only
+  when it plays for a listener (only on the concert arena, in the pack).
+  Long sounds are streamed, not decoded whole (`SOUND_DURATION_MAX_SINGLE` is
+  3 s in `src/client/sound/sound_constants.h`). The songs are sent with
+  `client_cache = false`, so the client does not keep a second copy under
+  `path_cache` (which on the web is inside the IDBFS-backed `path_user`).
+  `util/content/test_luanti_web_amps.py` fails past 30 MiB of songs.
 * An optional tiny authoring mod (e.g. a clone-stick tool) — not a full
   modpack zoo.
 
@@ -644,7 +661,7 @@ Do not bundle yet:
 
 * VoxeLibre, Mineclonia, or other large mob-pack/gameplay mods.
 * Full `minetest_game` as the *default* web game (it may ship later as an
-  opt-in, non-default download, not baked into `luanti.data`).
+  opt-in, non-default download, in its own package and never in `core`).
 * A runtime ContentDB client as a demo dependency: the showcase must work with
   networking switched off.
 * 128 px / HD texture packs.
@@ -657,7 +674,7 @@ Do not bundle yet:
   sources per listener, and a listener's sources are released once they walk
   out of earshot. A missing or failing `sound_play` leaves the band dancing in
   silence instead of erroring.
-* Large MP4s inside `--preload-file` / `luanti.data`. Theater clips are
+* Large MP4s inside an asset package (above all `core`). Theater clips are
   runtime fetches precisely so the download cost falls only on visitors who
   walk into the theater.
 

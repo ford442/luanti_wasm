@@ -250,7 +250,7 @@ end
 --------------------------------------------------------------------------
 
 -- Same-origin clip served next to luanti.html in media/. It is deliberately
--- NOT preloaded into luanti.data: see client/web/media/README.md.
+-- NOT in an asset package: see client/web/media/README.md.
 lw_theater.web_clip = "showcase-reel.webm"
 
 function lw_theater.web_video_available()

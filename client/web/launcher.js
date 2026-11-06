@@ -9,6 +9,8 @@
 	var config = window.LUANTI_WEB_CONFIG || {};
 	var query = new URLSearchParams(location.search);
 	var runtimeReady = false;
+	var coreReady = false;
+	var backgroundStarted = false;
 	var started = false;
 	var launchInFlight = false;
 	var activeMode = query.get("address") ? "remote" : "local";
@@ -63,7 +65,9 @@
 		resumeButton: element("luanti-resume-button"),
 		glLost: element("luanti-gl-lost"),
 		glLostText: element("luanti-gl-lost-text"),
-		glLostReload: element("luanti-gl-lost-reload")
+		glLostReload: element("luanti-gl-lost-reload"),
+		update: element("luanti-update"),
+		updateReload: element("luanti-update-reload")
 	};
 
 	// ?webgl=1|2 forces a single WebGL version (read by CIrrDeviceSDL.cpp).
@@ -129,6 +133,18 @@
 		ui.loading.style.pointerEvents = "";
 	}
 
+	// Optional content (the showcase songs) streams in once the world is up,
+	// so it never delays the first frame. lw_amps registers songs lazily and
+	// stays quiet until the files arrive.
+	function startBackgroundContent() {
+		if (backgroundStarted || !currentSession || currentSession.mode !== "local")
+			return;
+		backgroundStarted = true;
+		Module["luantiPackages"]["loadBackground"](currentSession.game).catch(function(error) {
+			appendLog("packages", ["background content failed: " + String(error && error.message || error)]);
+		});
+	}
+
 	function reportStatus(message, percent, phase) {
 		if (phase)
 			activePhase = phase;
@@ -153,6 +169,7 @@
 			ui.share.hidden = true;
 		}
 		if (activePhase === "playing") {
+			startBackgroundContent();
 			// Dismiss as soon as the engine enters the game loop. Waiting for
 			// the first GL commit left a full-screen "World ready" panel that
 			// flickered against the canvas whenever status/frame hooks raced.
@@ -183,7 +200,9 @@
 				"started": started,
 				"phase": activePhase,
 				"mode": currentSession ? currentSession.mode : activeMode,
-				"loadingDismissed": loadingShellDismissed
+				"loadingDismissed": loadingShellDismissed,
+				"coreReady": coreReady,
+				"packages": Module["luantiPackages"] ? Module["luantiPackages"]["getStates"]() : {}
 			};
 		}
 	};
@@ -197,13 +216,54 @@
 		reportStatus(text, percent, activePhase === "storage" ? "storage" : "assets");
 	};
 
-	Module["onRuntimeInitialized"] = function() {
-		runtimeReady = true;
+	function megabytes(bytes) {
+		return (bytes / 1048576).toFixed(1);
+	}
+
+	function reportDownload(label, loaded, total) {
+		var percent = total > 0 ? loaded / total * 100 : null;
+		reportStatus("Downloading " + label + " (" + megabytes(loaded) + " / " + megabytes(total) + " MB)",
+			percent, "assets");
+	}
+
+	// The core package (builtin, fonts, textures, shaders) starts downloading
+	// from packages.js as soon as the engine script is evaluated. Everything
+	// else is fetched when a game is chosen.
+	window.addEventListener("luanti:package", function(event) {
+		var detail = /** @type {CustomEvent} */ (event).detail || {};
+		if (detail.name !== "core" || coreReady)
+			return;
+		if (detail.state === "loading" && detail.total > 0) {
+			ui.playLabel.textContent = "Downloading engine data… " +
+				Math.floor(detail.loaded / detail.total * 100) + "%";
+		}
+	});
+
+	function enablePlayIfReady() {
+		if (!runtimeReady || !coreReady)
+			return;
 		ui.play.disabled = false;
 		ui.playLabel.textContent = activeMode === "remote" ? "Join server" : "Start world";
 		reportStatus("Ready to launch", 100, "engine");
 		if (query.get("autostart") === "1")
 			ui.form.requestSubmit();
+	}
+
+	Module["onRuntimeInitialized"] = function() {
+		runtimeReady = true;
+		var packages = Module["luantiPackages"];
+		if (!packages) {
+			showError("This build is missing its asset loader (packages.js).");
+			return;
+		}
+		packages["core"].then(function() {
+			coreReady = true;
+			enablePlayIfReady();
+		}, function(error) {
+			ui.playLabel.textContent = "Engine data failed to load";
+			showError("Could not download the engine data: " + String(error && error.message || error) +
+				". Check your connection and reload the page.");
+		});
 	};
 
 	window.addEventListener("luanti:persistence", function(event) {
@@ -383,6 +443,15 @@
 		} catch (_) {}
 	}
 
+	function abortLaunch(error) {
+		started = false;
+		launchInFlight = false;
+		ui.play.disabled = !(runtimeReady && coreReady);
+		ui.launcher.hidden = false;
+		ui.gameShell.hidden = true;
+		showError(String(error && error.message || error));
+	}
+
 	ui.form.addEventListener("submit", function(event) {
 		event.preventDefault();
 		if (started || launchInFlight)
@@ -401,34 +470,41 @@
 			ui.launcher.hidden = true;
 			ui.gameShell.hidden = false;
 			launchInFlight = true;
-			reportStatus("Starting Luanti…", 4, "engine");
+			backgroundStarted = false;
 			var launchArgs = argumentsForSession(session);
-			requestAnimationFrame(function() {
-				syncCanvasBackingStore();
+			var label = ui.game.selectedOptions && ui.game.selectedOptions[0] ?
+				ui.game.selectedOptions[0].textContent : session.game;
+			// A local world needs its game's files in the filesystem; a
+			// remote server brings its own content.
+			var gameReady = session.mode === "local" ?
+				(reportStatus("Downloading " + label + "…", 0, "assets"),
+					Module["luantiPackages"]["loadGame"](session.game, function(loaded, total) {
+						reportDownload(label, loaded, total);
+					})) :
+				Promise.resolve();
+			gameReady.then(function() {
+				reportStatus("Starting Luanti…", 4, "engine");
 				requestAnimationFrame(function() {
 					syncCanvasBackingStore();
-					try {
-						if (typeof Module["callMain"] !== "function")
-							throw new Error("The engine is still preparing. Try again in a moment.");
-						started = true;
-						Module["callMain"](launchArgs);
-					} catch (error) {
-						started = false;
-						launchInFlight = false;
-						ui.play.disabled = !runtimeReady;
-						ui.launcher.hidden = false;
-						ui.gameShell.hidden = true;
-						showError(String(error.message || error));
-					}
+					requestAnimationFrame(function() {
+						syncCanvasBackingStore();
+						try {
+							if (typeof Module["callMain"] !== "function")
+								throw new Error("The engine is still preparing. Try again in a moment.");
+							started = true;
+							Module["callMain"](launchArgs);
+						} catch (error) {
+							abortLaunch(error);
+						}
+					});
 				});
+			}, function(error) {
+				abortLaunch(new Error("Could not download " + label + " (" +
+					String(error && error.message || error) +
+					"). Check your connection and try again."));
 			});
 		} catch (error) {
-			started = false;
-			launchInFlight = false;
-			ui.play.disabled = !runtimeReady;
-			ui.launcher.hidden = false;
-			ui.gameShell.hidden = true;
-			showError(String(error.message || error));
+			abortLaunch(error);
 		}
 	});
 
@@ -615,29 +691,71 @@
 	initializeProxies();
 	setMode(activeMode);
 
+	// Narrow, versioned service worker (service-worker.js): precaches this
+	// build as one verified set, caches content-addressed asset packages
+	// forever, and never serves a mixed or stale engine. A new build waits
+	// until the user accepts it here.
 	if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+		var reloadingForUpdate = false;
+
+		/** @param {() => void} apply */
+		var offerUpdate = function(apply) {
+			ui.update.hidden = false;
+			ui.updateReload.onclick = function() {
+				ui.updateReload.disabled = true;
+				apply();
+			};
+		};
+
+		// A worker that installed while this page was already controlled is a
+		// new build of this same deployment; it activates when told to.
+		/** @param {ServiceWorker} worker */
+		var offerWorker = function(worker) {
+			offerUpdate(function() { worker.postMessage({type: "SKIP_WAITING"}); });
+		};
+
 		window.addEventListener("load", function() {
-			// Drop every previous registration/cache first. An older worker
-			// intercepted index.html + luanti.wasm and, on fetch failure,
-			// replayed a stale engine (6f0f902 + WASM SendBlocks logs).
-			var ready = navigator.serviceWorker.getRegistrations().then(function(regs) {
-				return Promise.all(regs.map(function(reg) { return reg.unregister(); }));
-			}).then(function() {
-				if (!window.caches || !caches.keys)
+			var hadController = !!navigator.serviceWorker.controller;
+			navigator.serviceWorker.addEventListener("controllerchange", function() {
+				// First install claims the page; only an update needs a reload.
+				if (!hadController || reloadingForUpdate)
 					return;
-				return caches.keys().then(function(keys) {
-					return Promise.all(keys.map(function(key) { return caches.delete(key); }));
-				});
+				reloadingForUpdate = true;
+				location.reload();
 			});
-			ready.then(function() {
-				return navigator.serviceWorker.register(
-					"service-worker.js?v=20260816g", {scope: "./"});
-			}).then(function(registration) {
-				if (registration && registration.update)
-					registration.update();
+			navigator.serviceWorker.register("service-worker.js", {scope: "./"}).then(function(registration) {
+				if (registration.waiting && navigator.serviceWorker.controller)
+					offerWorker(registration.waiting);
+				registration.addEventListener("updatefound", function() {
+					var installing = registration.installing;
+					if (!installing)
+						return;
+					installing.addEventListener("statechange", function() {
+						if (installing.state === "installed" && navigator.serviceWorker.controller)
+							offerWorker(installing);
+					});
+				});
+				registration.update().catch(function() {});
 			}).catch(function(error) {
 				appendLog("service-worker", [error]);
 			});
 		});
+	}
+
+	// Versioned deployments (package_demo.py) serve every build from
+	// releases/<version>/, each with its own service-worker scope, so a worker
+	// update never arrives. Compare with the site's current version instead.
+	var release = /\/releases\/([^/]+)\/[^/]*$/.exec(location.pathname);
+	if (release && location.protocol !== "file:") {
+		fetch(new URL("../../version.json", location.href), {cache: "no-store"}).then(function(response) {
+			return response.ok ? response.json() : null;
+		}).then(function(site) {
+			if (!site || !site.entrypoint || site.version === release[1])
+				return;
+			ui.update.hidden = false;
+			ui.updateReload.onclick = function() {
+				location.assign(new URL("../../" + site.entrypoint, location.href).href + location.search);
+			};
+		}).catch(function() {});
 	}
 })();

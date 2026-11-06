@@ -896,18 +896,30 @@ def test_param2_survives() -> None:
 
 # What the pack may cost the Lua heap for the session, measured by running
 # lw_world's loader under Lua 5.1 (measure_luanti_web_maps_heap.lua), and the
-# high-water mark while the largest map loads. See wasm_porting.md: raised
-# from 8 MiB for the thunder chapel, the ninth map and the second at 1 MiB
-# that the eight before it left no room for, then to 9.5 MiB for the cabaret
-# club: ten maps keep 9.02 MiB, because each one carries a few KiB of table
-# overhead on top of its power-of-two arrays. Then to 10.5 MiB for the
-# concert arena, the eleventh map and a third at 1 MiB: eleven keep 10.0 MiB.
-HEAP_BUDGET_KIB = 10 * 1024 + 512
+# high-water mark while the largest map loads. See wasm_porting.md.
+#
+# lw_world keeps each schematic run-length encoded in two strings, so a map
+# costs what its runs cost, not what its box does: the eleven maps keep about
+# 110 KiB between them (the busiest, the thunder chapel and halloween lane, 17
+# KiB), where the one-slot-per-cell arrays this replaced kept 10.0 MiB. These
+# caps are set at a few times the measurement, so they still fail on a map
+# that is not the sort of thing the encoding is good at (noise, a checkerboard
+# fill) rather than being loosened to the old 10.5 MiB.
+#
+# The load peak is the engine's: core.read_schematic builds one small table per
+# cell (about 250 bytes) before the loader packs it, and that exists in full
+# for a moment whatever the loader keeps. It is the real ceiling on one map's
+# size (the snow mountain's 44,800 cells peak at 10.9 MiB).
+HEAP_BUDGET_KIB = 512
+MAP_HEAP_BUDGET_KIB = 64
 LOAD_PEAK_BUDGET_KIB = 16 * 1024
 
 
 def measure_heap():
-	"""Returns ({map: (volume, kept KiB, peak KiB)}, kept, peak), or None."""
+	"""Returns ({map: (volume, kept KiB, peak KiB)}, kept, peak), or None.
+
+	The Lua script also round-trips every cell through the loader's encoding
+	and exits non-zero (failing this test) on any mismatch."""
 	import tempfile
 	with tempfile.TemporaryDirectory() as tmp:
 		dumps = []
@@ -940,7 +952,7 @@ def measure_heap():
 
 
 def test_budget() -> None:
-	"""The pack is content, and content is charged against luanti.data."""
+	"""The pack is content, and content is charged against the luanti_web package."""
 	total = sum(path.stat().st_size for path in SCHEM_DIR.glob("map_*.mts"))
 	assert_true(total < 64 * 1024,
 		f"the map schematics are {total / 1024:.1f} KiB; budget is 64 KiB")
@@ -952,19 +964,18 @@ def test_budget() -> None:
 		f"lw_maps textures are {art / 1024:.1f} KiB; budget is 16 KiB")
 
 	nodes = maps.pack_volume()
-	print(f"  pack: {len(maps.SPECS)} maps, {nodes} nodes of {maps.NODE_BUDGET}, "
+	print(f"  pack: {len(maps.SPECS)} maps, {nodes} cells of {maps.NODE_BUDGET}, "
 		f"{total / 1024:.1f} KiB on disk")
-	# Each authored node costs two Lua table slots when lw_world loads the
-	# schematic, and that lives in the WASM heap for the whole session.
+	# Volume no longer sets the heap (the measurement below does); it is the
+	# creep guard on how much world the pack asks the server to generate and mesh.
 	assert_true(nodes <= maps.NODE_BUDGET,
-		f"the maps are {nodes} nodes; the documented budget is {maps.NODE_BUDGET}")
-	# Past 32,768 cells a map's arrays double to the next power of two, so it
-	# costs what two small maps do. The snow mountain is the pack's one dense
-	# map; the next one has to fit or say why in wasm_porting.md.
-	dense = [spec.name for spec in maps.SPECS if spec.volume > maps.CHEAP_VOLUME]
-	assert_true(len(dense) <= 1,
-		f"{dense} are all over {maps.CHEAP_VOLUME} nodes; only one map may be, "
-		"because each one costs the heap twice what a smaller map does")
+		f"the maps are {nodes} cells; the documented budget is {maps.NODE_BUDGET}")
+	# One map's load peak scales with its box; past this it would approach the
+	# load-peak budget below even before the other maps' strings are counted.
+	big = [spec.name for spec in maps.SPECS if spec.volume > maps.MAX_MAP_VOLUME]
+	assert_true(not big,
+		f"{big} are over {maps.MAX_MAP_VOLUME} cells; split the map or raise "
+		"MAX_MAP_VOLUME with a new load-peak measurement")
 
 	heap = measure_heap()
 	if heap is None:
@@ -972,13 +983,16 @@ def test_budget() -> None:
 		return
 	per_map, kept, peak = heap
 	for name, (volume, map_kept, map_peak) in per_map.items():
-		print(f"  {name}: {volume} nodes, keeps {map_kept / 1024:.1f} MiB, "
+		print(f"  {name}: {volume} cells, keeps {map_kept:.1f} KiB, "
 			f"peaks at {map_peak / 1024:.1f} MiB while loading")
-	print(f"  heap: keeps {kept / 1024:.1f} MiB of {HEAP_BUDGET_KIB / 1024:.1f}, "
+		assert_true(map_kept <= MAP_HEAP_BUDGET_KIB,
+			f"{name} keeps {map_kept:.1f} KiB of Lua heap; one map may keep "
+			f"{MAP_HEAP_BUDGET_KIB} KiB (see wasm_porting.md)")
+	print(f"  heap: keeps {kept:.1f} KiB of {HEAP_BUDGET_KIB}, "
 		f"load peak {peak / 1024:.1f} MiB of {LOAD_PEAK_BUDGET_KIB / 1024:.0f}")
 	assert_true(kept <= HEAP_BUDGET_KIB,
-		f"the loaded maps keep {kept / 1024:.1f} MiB of Lua heap; the budget is "
-		f"{HEAP_BUDGET_KIB / 1024:.1f} MiB (see wasm_porting.md)")
+		f"the loaded maps keep {kept:.1f} KiB of Lua heap; the budget is "
+		f"{HEAP_BUDGET_KIB} KiB (see wasm_porting.md)")
 	assert_true(peak <= LOAD_PEAK_BUDGET_KIB,
 		f"loading one map peaks at {peak / 1024:.1f} MiB of Lua heap; the budget is "
 		f"{LOAD_PEAK_BUDGET_KIB / 1024:.0f} MiB (see wasm_porting.md)")

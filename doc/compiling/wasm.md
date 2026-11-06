@@ -59,20 +59,27 @@ For diagnosing crashes or profiling use `cmake --preset EmscriptenDebug`
 (`build-wasm-profile`, optimised with source maps). The per-profile flag
 matrix is in `wasm_porting.md` (Appendix: Flag Matrix).
 
-The preload-file list in `src/CMakeLists.txt` is the source of truth for the
-read-only asset bundle. A successful build creates the engine bundle and
-launcher/PWA companions:
+`util/wasm/packages.json` is the source of truth for the read-only assets:
+nothing is preloaded into the engine any more. The `luanti_packages` build
+target (part of `all`; it only needs Python 3) turns each package into an
+immutable `assets/<name>.<hash>.data` and writes `asset-manifest.json`, and
+the page streams them in on demand (core first, a game when it is chosen).
+Run it alone with `cmake --build build-wasm --target luanti_packages` or
+`python3 util/wasm/build_packages.py --output build-wasm/bin`. A successful
+build creates the engine bundle, the packages and launcher/PWA companions:
 
 ```text
 build-wasm/bin/luanti.html
 build-wasm/bin/luanti.js
 build-wasm/bin/luanti.wasm
-build-wasm/bin/luanti.data
+build-wasm/bin/asset-manifest.json
+build-wasm/bin/assets/core.<hash>.data
+build-wasm/bin/assets/<game>.<hash>.data   # one per game, plus the song packages
 build-wasm/bin/launcher.js
 build-wasm/bin/launcher.css
 build-wasm/bin/launcher-config.js
 build-wasm/bin/manifest.webmanifest
-build-wasm/bin/service-worker.js
+build-wasm/bin/service-worker.js   # stamped with the build id by build_packages.py
 build-wasm/bin/luanti-web.svg
 ```
 
@@ -96,8 +103,9 @@ The helper also sends `Cross-Origin-Resource-Policy: cross-origin` so an
 isolated parent page can embed the demo, disables local caching, and serves
 `.wasm` as `application/wasm`.
 
-The page first prepares the asset bundle and persistent filesystem, then
-enables the launcher. Start a local DevTest world or choose Join server. A
+The page first downloads `core` (with progress on the Start button) and opens
+the persistent filesystem, then enables the launcher; the chosen game's
+package is fetched when you press Start. Start a local DevTest world or choose Join server. A
 remote server additionally requires a configured WebSocket/UDP proxy.
 
 To serve another build directory or accept connections from another machine:
@@ -124,6 +132,22 @@ ready before the launch button is enabled, networking starts disabled, a local
 world can be launched, C++ runs on an application worker, browser-main timers
 remain responsive, and real engine loading status reaches the launcher. This
 is the automated CI smoke; it is not a visual regression test.
+
+Two more browser tests cover the streamed packages. Neither needs a game
+world to be playable:
+
+```bash
+# Real engine: first visit fetches only core; a game fetches only its own
+# package; with the network off a cached game still starts and an uncached one
+# fails with a clear message; the showcase songs arrive after the world starts.
+python3 util/wasm/test_packages_browser.py --browser "$(command -v google-chrome)"
+
+# No engine needed: the service worker against a fake, versioned site. Includes
+# the stale-luanti.wasm regression (a deploy, an HTTP error, a half-deployed or
+# corrupt build must never be answered with an old binary or a mix of builds).
+python3 util/wasm/test_service_worker_browser.py --browser "$(command -v google-chrome)"
+python3 util/wasm/test_demo_tools.py    # packager, package format, first-visit budget
+```
 
 Before publishing a demo, the build must pass the **First Playable Smoke Test**,
 the integration gate for the browser client. Every step has to pass on both

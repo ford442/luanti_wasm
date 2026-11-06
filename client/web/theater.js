@@ -20,7 +20,7 @@
 // JavaScript at all.
 //
 // Clips live in media/ next to luanti.html and are fetched at runtime. They are
-// deliberately NOT baked into luanti.data — see client/web/media/README.md and
+// deliberately NOT baked into an asset package — see client/web/media/README.md and
 // the content budget in wasm_porting.md.
 
 (function () {

@@ -179,12 +179,12 @@ listener's client has both files, that listener is not started. The next
 once-a-second sweep starts them at `start_time = elapsed % length`, in time
 with the song and the band.
 
-That keeps the songs out of the engine's join-time media, but not out of
-the web build's download. `src/CMakeLists.txt` preloads all of
-`games/luanti_web` into `luanti.data`, so committed songs grow it by their
-size, and it is already at about 38 of its ~40 MB. Keep cabaret pairs few
-and small, or keep them out of the repository and add them only where they
-should play. `mods/lw_amps/cabaret/README.md` has the details.
+That keeps the songs out of the engine's join-time media. In the web build
+the cabaret's files are still inside the `luanti_web` package (everything
+under `games/luanti_web` except the Around songs), so committed pairs grow it
+by their size. Keep cabaret pairs few and small, or give a large set its own
+`background` package in `util/wasm/packages.json` and register its songs with
+`lazy_media = true`, as the Around songs do. `mods/lw_amps/cabaret/README.md` has the details.
 
 ## Cost
 
@@ -197,10 +197,12 @@ should play. `mods/lw_amps/cabaret/README.md` has the details.
   in range — in the pack, only on the concert arena — and starts their two
   sources on the next sweep, once the client has the files, at
   `elapsed % length` like any late arrival.
-* **Download:** the 14 files are still about 26 MiB inside `luanti.data`,
-  because the build preloads the whole game folder. Keeping them out of the
-  preload too would mean fetching them at runtime, which is a separate change.
-  See the content budget in `wasm_porting.md`.
+* **Download:** the 14 files are about 26 MiB, but no longer part of what a
+  visitor waits for. The web build ships them as two `background` packages
+  that the launcher streams after the showcase world is running (the default
+  mix first). The songs are registered with `lazy_media = true`, so a stage
+  that is punched before its files have arrived stays quiet and starts, in
+  time, on a later sweep. See the content budget in `wasm_porting.md`.
 * **Audio:** one song at a time, and two streamed sources per listener in
   range.
 * **Entities:** eight dancers. The director already holds that to ten pose
