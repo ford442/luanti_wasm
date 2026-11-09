@@ -570,6 +570,42 @@ lw_amps.stop()
 lw_amps.play("around_happy_hard_2")
 assert_eq(#added, sent, "a file a client has is not sent again")
 lw_amps.stop()
+
+-- The web build streams the Around songs in after the world has started, so a
+-- `lazy_media` song registers with no files and waits for them.
+local LAZY_DIR = MODPATH .. "/songs/"
+local lazy_files = {
+	LAZY_DIR .. "lw_amps_lazy_test_l.ogg", LAZY_DIR .. "lw_amps_lazy_test_r.ogg"}
+for _, path in ipairs(lazy_files) do
+	assert_true(io.open(path, "rb") == nil, "no stray " .. path)
+end
+local lazy = lw_amps.register_song("lazy_test", {length = 10, media_dir = "songs",
+	lazy_media = true})
+assert_true(lazy ~= nil, "a lazy song registers before its files exist")
+assert_eq(lw_amps.get_song("lazy_test") ~= nil, true, "and is playable")
+local lazy_sent = #added
+local lazy_played = #played
+lw_amps.play("lazy_test")
+step(1.0)
+step(1.0)
+assert_eq(#added, lazy_sent, "nothing is sent for files that have not arrived")
+assert_eq(#played, lazy_played, "and nothing plays")
+for _, path in ipairs(lazy_files) do
+	local file = io.open(path, "wb")
+	file:write("OggS")
+	file:close()
+end
+step(1.0)
+assert_true(#added > lazy_sent, "once the files exist the pair is sent on the next sweep")
+for i = lazy_sent + 1, #confirm do
+	confirm[i]()
+end
+step(1.0)
+assert_true(#played > lazy_played, "and the song starts in step with the clock")
+lw_amps.stop()
+for _, path in ipairs(lazy_files) do
+	os.remove(path)
+end
 core.dynamic_add_media = nil
 
 if failures > 0 then

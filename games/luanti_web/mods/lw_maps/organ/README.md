@@ -82,11 +82,11 @@ visitors to the chapel receive it, and only when they arrive.
 ## The web download
 
 That covers the engine's media. The web build has a second, separate cost:
-`src/CMakeLists.txt` preloads the whole of `games/luanti_web` into
-`luanti.data`, the file every visitor downloads before the engine starts. A
-track committed here makes that file bigger by the track's size. See the
-content budget in `wasm_porting.md`. `luanti.data` is meant to stay under
-about 40 MB, and the stage amps' songs already take most of that.
+`util/wasm/packages.json` puts the whole of `games/luanti_web` (except the
+stage amps' songs) into the `luanti_web` package, which every showcase start
+downloads before the world loads. A track committed here makes that package
+bigger by the track's size. See the content budget in `wasm_porting.md`
+(`luanti_web` is meant to stay under about 1 MB).
 
 So keep it small:
 

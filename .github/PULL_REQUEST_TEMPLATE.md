@@ -23,4 +23,4 @@ This PR is a Work in Progress / Ready for Review.
 
 ## WASM web pack
 
-- [ ] Does this change grow the web pack (`luanti.data`, `--preload-file` list, or bundled game/mod content)? If so, by how much, and does it stay within the content budget in [`wasm_porting.md`](../wasm_porting.md#content-budget)?
+- [ ] Does this change grow the web pack (`core` or a game package in `util/wasm/packages.json`, or bundled game/mod content)? If so, report the `asset-manifest.json` package sizes before and after, and say whether it stays within the content budget in [`wasm_porting.md`](../wasm_porting.md#content-budget).

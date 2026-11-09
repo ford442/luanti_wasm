@@ -86,12 +86,11 @@ starts the pair in time with the song.
 ## The web download
 
 That keeps the songs out of the engine's join-time media. The web build is a
-separate matter: `src/CMakeLists.txt` preloads all of `games/luanti_web`
-into `luanti.data`, the file every visitor downloads before the engine
-starts. A song committed here adds its size to that file.
-
-`luanti.data` is budgeted at about 40 MB and is already at about 38 MB (see
-the content budget in `wasm_porting.md`). So:
+separate matter: `util/wasm/packages.json` puts all of `games/luanti_web`
+(except the Around songs) into the `luanti_web` package, which every showcase
+start downloads before the world loads. A song committed here adds its size
+to that package, which is budgeted at about 1 MB (see the content budget in
+`wasm_porting.md`). So:
 
 * For the web build, keep the cabaret songs few and small: mono pairs at
   `-q:a 2` to `-q:a 4`, and say how much they add in the pull request.

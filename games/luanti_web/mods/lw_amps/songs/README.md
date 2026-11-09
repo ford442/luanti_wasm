@@ -83,8 +83,12 @@ will not place a stereo file on the amps.
 
 ## Budget
 
-The 14 files are about 26 MiB, which is most of what the web pack downloads
-before the first frame (the build still preloads the whole game folder into
-`luanti.data`; they are only kept out of the media set). See the content budget in `wasm_porting.md` (it was
-raised for these) and `util/content/test_luanti_web_amps.py`, which fails the
+The 14 files are about 26 MiB. They are not part of the first-frame download:
+`util/wasm/packages.json` puts them in two `background` packages
+(`luanti_web_songs_main`, the default mix, then `luanti_web_songs_takes`, the
+six alternates) that the launcher streams once the showcase world is running,
+and `lw_amps` registers them with `lazy_media = true` so it waits for them.
+A song added here must be listed in one of those packages (a test in
+`util/wasm/test_demo_tools.py` fails otherwise). See the content budget in
+`wasm_porting.md` and `util/content/test_luanti_web_amps.py`, which fails the
 build past 30 MiB.

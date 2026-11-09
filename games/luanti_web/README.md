@@ -137,7 +137,7 @@ calls `core.set_web_video{clip = "..."}`, which exists only under Emscripten;
 lock so its controls are clickable, and hands pointer lock back on close.
 
 Clips are fetched at runtime from `media/` on the page's own origin and are
-never baked into `luanti.data`; see `client/web/media/README.md`. If the clip is
+never baked into an asset package; see `client/web/media/README.md`. If the clip is
 missing, the API is absent (native build, or a remote server), or the browser
 refuses to decode, Tier A keeps playing and the visitor still sees motion on the
 wall.
@@ -269,7 +269,7 @@ one-line diff. The script also runs on its own.
 **WorldEdit** is fine for authoring — `//pos1`, `//pos2`, `//mtschemcreate
 <name>` writes the same format to the same `<world>/schems/` directory — but it
 is not part of this game and must not become one. Put it in the author world's
-`worldmods/` on a native build. Bundling it would add it to `luanti.data` for
+`worldmods/` on a native build. Bundling it would add it to the `luanti_web` package for
 every visitor, and `worldedit_gui` expects an inventory mod (Unified Inventory,
 sfinv) that this game does not ship. If an
 in-game editor is ever preloaded, keep it to a dedicated author world.
