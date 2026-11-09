@@ -1,0 +1,13 @@
+# TLS terminator for the proxy. PROXY_DOMAIN must resolve to this host;
+# Caddy obtains and renews the certificate itself.
+{$PROXY_DOMAIN} {
+	# Prometheus scrapes proxy:8080/metrics on the compose network. Never
+	# publish it.
+	@private path /metrics
+	respond @private 404
+
+	# WebSocket upgrades are proxied automatically. Caddy replaces any
+	# X-Forwarded-For sent by the client, which is what
+	# LUANTI_PROXY_TRUST_PROXY=1 relies on.
+	reverse_proxy proxy:8080
+}
