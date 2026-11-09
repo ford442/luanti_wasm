@@ -134,6 +134,11 @@ Copyright (C) 2026 The Luanti Contributors
 			<button id="luanti-resume-button" type="button">Click to return to the game</button>
 			<p>Escape releases the pointer.</p>
 		</div>
+		<div id="luanti-gl-lost" class="gl-lost-panel" role="alertdialog" aria-labelledby="luanti-gl-lost-title" hidden>
+			<h2 id="luanti-gl-lost-title">Graphics were interrupted</h2>
+			<p id="luanti-gl-lost-text">The browser reset the graphics device (this can happen when the tab is in the background or the GPU resets). Your world is being saved.</p>
+			<button id="luanti-gl-lost-reload" type="button" disabled>Saving…</button>
+		</div>
 		<nav class="game-tools" aria-label="Browser controls">
 			<button id="luanti-share-button" type="button" hidden>Copy invite link</button>
 			<button id="luanti-fullscreen-button" type="button">Fullscreen</button>

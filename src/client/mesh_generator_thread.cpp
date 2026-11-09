@@ -302,8 +302,10 @@ MeshUpdateManager::MeshUpdateManager(Client *client):
 	// use at least one thread
 	number_of_threads = std::max(1, number_of_threads);
 #ifdef __EMSCRIPTEN__
-	// One worker is enough; main-thread processOnThisThread() is the safety net.
-	number_of_threads = 1;
+	// One worker is the conservative default; main-thread
+	// processOnThisThread() is the safety net. 0 defers to the setting above.
+	if (const int wasm_threads = g_settings->getS32("wasm_mesh_threads"); wasm_threads > 0)
+		number_of_threads = rangelim(wasm_threads, 1, 8);
 #endif
 	infostream << "MeshUpdateManager: using " << number_of_threads << " threads" << std::endl;
 

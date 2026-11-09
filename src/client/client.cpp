@@ -626,7 +626,11 @@ void Client::step(float dtime)
 #ifdef __EMSCRIPTEN__
 		// Mesh worker pthreads often stall under PROXY_TO_PTHREAD. Generate a
 		// few meshes on the application worker so blocks get ACKed and drawn.
-		m_mesh_update_manager->processOnThisThread(4);
+		// Tunable (wasm_mesh_app_thread_items) now that a pthread pool exists.
+		static const int app_thread_items = std::max(0,
+				g_settings->getS32("wasm_mesh_app_thread_items"));
+		if (app_thread_items > 0)
+			m_mesh_update_manager->processOnThisThread(app_thread_items);
 #endif
 		int num_processed_meshes = 0;
 		std::vector<v3s16> blocks_to_ack;

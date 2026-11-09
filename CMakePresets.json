@@ -38,13 +38,10 @@
       }
     },
     {
-      "name": "Emscripten",
-      "displayName": "Emscripten (WebAssembly)",
-      "description": "Client-only Release WASM build via pinned Emscripten. Run after sourcing emsdk_env.sh: cmake --preset Emscripten",
+      "name": "EmscriptenBase",
       "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
       "binaryDir": "${sourceDir}/build-wasm",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "BUILD_CLIENT": "TRUE",
         "BUILD_SERVER": "FALSE",
         "BUILD_UNITTESTS": "FALSE",
@@ -64,6 +61,37 @@
         "ENABLE_OPENGL": "FALSE",
         "ENABLE_OPENGL3": "FALSE",
         "RUN_IN_PLACE": "TRUE"
+      },
+      "hidden": true
+    },
+    {
+      "name": "Emscripten",
+      "displayName": "Emscripten (WebAssembly)",
+      "description": "Client-only Release WASM build via pinned Emscripten. Run after sourcing emsdk_env.sh: cmake --preset Emscripten",
+      "inherits": "EmscriptenBase",
+      "binaryDir": "${sourceDir}/build-wasm",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "EmscriptenDebug",
+      "displayName": "Emscripten Debug",
+      "description": "Debug WASM build: ASSERTIONS=2, SAFE_HEAP, source maps. Slow; for diagnosing crashes",
+      "inherits": "EmscriptenBase",
+      "binaryDir": "${sourceDir}/build-wasm-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "EmscriptenProfile",
+      "displayName": "Emscripten Profile",
+      "description": "Optimised WASM build with function names and source maps for browser profiling",
+      "inherits": "EmscriptenBase",
+      "binaryDir": "${sourceDir}/build-wasm-profile",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       }
     }
   ]

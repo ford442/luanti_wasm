@@ -41,6 +41,29 @@ Until #32 and #33 are fixed, the gate does **not** pass and the public demo
 stays gated. `util/wasm/test_first_playable.py` measures placement but does not
 assert on it; run it with `--require-place` to check a candidate fix for #32.
 
+## Re-run notes, 2026-11-05 (local, loaded 8-core host)
+
+Not a gate pass; observations only. Headless Chromium, SwiftShader, host load
+average ~9 from unrelated jobs, server "max lag" 7-20 s.
+
+- `test_first_playable.py` already failed on a clean `HEAD` build here, so the
+  failures are not caused by the link-profile / WebGL changes in #83.
+- With the default game (`luanti_web`) the chat step used to fail because it
+  waited for devtest's `Caught command` log line, which `luanti_web` does not
+  print. It now waits for the engine's own `invoked /<command>` line.
+- Right-click **does** reach the server: the log shows `singleplayer activates
+  <item>` (the engine's right-click-on-air action) for every attempt. In the
+  place step the view was pointing at air, so that is not by itself evidence
+  for or against #32.
+- Server-side input is processed many seconds late under load (a `digs` line
+  appeared ~7 s after the click). The dig step now polls up to 30 s instead of
+  waiting a fixed 2 s.
+- The dig step presses hotbar slot 1, which is the mese pick in devtest but
+  `lw_tools:param2` in `luanti_web`; with `luanti_web` it "uses" a tool on the
+  node instead of digging. The place/dig steps need per-game slots before the
+  default game can pass.
+- Re-run on an idle host before drawing conclusions about #32 / #33.
+
 ## Not yet run
 
 - **Chrome stable and Firefox stable, driven by a human.** Everything above

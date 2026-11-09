@@ -190,7 +190,9 @@ core = {
 	registered_nodes = {},
 	registered_entities = {},
 	registered_chatcommands = commands,
-	get_modpath = function() return MODPATH end,
+	get_modpath = function(name)
+		return ROOT .. "/games/luanti_web/mods/" .. (name or "lw_dance")
+	end,
 	get_game_info = function()
 		return {id = "luanti_web", path = ROOT .. "/games/luanti_web"}
 	end,

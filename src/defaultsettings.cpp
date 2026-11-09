@@ -449,6 +449,17 @@ void set_default_settings()
 
 	// Network
 #ifdef __EMSCRIPTEN__
+	// WASM thread workarounds (see wasm_porting.md, "Flag Matrix"). They were
+	// added when pthreads were created on demand under PROXY_TO_PTHREAD; with
+	// -sPTHREAD_POOL_SIZE the workers are pre-spawned, so each knob can be
+	// relaxed and measured independently. Defaults keep the original behaviour.
+	// Meshes generated on the application thread per frame (0 = off).
+	settings->setDefault("wasm_mesh_app_thread_items", "4");
+	// Mesh worker threads (0 = use mesh_generation_threads/auto).
+	settings->setDefault("wasm_mesh_threads", "1");
+	// Minimum server Receive() wait in ms (0 = off).
+	settings->setDefault("wasm_server_min_receive_ms", "5");
+
 	// The browser proxy protocol is IPv4-only. Singleplayer also uses the
 	// in-process IPv4 loopback implemented by the Emscripten socket adapter.
 	settings->setDefault("enable_ipv6", "false");

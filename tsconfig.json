@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		"allowJs": true,
+		"checkJs": true,
+		"noEmit": true,
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+		"types": ["node"],
+		"strict": false,
+		"noImplicitAny": false,
+		"skipLibCheck": true
+	},
+	"include": [
+		"client/web/**/*.js",
+		"client/web/emscripten-module.d.ts",
+		"util/wasm/proxy/**/*.mjs"
+	],
+	"exclude": ["**/node_modules"]
+}

@@ -153,3 +153,12 @@ client/mod_storage.sqlite
 # Python bytecode from the util/ scripts
 __pycache__/
 *.pyc
+
+# Build output (any CMake build dir other than the in-tree `build/`)
+build-*/
+
+# JavaScript dependencies and tooling output
+node_modules/
+
+# Browser smoke-test screenshots dropped at the repo root
+/*.png

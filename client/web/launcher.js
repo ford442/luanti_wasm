@@ -5,6 +5,7 @@
 (function() {
 	"use strict";
 
+	/** @type {Partial<LuantiWebConfig>} */
 	var config = window.LUANTI_WEB_CONFIG || {};
 	var query = new URLSearchParams(location.search);
 	var runtimeReady = false;
@@ -17,6 +18,12 @@
 	var loadingShellDismissed = false;
 	var logs = [];
 
+	/**
+	 * The launcher markup is fixed (client/web/shell.html), so each element is
+	 * typed `any` rather than guessing HTMLInputElement/HTMLButtonElement/etc.
+	 * @param {string} id
+	 * @returns {any}
+	 */
 	function element(id) {
 		return document.getElementById(id);
 	}
@@ -53,8 +60,16 @@
 		consolePanel: element("luanti-console"),
 		consoleOutput: element("luanti-console-output"),
 		resume: element("luanti-resume"),
-		resumeButton: element("luanti-resume-button")
+		resumeButton: element("luanti-resume-button"),
+		glLost: element("luanti-gl-lost"),
+		glLostText: element("luanti-gl-lost-text"),
+		glLostReload: element("luanti-gl-lost-reload")
 	};
+
+	// ?webgl=1|2 forces a single WebGL version (read by CIrrDeviceSDL.cpp).
+	var forcedWebGL = Number(query.get("webgl"));
+	if (forcedWebGL === 1 || forcedWebGL === 2)
+		Module["luantiWebGL"] = {"major": forcedWebGL};
 
 	function safeStorageGet(key) {
 		try {
@@ -158,6 +173,9 @@
 		"notifyFramePresented": function() {
 			if (started && activePhase === "playing")
 				dismissLoadingShell();
+		},
+		"getGLState": function() {
+			return {"lost": glLostCount, "restored": glRestoredCount};
 		},
 		"getState": function() {
 			return {
@@ -342,6 +360,12 @@
 	}
 
 	function unlockAudio() {
+		// audio_unlock.js (a --pre-js) owns the OpenAL contexts and logs them.
+		if (typeof Module !== "undefined" && typeof Module["luantiResumeAudio"] === "function") {
+			try {
+				Module["luantiResumeAudio"]("launcher");
+			} catch (_) {}
+		}
 		try {
 			if (typeof window.AudioContext !== "undefined" || typeof window.webkitAudioContext !== "undefined") {
 				if (window.AL && window.AL.contexts) {
@@ -507,6 +531,65 @@
 	});
 
 	window.addEventListener("resize", syncCanvasBackingStore);
+
+	// WebGL context loss. The engine pauses rendering (CIrrDeviceSDL.cpp) but
+	// cannot rebuild its GL resources, so the recoverable path is a reload.
+	// World data is flushed to IndexedDB first.
+	var glLostCount = 0;
+	var glRestoredCount = 0;
+	var glLostSaved = false;
+	var glOverlayActive = false;
+	// The engine keeps asking for pointer lock while the game runs; with the
+	// overlay up a locked pointer would route every click to the canvas and
+	// the reload button could never be pressed.
+	var nativeRequestPointerLock = Module.canvas.requestPointerLock;
+	Module.canvas.requestPointerLock = function() {
+		if (glOverlayActive)
+			return undefined;
+		return nativeRequestPointerLock.apply(this, arguments);
+	};
+	document.addEventListener("pointerlockchange", function() {
+		if (glOverlayActive && document.pointerLockElement)
+			document.exitPointerLock();
+	});
+	function enableGlReload(label) {
+		ui.glLostReload.disabled = false;
+		ui.glLostReload.textContent = label;
+	}
+	Module.canvas.addEventListener("webglcontextlost", function(event) {
+		// preventDefault lets the browser restore the context later.
+		event.preventDefault();
+		glLostCount++;
+		appendLog("error", ["Luanti: WebGL context lost"]);
+		if (!started)
+			return;
+		ui.glLost.hidden = false;
+		ui.glLostReload.disabled = true;
+		ui.glLostReload.textContent = "Saving…";
+		glOverlayActive = true;
+		if (document.pointerLockElement === Module.canvas)
+			document.exitPointerLock();
+		var persistence = Module["luantiPersistence"];
+		var saved = persistence && persistence.requestSync ?
+			persistence.requestSync({"reason": "webglcontextlost", "urgent": true}) :
+			Promise.resolve();
+		saved.then(function() {
+			glLostSaved = true;
+			enableGlReload("Reload and resume");
+		}, function() {
+			enableGlReload("Reload anyway");
+		});
+	});
+	Module.canvas.addEventListener("webglcontextrestored", function() {
+		glRestoredCount++;
+		appendLog("info", ["Luanti: WebGL context restored"]);
+		if (started)
+			ui.glLostText.textContent = "Graphics are back, but the game has to reload its textures. " +
+				(glLostSaved ? "Your world has been saved." : "Saving your world…");
+	});
+	ui.glLostReload.addEventListener("click", function() {
+		location.reload();
+	});
 
 	Module.canvas.addEventListener("click", function() {
 		unlockAudio();

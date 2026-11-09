@@ -27,6 +27,7 @@
 #include <SDL_messagebox.h>
 #endif
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
@@ -704,6 +705,47 @@ static void ensureBrowserCanvasSize(u32 *width, u32 *height)
 	emscripten_set_canvas_element_size("#canvas", fallback_w, fallback_h);
 }
 
+// Optional overrides from the page: Module.luantiWebGL = { major: 1|2 }.
+// "major" forces a single WebGL version (used by tests and for bisecting
+// driver problems); 0 or absent tries WebGL2 and then WebGL1.
+static int browserWebGLForcedMajor()
+{
+	return MAIN_THREAD_EM_ASM_INT({
+		var o = Module['luantiWebGL'];
+		var m = o && o['major'] | 0;
+		return (m === 1 || m === 2) ? m : 0;
+	});
+}
+
+static void reportBrowserWebGLContext(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx,
+		int attempt, bool explicit_swap)
+{
+	EmscriptenWebGLContextAttributes got;
+	if (emscripten_webgl_get_context_attributes(ctx, &got) != EMSCRIPTEN_RESULT_SUCCESS)
+		return;
+	char msg[200];
+	snprintf(msg, sizeof(msg),
+		"WebGL%d context (attempt %d, explicitSwap=%d, alpha=%d depth=%d stencil=%d "
+		"antialias=%d powerPreference=%d)", got.majorVersion, attempt,
+		explicit_swap ? 1 : 0, got.alpha, got.depth, got.stencil, got.antialias,
+		got.powerPreference);
+	os::Printer::log(msg, ELL_INFORMATION);
+	// Visible to the launcher console and to tests without a GL query. Built as
+	// a string because commas in a JS object literal would split the macro args.
+	char json[256];
+	snprintf(json, sizeof(json),
+		"{\"version\":%d,\"attempt\":%d,\"explicitSwap\":%s,\"alpha\":%s,"
+		"\"depth\":%s,\"stencil\":%s,\"antialias\":%s,\"powerPreference\":%d}",
+		got.majorVersion, attempt, explicit_swap ? "true" : "false",
+		got.alpha ? "true" : "false", got.depth ? "true" : "false",
+		got.stencil ? "true" : "false", got.antialias ? "true" : "false",
+		static_cast<int>(got.powerPreference));
+	MAIN_THREAD_EM_ASM({
+		Module['luantiWebGLInfo'] = JSON.parse(UTF8ToString($0));
+		console.info('Luanti: WebGL context', UTF8ToString($0));
+	}, json);
+}
+
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE createBrowserWebGLContext(
 		const SIrrlichtCreationParameters &params)
 {
@@ -713,7 +755,9 @@ static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE createBrowserWebGLContext(
 		attributes.alpha = params.WithAlphaChannel;
 		attributes.depth = params.ZBufferBits > 0;
 		attributes.stencil = params.Stencilbuffer;
-		attributes.antialias = params.AntiAlias > 1;
+		// The offscreen back buffer is what the game renders to, so canvas
+		// MSAA only costs memory; anti-aliasing is handled by the engine.
+		attributes.antialias = false;
 		attributes.majorVersion = major_version;
 		attributes.minorVersion = 0;
 		attributes.enableExtensionsByDefault = true;
@@ -721,16 +765,62 @@ static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE createBrowserWebGLContext(
 		attributes.proxyContextToMainThread = EMSCRIPTEN_WEBGL_CONTEXT_PROXY_ALWAYS;
 		attributes.renderViaOffscreenBackBuffer = true;
 		attributes.failIfMajorPerformanceCaveat = false;
+		// Dual-GPU laptops otherwise default to the integrated GPU.
+		attributes.powerPreference = EM_WEBGL_POWER_PREFERENCE_HIGH_PERFORMANCE;
+		attributes.preserveDrawingBuffer = false;
 		return emscripten_webgl_create_context("#canvas", &attributes);
 	};
 
-	EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_context = try_create(2, true);
-	if (webgl_context)
-		return webgl_context;
-	webgl_context = try_create(2, false);
-	if (webgl_context)
-		return webgl_context;
+	// Newest first. Some drivers/blocklists reject WebGL2 or refuse explicit
+	// swap control; WebGL1 (with the ES2 shaders) is the last resort.
+	const int forced = browserWebGLForcedMajor();
+	struct Attempt { int major; bool explicit_swap; };
+	static const Attempt attempts[] = {
+		{2, true}, {2, false}, {1, true}, {1, false},
+	};
+	int n = 0;
+	for (const Attempt &a : attempts) {
+		n++;
+		if (forced && a.major != forced)
+			continue;
+		EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = try_create(a.major, a.explicit_swap);
+		if (ctx) {
+			reportBrowserWebGLContext(ctx, n, a.explicit_swap);
+			return ctx;
+		}
+		char msg[80];
+		snprintf(msg, sizeof(msg), "WebGL%d context creation failed (explicitSwap=%d)",
+			a.major, a.explicit_swap ? 1 : 0);
+		os::Printer::log(msg, ELL_WARNING);
+	}
 	return 0;
+}
+
+// Set from the webglcontextlost event (delivered to the thread that
+// registered it). The engine cannot rebuild its GL resources, so after a loss
+// rendering stays paused until the page is reloaded. File-level state because
+// Emscripten cannot reliably unregister these handlers; there is one device
+// per page.
+static std::atomic<bool> g_webglContextLost{false};
+
+static EM_BOOL webglContextEventCallback(int eventType, const void *, void *)
+{
+	if (eventType == EMSCRIPTEN_EVENT_WEBGLCONTEXTLOST) {
+		g_webglContextLost = true;
+		os::Printer::log("WebGL context lost; rendering paused", ELL_ERROR);
+		// Returning true calls preventDefault(), which is what allows the
+		// browser to later restore the context at all.
+		return EM_TRUE;
+	}
+	if (eventType == EMSCRIPTEN_EVENT_WEBGLCONTEXTRESTORED) {
+		// Textures, buffers, shaders and FBOs are gone and Irrlicht keeps no
+		// recreate path, so stay paused; the page offers a reload (world data
+		// is flushed to IndexedDB first).
+		os::Printer::log("WebGL context restored but engine GL state is stale; "
+			"reload required", ELL_WARNING);
+		return EM_TRUE;
+	}
+	return EM_FALSE;
 }
 #endif
 
@@ -818,6 +908,16 @@ bool CIrrDeviceSDL::createWindowWithContext()
 	// Re-apply the layout size now that the WebGL context (and offscreen FBO)
 	// exist so viewport, backing store, and mouse space stay aligned.
 	updateSizeAndScale();
+
+	g_webglContextLost = false;
+	static bool contextEventsRegistered = false;
+	if (!contextEventsRegistered) {
+		contextEventsRegistered = true;
+		emscripten_set_webglcontextlost_callback("#canvas", nullptr, true,
+			webglContextEventCallback);
+		emscripten_set_webglcontextrestored_callback("#canvas", nullptr, true,
+			webglContextEventCallback);
+	}
 
 	// "#canvas" is for the opengl context
 	emscripten_set_mousedown_callback("#canvas", (void *)this, true, MouseUpDownCallback);
@@ -1477,6 +1577,12 @@ void CIrrDeviceSDL::SwapWindow()
 	// Context was created with emscripten_webgl_create_context +
 	// explicitSwapControl. SDL_GL_SwapWindow does not present that path;
 	// emscripten_webgl_commit_frame must blit the default framebuffer.
+	if (g_webglContextLost) {
+		// Nothing can be presented (and GL calls are no-ops). Idle instead of
+		// spinning; the launcher overlay tells the player what happened.
+		emscripten_thread_sleep(50);
+		return;
+	}
 	const auto webgl = reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context);
 	if (webgl)
 		emscripten_webgl_make_context_current(webgl);

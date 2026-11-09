@@ -72,7 +72,7 @@
 			return;
 		var status = document.getElementById("luanti-network-status");
 		var error = document.getElementById("luanti-network-error");
-		var input = document.getElementById("luanti-proxy-url");
+		var input = /** @type {HTMLInputElement|null} */ (document.getElementById("luanti-proxy-url"));
 		if (input && document.activeElement !== input)
 			input.value = state["url"] || "";
 		if (status) {
@@ -345,7 +345,7 @@
 	if (typeof document !== "undefined") {
 		var initializeShell = function() {
 			var form = document.getElementById("luanti-proxy-form");
-			var input = document.getElementById("luanti-proxy-url");
+			var input = /** @type {HTMLInputElement|null} */ (document.getElementById("luanti-proxy-url"));
 			if (form && input) {
 				input.value = configuredUrl;
 				form.addEventListener("submit", function(event) {
