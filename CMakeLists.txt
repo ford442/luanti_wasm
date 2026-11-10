@@ -102,6 +102,20 @@ if(EMSCRIPTEN)
 	# Every object linked into shared WebAssembly memory must be compiled with
 	# atomics and bulk-memory support, including Irrlicht and bundled libraries.
 	add_compile_options(-pthread -fexceptions)
+	# SIMD and LTO must reach every target, not just the executable: most of
+	# the engine is the EngineCommon object library, and IrrlichtMt, Lua and
+	# zstd are separate targets. Per-target flags left -msimd128 on the client
+	# sources only and mixed bitcode with regular objects under -flto.
+	option(WASM_ENABLE_LTO "Link-time optimisation for the Release WASM build (experimental)" OFF)
+	option(WASM_ENABLE_SIMD "Build with -msimd128 (needs a SIMD-capable browser)" OFF)
+	if(WASM_ENABLE_SIMD)
+		add_compile_options(-msimd128)
+		add_link_options(-msimd128)
+	endif()
+	if(WASM_ENABLE_LTO AND CMAKE_BUILD_TYPE MATCHES "^(Release|MinSizeRel)$")
+		add_compile_options(-flto)
+		add_link_options(-flto)
+	endif()
 	include(EmscriptenDependencies)
 endif()
 
