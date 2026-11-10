@@ -822,6 +822,21 @@ On `webglcontextlost` the engine pauses presenting and the launcher shows an
 overlay, flushes IndexedDB, and offers a reload. The engine has no GL resource
 recreation path, so `webglcontextrestored` does not resume rendering in place.
 
+### Frame-time baseline
+
+Measured with `util/wasm/bench_frame_time.py` (fresh `luanti_web` world, view
+distance 100, 1280x720, 30 s path). `present` is `endScene()`, which under the
+proxied design is where the browser main thread drains the queued GL calls
+and runs `emscripten_webgl_commit_frame()`.
+
+| Date | Revision | Render path | GPU | fps | frame p50 / p95 / p99 ms | present p95 ms | draw calls p50 |
+|------|----------|-------------|-----|-----|--------------------------|----------------|----------------|
+| 2026-11-11 | `perf/wasm-frame-stats` | proxy (current design) | SwiftShader, headless, 8 cores | 9.2 | 108 / 231 / 308 | 217 | 133 |
+
+No real-GPU baseline has been recorded yet; add one (`--headed --gpu`)
+before judging any render-path change. SwiftShader rasterises on the CPU, so
+present time there is dominated by rasterisation, not by the proxy.
+
 ### Not yet done
 
 Tracked in the originating issue: SIMD second flavour + launcher feature

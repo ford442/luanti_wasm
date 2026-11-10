@@ -189,6 +189,32 @@ records the last run step by step, along with the known failures that block it
 and the browsers still to be covered. Update that file whenever the gate is
 re-run, and keep the demo gated until it passes.
 
+## Frame-time benchmark
+
+```bash
+python3 util/wasm/bench_frame_time.py --headed --gpu --output bench.json
+```
+
+Creates a fresh `luanti_web` world at view distance 100, flies a fixed path
+around the island for 30 s and writes a JSON report: frame time p50/p95/p99,
+draw and present (`endScene`) time, draw calls, mesh queue length, a
+per-second timeline, the WebGL context and the GPU the browser reports. The
+path follows server wall-clock time, so slower builds cover the same ground.
+`--setting KEY=VALUE` writes a `minetest.conf` line for the run (for example
+`--setting wasm_mesh_threads=0`) and `--query` adds launcher parameters.
+Without `--gpu` it runs on SwiftShader, which is what CI does; those numbers
+are only comparable with other SwiftShader runs.
+
+The numbers come from `Module.luantiPerf` (`client/web/perf.js`), which any
+page or the browser console can query in game:
+
+```js
+Module.luantiPerf.summary({seconds: 10})   // last 10 s: fps, frameMs.p95, ...
+const c = Module.luantiPerf.cursor(); /* ... */ Module.luantiPerf.summary({since: c})
+```
+
+Baselines are recorded in `wasm_porting.md` ("Frame-time baseline").
+
 ## CI and demo deployment
 
 `.github/workflows/wasm.yml` runs one Release build on relevant pull requests,

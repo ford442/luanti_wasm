@@ -140,6 +140,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # Not a gate: SwiftShader numbers only catch large regressions. The
+      # report is kept so a commit can be compared with its parent.
+      - name: Benchmark frame time (non-gating)
+        continue-on-error: true
+        run: |
+          python3 util/wasm/bench_frame_time.py \
+            --browser "$(command -v google-chrome)" \
+            --label "ci-swiftshader" \
+            --output wasm-bench/frame-time.json \
+            --screenshot wasm-bench/path-end.png
+
+      - name: Upload frame-time report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: luanti-wasm-bench-${{ github.sha }}
+          path: wasm-bench/
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: Package versioned demo
         run: python3 util/wasm/package_demo.py --version "$GITHUB_SHA" --output wasm-demo
 
