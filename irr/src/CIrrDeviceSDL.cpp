@@ -1609,11 +1609,18 @@ void CIrrDeviceSDL::SwapWindow()
 	// Only the launcher decides when to hide the loading shell (after the
 	// first gameplay frame). Do not force opacity here — that hid load
 	// progress and fought prepareCompositor.
-	MAIN_THREAD_EM_ASM({
-		var launcher = Module["luantiLauncher"];
-		if (launcher && typeof launcher["notifyFramePresented"] === "function")
+	// This hop is synchronous, so stop making it once the launcher reports
+	// the shell dismissed; it never comes back for the life of the page.
+	static bool loading_shell_dismissed = false;
+	if (!loading_shell_dismissed) {
+		loading_shell_dismissed = MAIN_THREAD_EM_ASM_INT({
+			var launcher = Module["luantiLauncher"];
+			if (!launcher || typeof launcher["notifyFramePresented"] !== "function")
+				return 0;
 			launcher["notifyFramePresented"]();
-	});
+			return launcher["getState"]()["loadingDismissed"] ? 1 : 0;
+		});
+	}
 #else
 	SDL_GL_SwapWindow(Window);
 #endif
