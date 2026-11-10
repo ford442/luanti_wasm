@@ -19,13 +19,13 @@ We are **not** trying to replace the native client for hardcore players. We are 
 
 ## The Three P0 Technical Pillars (Must Land for MVP)
 
-1. **Persistence** — `01-persistence-mvp.md`  
+1. **Persistence** — `01-persistence-mvp.md`<br>
    World saves, player data, and settings must reliably survive reload and tab close. (paradust7's #1 open wound after years.)
 
-2. **Networking / Proxy Transport** — `02-websocket-proxy-networking.md`  
+2. **Networking / Proxy Transport** — `02-websocket-proxy-networking.md`<br>
    Adapt the proven emsocket + encapsulation design so the client can join real servers (and eventually host).
 
-3. **Non-Blocking Execution** — `03-async-main-loop.md`  
+3. **Non-Blocking Execution** — `03-async-main-loop.md`<br>
    The tab must stay responsive. No frozen UI, working pointerlock, no "page unresponsive" dialogs.
 
 ## Supporting Work (P1 for a *shippable* MVP)
