@@ -22,10 +22,6 @@ enum class EmscriptenPersistenceReason : std::uint8_t {
 // application worker. Fail early if the browser build contract regresses.
 void emscripten_validate_main_loop();
 void emscripten_service_browser_frame();
-// Legacy hooks kept for call sites. Presentation is handled in
-// CIrrDeviceSDL::SwapWindow (emscripten_webgl_commit_frame + launcher notify).
-void emscripten_prepare_canvas_present();
-void emscripten_finish_canvas_present();
 // Send human-readable engine loading state to the browser launcher. Phase is a
 // stable machine-readable value such as "engine", "loading", or "playing".
 void emscripten_report_status(const std::string &message, int percent = -1,
@@ -84,14 +80,6 @@ inline void emscripten_validate_main_loop()
 }
 
 inline void emscripten_service_browser_frame()
-{
-}
-
-inline void emscripten_prepare_canvas_present()
-{
-}
-
-inline void emscripten_finish_canvas_present()
 {
 }
 

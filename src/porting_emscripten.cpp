@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstdint>
+#include <mutex>
 #include <emscripten.h>
 #include <emscripten/threading.h>
 
@@ -151,29 +152,17 @@ void emscripten_service_browser_frame()
 	emscripten_service_persistence();
 }
 
-void emscripten_prepare_canvas_present()
-{
-	// Intentionally empty. Re-showing the loading shell every frame fought
-	// frame presentation and left the UI stuck on "World ready". Commit happens
-	// in CIrrDeviceSDL::SwapWindow via emscripten_webgl_commit_frame().
-}
-
-void emscripten_finish_canvas_present()
-{
-	MAIN_THREAD_EM_ASM({
-		var launcher = Module["luantiLauncher"];
-		if (launcher && typeof launcher["notifyFramePresented"] === "function")
-			launcher["notifyFramePresented"]();
-	});
-}
-
 void emscripten_report_status(const std::string &message, int percent,
 		const char *phase)
 {
+	// Called from both the client and the server init path, which are not
+	// guaranteed to be the same thread, so the de-duplication state is locked.
+	static std::mutex lock;
 	static std::string last_message;
 	static std::string last_phase;
 	static int last_percent = -2;
 	const std::string phase_string = phase ? phase : "";
+	std::lock_guard<std::mutex> guard(lock);
 	if (message == last_message && phase_string == last_phase &&
 			percent == last_percent)
 		return;
