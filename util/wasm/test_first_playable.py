@@ -45,6 +45,18 @@ PLACE_ITEMS = {
 	"luanti_web": "lw_nodes:stone_brick",
 	"devtest": "basenodes:stone",
 }
+# The tool each game digs with. None means the empty hand: luanti_web's hand
+# digs every group quickly. Never trust the starting hotbar: luanti_web puts
+# the lw_tools:param2 authoring tool in slot 1, and its on_use swallows the
+# left click, so nothing is ever dug.
+DIG_ITEMS = {
+	"luanti_web": None,
+	"devtest": "basetools:pick_mese",
+}
+# After /clearinv the place item lands in slot 1 and the dig item in slot 2,
+# so an absent dig item leaves slot 2 empty, i.e. the hand.
+PLACE_SLOT = "1"
+DIG_SLOT = "2"
 DEFAULT_GAME = "luanti_web"
 # default_privs applies when the world's player record is created, so the
 # configuration file has to be in place before the world is ever launched.
@@ -108,7 +120,8 @@ def grab_pointer(page: Page) -> None:
 		"document.pointerLockElement === Module.canvas", timeout=30_000)
 
 
-def send_chat(page: Page, console: list[str], command: str) -> None:
+def send_chat(page: Page, console: list[str], command: str,
+		marker: str | None = None) -> None:
 	"""Type a chat command, retrying until the server acknowledges it.
 
 	The first key presses after entering a world are routinely dropped while
@@ -118,7 +131,8 @@ def send_chat(page: Page, console: list[str], command: str) -> None:
 	name = command.split()[0].lstrip("/")
 	# The engine logs this for every game (serverpackethandler / chat handling);
 	# devtest's own "Caught command" line does not exist in luanti_web.
-	marker = f"invoked /{name}"
+	# /giveme logs "invoked /giveme"; other commands pass their own marker.
+	marker = marker or f"invoked /{name}"
 	for _ in range(6):
 		start = len(console)
 		page.keyboard.press("t")
@@ -156,14 +170,17 @@ def place_nodes(page: Page, console: list[str]) -> int:
 	fresh spawn is not known in advance.
 	"""
 	start = len(console)
-	page.keyboard.press("7")
+	page.keyboard.press(PLACE_SLOT)
 	page.wait_for_timeout(800)
-	look(page, 0, 12)
+	# Aim at the ground a couple of nodes ahead, not the horizon: the
+	# 2026-11-05 runs clicked while pointing at air, which says nothing
+	# about #32. 25 units is roughly 45 degrees down.
+	look(page, 0, 25)
 	for attempt in range(48):
 		if count(console, start, "places node") >= PLACE_TARGET:
 			break
 		if attempt and attempt % 8 == 0:
-			look(page, 20, 4 if attempt % 16 else -4)
+			look(page, 20, 0)
 		page.mouse.down(button="right")
 		page.wait_for_timeout(200)
 		page.mouse.up(button="right")
@@ -173,9 +190,9 @@ def place_nodes(page: Page, console: list[str]) -> int:
 
 
 def dig_nodes(page: Page, console: list[str]) -> int:
-	"""Dig the ground the player is standing on, with the mese pick."""
+	"""Dig the ground the player is standing on, with the game's dig tool."""
 	start = len(console)
-	page.keyboard.press("1")
+	page.keyboard.press(DIG_SLOT)
 	page.wait_for_timeout(800)
 	look(page, 0, 40)
 	for attempt in range(40):
@@ -251,7 +268,11 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 	page.wait_for_timeout(6000)
 	shot("02-world")
 	grab_pointer(page)
+	send_chat(page, console, "/clearinv", "clears singleplayer's inventory")
 	send_chat(page, console, f"/giveme {place_item} 40")
+	dig_item = DIG_ITEMS.get(game)
+	if dig_item:
+		send_chat(page, console, f"/giveme {dig_item}")
 	placed = place_nodes(page, console)
 	dug = dig_nodes(page, console)
 	shot("03-interaction")
