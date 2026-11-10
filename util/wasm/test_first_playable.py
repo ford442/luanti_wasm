@@ -120,7 +120,8 @@ def grab_pointer(page: Page) -> None:
 		"document.pointerLockElement === Module.canvas", timeout=30_000)
 
 
-def send_chat(page: Page, console: list[str], command: str) -> None:
+def send_chat(page: Page, console: list[str], command: str,
+		marker: str | None = None) -> None:
 	"""Type a chat command, retrying until the server acknowledges it.
 
 	The first key presses after entering a world are routinely dropped while
@@ -130,7 +131,8 @@ def send_chat(page: Page, console: list[str], command: str) -> None:
 	name = command.split()[0].lstrip("/")
 	# The engine logs this for every game (serverpackethandler / chat handling);
 	# devtest's own "Caught command" line does not exist in luanti_web.
-	marker = f"invoked /{name}"
+	# /giveme logs "invoked /giveme"; other commands pass their own marker.
+	marker = marker or f"invoked /{name}"
 	for _ in range(6):
 		start = len(console)
 		page.keyboard.press("t")
@@ -266,7 +268,7 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 	page.wait_for_timeout(6000)
 	shot("02-world")
 	grab_pointer(page)
-	send_chat(page, console, "/clearinv")
+	send_chat(page, console, "/clearinv", "clears singleplayer's inventory")
 	send_chat(page, console, f"/giveme {place_item} 40")
 	dig_item = DIG_ITEMS.get(game)
 	if dig_item:
