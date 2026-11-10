@@ -811,8 +811,8 @@ if(BUILD_CLIENT)
 	if(EMSCRIPTEN)
 		set(WASM_PTHREAD_POOL_SIZE "10" CACHE STRING
 			"Pre-spawned pthread pool size (integer or JS expression, e.g. navigator.hardwareConcurrency)")
-		option(WASM_ENABLE_LTO "Link-time optimisation for the Release WASM build (experimental)" OFF)
-		option(WASM_ENABLE_SIMD "Build with -msimd128 (needs a SIMD-capable browser)" OFF)
+		# WASM_ENABLE_LTO / WASM_ENABLE_SIMD are applied to every target in
+		# the top-level CMakeLists.txt.
 		set(WASM_MALLOC "" CACHE STRING "Emscripten allocator override: dlmalloc, emmalloc or mimalloc (empty = default)")
 		# Emscripten ports and WebAssembly-specific linker flags
 		target_compile_options(${PROJECT_NAME} PRIVATE
@@ -907,14 +907,6 @@ if(BUILD_CLIENT)
 				-sASSERTIONS=0
 				-O3
 			)
-			if(WASM_ENABLE_LTO)
-				target_compile_options(${PROJECT_NAME} PRIVATE -flto)
-				target_link_options(${PROJECT_NAME} PRIVATE -flto)
-			endif()
-		endif()
-		if(WASM_ENABLE_SIMD)
-			target_compile_options(${PROJECT_NAME} PRIVATE -msimd128)
-			target_link_options(${PROJECT_NAME} PRIVATE -msimd128)
 		endif()
 		if(WASM_MALLOC)
 			target_link_options(${PROJECT_NAME} PRIVATE -sMALLOC=${WASM_MALLOC})
