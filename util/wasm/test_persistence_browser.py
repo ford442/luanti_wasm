@@ -34,6 +34,16 @@ class ReusableTCPServer(socketserver.TCPServer):
 	allow_reuse_address = True
 
 
+def start_main(page) -> None:
+	"""Do what launcher.js does once the runtime is up: call main."""
+	page.wait_for_function(
+		"typeof runtimeInitialized !== 'undefined' && runtimeInitialized && "
+		"typeof Module.callMain === 'function'")
+	page.evaluate("Module.callMain([])")
+	page.wait_for_function(
+		"Module.luantiPersistenceProbe?.mainStarted === true")
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--emcc", default=shutil.which("emcc"))
@@ -58,6 +68,9 @@ def main() -> int:
 			"-sPROXY_TO_PTHREAD=1",
 			"-sFORCE_FILESYSTEM=1",
 			"-sEXIT_RUNTIME=0",
+			# shell.html sets noInitialRun and leaves main to launcher.js, which
+			# the probe does not ship, so the test starts main itself.
+			"-sEXPORTED_RUNTIME_METHODS=callMain",
 			"-lidbfs.js",
 			"--pre-js",
 			str(repo / "client/web/persistence.js"),
@@ -82,8 +95,7 @@ def main() -> int:
 					page = browser.new_page()
 					url = f"http://127.0.0.1:{server.server_address[1]}/probe.html"
 					page.goto(url)
-					page.wait_for_function(
-						"Module.luantiPersistenceProbe?.mainStarted === true")
+					start_main(page)
 					first = page.evaluate("Module.luantiPersistenceProbe")
 					assert first == {
 						"mainStarted": True,
@@ -109,8 +121,7 @@ def main() -> int:
 					assert page.locator("#luanti-persistence-error").is_hidden()
 
 					page.reload()
-					page.wait_for_function(
-						"Module.luantiPersistenceProbe?.mainStarted === true")
+					start_main(page)
 					restored = page.evaluate(
 						"path => FS.readFile(path, {encoding: 'utf8'})", sentinel)
 					assert restored == "survived reload", restored
