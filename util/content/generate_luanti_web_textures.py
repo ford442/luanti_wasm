@@ -5,7 +5,7 @@
 """Generate every texture used by games/luanti_web.
 
 The showcase pack keeps its art in-repo as small indexed-free RGBA PNGs so the
-Emscripten ``--preload-file`` payload stays predictable (see the content budget
+streamed ``luanti_web`` asset package stays predictable (see the content budget
 in ``wasm_porting.md``). Rather than committing binaries nobody can edit, the
 tiles are described procedurally here and regenerated with:
 

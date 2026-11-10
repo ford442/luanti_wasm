@@ -11,13 +11,13 @@ Short video clips for the showcase theater's browser overlay
 `luanti.html`, so a file dropped here is served from `media/<name>` on the same
 origin as the page.
 
-## Why these are not in `luanti.data`
+## Why these are not in an asset package
 
-`--preload-file` bakes its input into `luanti.data`, which every visitor
-downloads before the engine starts. A 10 MB reel would add 10 MB to the time to
-first frame whether or not anyone walks into the theater. Clips are fetched at
-runtime instead, and the content budget in `wasm_porting.md` says to keep it
-that way.
+Everything in `core` is downloaded by every visitor before the engine starts,
+and a game's package by everyone who picks that game. A 10 MB reel would add
+10 MB to that whether or not anyone walks into the theater. Clips are fetched at
+runtime instead (and with HTTP Range, which the service worker leaves alone),
+and the content budget in `wasm_porting.md` says to keep it that way.
 
 ## Naming rules
 

@@ -11,7 +11,7 @@ and a museum of drawtypes. That is exactly right for engine bring-up and exactly
 wrong as the first thing a visitor sees in a shareable link.
 
 `games/luanti_web` is now the default game in the launcher, in `shell.html` and
-in the first-playable gate. `devtest` stays in the tree, stays preloaded, and is
+in the first-playable gate. `devtest` stays in the tree, stays a package (fetched when chosen), and is
 still one entry down the dropdown — engine work should keep using it.
 
 ## What shipped
@@ -121,7 +121,7 @@ Clip names are restricted to `[A-Za-z0-9][A-Za-z0-9._-]*`, no `..`, no slashes,
 128 characters or fewer — checked in C++ *and* again in JS. The launcher
 resolves the name inside its own `media/` directory, so a mod cannot aim the
 overlay at another origin. Clips are fetched at runtime and are deliberately not
-in `luanti.data`.
+in an asset package.
 
 Every failure path degrades to Tier A: no API (native build or a remote server),
 no overlay (an embedder replaced the shell), no clip on disk, or a codec the

@@ -16,7 +16,7 @@
 - **Core**: C++17, Lua 5.1 (bundled), IrrlichtMt (embedded in `irr/`)
 - **Graphics**: GLES2 + WebGL (via Emscripten's SDL2 + EGL)
 - **Build**: CMake + Emscripten (`emcmake`, `emmake`). Custom preset "Emscripten" in `CMakePresets.json`.
-- **Persistence**: `--preload-file` for read-only assets (`builtin/`, `games/devtest/`, `textures/`, `fonts/`, `client/shaders/`, `clientmods/`) + IDBFS (IndexedDB) mounted at `/home/web_user/.luanti/` for `worlds/`, config, etc.
+- **Persistence**: streamed asset packages (`util/wasm/packages.json`) for read-only assets (`builtin/`, `games/devtest/`, `textures/`, `fonts/`, `client/shaders/`, `clientmods/`) + IDBFS (IndexedDB) mounted at `/home/web_user/.luanti/` for `worlds/`, config, etc.
 - **Threading**: pthreads via `-pthread -sSHARED_MEMORY=1` (requires COOP/COEP headers on the serving page).
 - **Networking**: `src/network/socket.cpp` implements `UDPSocket` in-process (loopback for the internal server) and tunnels remote traffic through a WebSocket proxy (`client/web/network.js` ↔ `util/wasm/proxy/`). A deployed TLS (WSS) proxy is still outstanding.
 - **Main Loop**: The classic blocking `while (m_rendering_engine->run())` loops are kept. The engine runs on a pthread via `-sPROXY_TO_PTHREAD=1` + `-sOFFSCREEN_FRAMEBUFFER=1`; no ASYNCIFY and no `emscripten_set_main_loop`.
@@ -26,7 +26,7 @@
 
 **Build / Config**
 - `CMakePresets.json` — "Emscripten" preset
-- `src/CMakeLists.txt` — `elseif(EMSCRIPTEN)` branches (platform libs, link flags and the `--preload-file` list)
+- `src/CMakeLists.txt` — `elseif(EMSCRIPTEN)` branches (platform libs, link flags and the `luanti_packages` target; the asset list lives in `util/wasm/packages.json`)
 - `irr/src/CMakeLists.txt` — GLES2 / SDL2 Emscripten handling
 
 **Platform Abstraction (the WASM glue)**
@@ -54,7 +54,7 @@ util/wasm/build_libzip.sh
 cmake --preset Emscripten
 cmake --build build-wasm --parallel $(($(nproc)+1))
 
-# Output: build-wasm/bin/luanti.html + luanti.js + luanti.wasm + luanti.data
+# Output: build-wasm/bin/luanti.html + luanti.js + luanti.wasm + asset-manifest.json + assets/*.data
 ```
 
 **Serving (mandatory for pthreads / SHARED_MEMORY):**
@@ -89,9 +89,9 @@ Then open `http://127.0.0.1:8000/luanti.html`.
    - 256 MB initial heap is tight for big worlds + Lua + assets. Suggest chunking/unloading strategies when relevant.
    - Binary size matters for web delivery. `-Oz`, `-sASSERTIONS=0` for release, modularize when appropriate.
    - Profile in browser DevTools (Memory, Performance tabs) + Emscripten's `--profiling-funcs`.
-   - Before adding anything to the `--preload-file` list in `src/CMakeLists.txt`
+   - Before adding anything to a package in `util/wasm/packages.json`
      (a new game, mod, or texture set), read the **Content Budget** section in
-     [wasm_porting.md](wasm_porting.md#content-budget) — it has the `luanti.data`
+     [wasm_porting.md](wasm_porting.md#content-budget) — it has the first-visit and per-game
      size limit and the allow/deny list for what ships in the demo pack.
 
 5. **Testing mindset**:

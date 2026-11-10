@@ -38,15 +38,31 @@ end
 
 local loaded = {}
 
--- Reads <modpath>/schems/<name>.mts into a compact form the stamper can index
--- without allocating per node: `nodes[i]` is an index into `names`, or 0 for a
--- node the schematic never places. Probabilities other than "never" are treated
--- as "always" — the showcase is authored, so it must come out the same on every
--- world.
+-- Reads <modpath>/schems/<name>.mts into a compact form the stamper can read
+-- a row at a time without allocating per node. Probabilities other than
+-- "never" are treated as "always" — the showcase is authored, so it must come
+-- out the same on every world.
+--
+-- The cells are kept run-length encoded, one X row at a time, in two strings
+-- (a Lua string costs its bytes and nothing else, where a table slot costs
+-- sixteen, and a map is mostly air):
+--
+--   runs         three bytes per run: node, param2, length (1..255).
+--                `node` is an index into `names`, or 0 for a node the
+--                schematic never places (its param2 is then stored as 0, so
+--                it joins the run next to it); a run never crosses a row.
+--   row_offsets  three bytes per row, little-endian: where that row's first
+--                run starts in `runs`. Row r is z * size.y + y.
+--
+-- Read them with schems.read_row() or schems.node_at(); nothing outside this
+-- file should look inside.
 --
 -- read_schematic is used rather than place_schematic because a file loaded by
 -- name is cached by the engine for the life of the server, and because the
 -- stamper has to clip a piece to whichever chunk is being generated.
+local MAX_RUN = 255
+local MAX_OFFSET = 256 * 256 * 256
+
 function schems.load(name)
 	assert(valid_name(name), ("lw_world: bad schematic name %q"):format(tostring(name)))
 	if loaded[name] then
@@ -58,21 +74,48 @@ function schems.load(name)
 	-- the world that nobody notices until a visitor walks into it.
 	assert(schem, "lw_world: cannot read schematic " .. path)
 
+	local sx, sy, sz = schem.size.x, schem.size.y, schem.size.z
+	local data = schem.data
 	local names, index_of = {}, {}
-	local nodes, param2 = {}, {}
-	for i, entry in ipairs(schem.data) do
-		if entry.prob == 0 or entry.name == "ignore" then
-			nodes[i] = 0
-		else
-			local n = index_of[entry.name]
-			if not n then
-				n = #names + 1
-				names[n] = entry.name
-				index_of[entry.name] = n
+	local rows, offsets = {}, {}
+	local position = 0
+
+	for row = 0, sy * sz - 1 do
+		local out, count = {}, 0
+		local run_node, run_param2, run_length
+		local base = row * sx
+		for x = 1, sx do
+			local entry = data[base + x]
+			local node, param2 = 0, 0
+			if not (entry.prob == 0 or entry.name == "ignore") then
+				node = index_of[entry.name]
+				if not node then
+					node = #names + 1
+					assert(node < 256, "lw_world: " .. name .. " has too many node names")
+					names[node] = entry.name
+					index_of[entry.name] = node
+				end
+				param2 = entry.param2 or 0
 			end
-			nodes[i] = n
+			if node == run_node and param2 == run_param2 and run_length < MAX_RUN then
+				run_length = run_length + 1
+			else
+				if run_node then
+					count = count + 1
+					out[count] = string.char(run_node, run_param2, run_length)
+				end
+				run_node, run_param2, run_length = node, param2, 1
+			end
 		end
-		param2[i] = entry.param2 or 0
+		count = count + 1
+		out[count] = string.char(run_node, run_param2, run_length)
+
+		local packed = table.concat(out)
+		rows[row + 1] = packed
+		offsets[row + 1] = string.char(position % 256, math.floor(position / 256) % 256,
+			math.floor(position / 65536))
+		position = position + #packed
+		assert(position < MAX_OFFSET, "lw_world: " .. name .. " is too large")
 	end
 
 	local piece = {
@@ -80,20 +123,45 @@ function schems.load(name)
 		path = path,
 		size = schem.size,
 		names = names,
-		nodes = nodes,
-		param2 = param2,
+		runs = table.concat(rows),
+		row_offsets = table.concat(offsets),
 	}
 	loaded[name] = piece
 	return piece
 end
 
+-- Decodes cells x0..x1 (piece-local, 0-based, inclusive) of the row at (y, z)
+-- into nodes[x + 1] and param2[x + 1]: the same `names` index or 0 that the
+-- cell holds. The caller owns both tables and reuses them from row to row.
+function schems.read_row(piece, y, z, x0, x1, nodes, param2)
+	local runs = piece.runs
+	local row = z * piece.size.y + y
+	local a, b, c = string.byte(piece.row_offsets, row * 3 + 1, row * 3 + 3)
+	local at = a + b * 256 + c * 65536 + 1
+	local x = 0
+	while x <= x1 do
+		local node, p2, length = string.byte(runs, at, at + 2)
+		at = at + 3
+		local last = x + length - 1
+		if last >= x0 then
+			for i = (x < x0 and x0 or x), (last > x1 and x1 or last) do
+				nodes[i + 1] = node
+				param2[i + 1] = p2
+			end
+		end
+		x = last + 1
+	end
+end
+
+local scratch_nodes, scratch_param2 = {}, {}
+
 -- The node at a piece-local offset (0-based), or nil when the piece leaves that
 -- node alone. Used by init.lua to check that a piece still lines up with the
 -- code that depends on it.
 function schems.node_at(piece, x, y, z)
-	local sx, sy = piece.size.x, piece.size.y
-	local n = piece.nodes[z * sy * sx + y * sx + x + 1]
-	return n and n ~= 0 and piece.names[n] or nil
+	schems.read_row(piece, y, z, x, x, scratch_nodes, scratch_param2)
+	local n = scratch_nodes[x + 1]
+	return n ~= 0 and piece.names[n] or nil
 end
 
 -- Swap only the nodes that differ from a loaded piece. Used by the living
@@ -103,11 +171,13 @@ end
 -- written, so a half-applied frame cannot stall the WASM worker.
 function schems.apply_diff(piece, origin)
 	local sx, sy, sz = piece.size.x, piece.size.y, piece.size.z
+	local nodes, params = scratch_nodes, scratch_param2
 	local changes = {}
 	for z = 0, sz - 1 do
 		for y = 0, sy - 1 do
+			schems.read_row(piece, y, z, 0, sx - 1, nodes, params)
 			for x = 0, sx - 1 do
-				local n = piece.nodes[z * sy * sx + y * sx + x + 1]
+				local n = nodes[x + 1]
 				if n ~= 0 then
 					local pos = {x = origin.x + x, y = origin.y + y, z = origin.z + z}
 					local current = core.get_node(pos)
@@ -115,7 +185,7 @@ function schems.apply_diff(piece, origin)
 						return nil
 					end
 					local target = piece.names[n]
-					local param2 = piece.param2[z * sy * sx + y * sx + x + 1]
+					local param2 = params[x + 1]
 					if current.name ~= target or current.param2 ~= param2 then
 						changes[#changes + 1] = {
 							pos = pos,

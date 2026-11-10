@@ -1780,8 +1780,7 @@ def build_rainbow_storm() -> Build:
 # Lace Waterfall's stage for "Around". Since the concert arena (9.) took the
 # song, this one is a light show only: no amp cabs, so nothing here pulls the
 # song files in. Small on purpose: 25 x 12 x 25 is 7,500
-# cells, under 8,192, so lw_world keeps it in a quarter of what the other maps
-# cost (see Budget in docs/maps.md). Odd on both sides so the truss round the
+# cells, a small box (see Budget in docs/maps.md). Odd on both sides so the truss round the
 # edge is 96 cells, which takes 32 lights three apart — a whole number of
 # chase periods, so the loop has no seam.
 ARENA_SIZE = (25, 12, 25)
@@ -2158,8 +2157,8 @@ def build_halloween_storm() -> Build:
 # a bar. Indoors, so the night outside is the sky and fog over the roof and
 # the room is lit by its own lamps.
 #
-# 27 x 11 x 27 is 8,019 cells, under 8,192, so lw_world keeps it in a quarter
-# of a MiB like the Around arena (see Budget in docs/maps.md).
+# 27 x 11 x 27 is 8,019 cells, a small box like the Around arena's (see Budget
+# in docs/maps.md).
 CABARET_SIZE = (27, 11, 27)
 # The causeway lands on the east face, under the awning, level with the door.
 CABARET_SPAWN = (26, FLOOR, 14)
@@ -2289,8 +2288,7 @@ def build_cabaret() -> Build:
 # here (lw_amps/songs/README.md), so the rest of the pack stays light; a
 # later lossless experiment belongs here too, and nowhere else.
 #
-# 49 x 13 x 49 is 31,213 cells: about twice the Around arena on each side and
-# still under 32,768, the step past which lw_world's arrays double (see
+# 49 x 13 x 49 is 31,213 cells: about twice the Around arena on each side (see
 # NODE_BUDGET). Odd on both sides again: a 192-cell truss takes 64 lights
 # three apart, eight whole chase periods.
 CONCERT_SIZE = (49, 13, 49)
@@ -2457,29 +2455,29 @@ MAPS = {spec.name: spec.build for spec in SPECS}
 SIZES = {spec.name: spec.size for spec in SPECS}
 SPAWNS = {spec.name: spec.spawn for spec in SPECS}
 
-# The pack's node budget, in schematic *volume*: lw_world/schems.lua loads a
-# schematic into two Lua arrays with a slot for every cell, air included, and
-# they stay in the WASM heap for the session. A sparse map is still cheaper to
-# mesh and to diff, but it is not cheaper to hold, so the cap counts the box.
+# The pack's node budget, in schematic *volume* (box cells, air included).
 #
-# The heap is what the cap protects, and test_luanti_web_maps.py measures it
-# directly as well: Lua sizes an array part to a power of two, so a map keeps
-# 1 MiB up to 32,768 cells and 2 MiB up to 65,536. That step, not the node
-# count, is what makes a 36x24x36 map cheap and a 40x24x40 one twice the
-# price. The numbers and the reasoning are in wasm_porting.md ("Content
-# Budget") and games/luanti_web/docs/maps.md ("Budget").
+# lw_world/schems.lua keeps each schematic run-length encoded, a row at a time,
+# in two Lua strings: about 0.4 bytes a cell for these maps, 110 KiB for all
+# eleven. The volume therefore no longer sets what the pack keeps in the heap;
+# test_luanti_web_maps.py measures that directly and caps it. What volume still
+# costs is the high-water mark while a map loads (the engine's read_schematic
+# builds one small table per cell, about 250 bytes each, before the loader packs
+# it), the work of generating and meshing the cells, and the review burden of a
+# map nobody can walk end to end. So there are two volume caps, both creep
+# guards: MAX_MAP_VOLUME for one map (its load peak stays under 16 MiB) and
+# NODE_BUDGET for the pack. The numbers and the reasoning are in
+# wasm_porting.md ("Content Budget") and games/luanti_web/docs/maps.md
+# ("Budget").
 #
-# Raised from 200,000 for the Around arena: it is 7,500 cells, under 8,192, so
-# it keeps 0.25 MiB and the pack 7.75 MiB. Raised again, to 235,000, for the
-# thunder chapel: 25,920 cells, the Halloween lane's own box, so 1 MiB, and
-# the heap cap went from 8 to 9 MiB with it. The heap measurement is the cap
-# that bites; this one only stops the volume creeping up unnoticed. Raised to
-# 241,000 for the cabaret club: 8,019 cells, under 8,192, so a quarter of a
-# MiB, which fits the 9 MiB heap cap as it stands (9.0 MiB for ten maps).
-# Raised to 272,000 for the concert arena: 31,213 cells, under 32,768, so
-# it keeps 1 MiB.
-NODE_BUDGET = 272_000
-CHEAP_VOLUME = 32_768
+# History: 120,000 cells before the cost was measured, then 200,000 to 272,000
+# while the loader kept two Lua arrays with a slot per cell (1 MiB per
+# 32,768 cells, so the box was the budget). Run-length storage took the pack
+# from 10.0 MiB kept to 110 KiB, and the cell cap was re-based at 512,000:
+# roughly the eleven maps again, with their share of room for about eight
+# more maps the size of the concert arena.
+NODE_BUDGET = 512_000
+MAX_MAP_VOLUME = 65_536
 
 
 def pack_volume() -> int:

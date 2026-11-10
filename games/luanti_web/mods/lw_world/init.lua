@@ -747,6 +747,8 @@ end
 -- Writes every op (or only the placements of piece `only`) that touches
 -- minp..maxp into voxel data covering that box. Returns whether anything was
 -- written, and the positions of nodes whose on_construct must still run.
+local row_nodes, row_param2 = {}, {}
+
 local function stamp(data, param2, area, minp, maxp, only)
 	local touched = false
 	local constructs = {}
@@ -762,7 +764,6 @@ local function stamp(data, param2, area, minp, maxp, only)
 		if x0 <= x1 and y0 <= y1 and z0 <= z1
 				and (not only or (piece and piece.name == only)) then
 			if piece then
-				local sx, sy = piece.size.x, piece.size.y
 				local ids, construct = {}, {}
 				for n, name in ipairs(piece.names) do
 					ids[n] = content_id(name)
@@ -771,12 +772,14 @@ local function stamp(data, param2, area, minp, maxp, only)
 				for z = z0, z1 do
 					for y = y0, y1 do
 						local index = area:index(x0, y, z)
-						local i = (z - op.z0) * sy * sx + (y - op.y0) * sx + (x0 - op.x0) + 1
+						local i = x0 - op.x0 + 1
+						schems.read_row(piece, y - op.y0, z - op.z0, x0 - op.x0, x1 - op.x0,
+							row_nodes, row_param2)
 						for x = x0, x1 do
-							local n = piece.nodes[i]
+							local n = row_nodes[i]
 							if n ~= 0 then
 								data[index] = ids[n]
-								param2[index] = piece.param2[i]
+								param2[index] = row_param2[i]
 								if construct[n] then
 									constructs[#constructs + 1] =
 										{pos = vector.new(x, y, z), name = piece.names[n]}

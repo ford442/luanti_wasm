@@ -54,7 +54,7 @@ The WASM port targets a **client-only browser build** (internal server for singl
 - **Windowing / Input**: SDL2 via Emscripten port (`-sUSE_SDL=2`)
 - **Threading**: pthreads (`-pthread -sSHARED_MEMORY=1`), requires COOP/COEP headers; engine runs off the UI thread via `-sPROXY_TO_PTHREAD=1 -sOFFSCREEN_FRAMEBUFFER=1`
 - **Memory**: 256 MB initial, 1 GB max (`-sALLOW_MEMORY_GROWTH=1`)
-- **File System**: MEMFS for runtime, IDBFS for persistence, `--preload-file` for assets
+- **File System**: MEMFS for runtime, IDBFS for persistence, streamed asset packages (`util/wasm/packages.json`) for read-only assets
 - **Networking**: In-process loopback for singleplayer; remote servers via WebSocket proxy (`src/network/socket.cpp`, `client/web/network.js`, `util/wasm/proxy/`)
 - **Sound**: Enabled (`ENABLE_SOUND=TRUE` in the preset; Emscripten Ogg/Vorbis ports)
 
@@ -151,7 +151,7 @@ The `Emscripten` preset (defined in `CMakePresets.json`) configures:
 - GLES2 rendering (`ENABLE_GLES2=TRUE`, `ENABLE_OPENGL=FALSE`, `ENABLE_OPENGL3=FALSE`)
 - Sound enabled; disabled features not available in browser: curl, gettext, curses, PostgreSQL, LevelDB, Redis, Prometheus, Spatial, OpenSSL
 - pthreads + shared memory
-- Asset preloading is set in `src/CMakeLists.txt` (`--preload-file`: `builtin`, all bundled `games/*`, `textures`, `fonts`, `client/shaders`, `clientmods`) — that list is the source of truth
+- Read-only assets are split into streamed packages in `util/wasm/packages.json` (`core` = `builtin`, `textures`, `fonts`, `client/shaders`, `clientmods`; one package per bundled game; background packages for the showcase songs) — that file is the source of truth. Nothing is preloaded into the engine.
 
 ### Presets (from `CMakePresets.json`)
 - `Debug` — debug symbols, no optimization
@@ -195,7 +195,7 @@ cmake --build build --parallel $(($(nproc) + 1))
 - `bin/luantiserver` — dedicated server
 - `build-wasm/bin/luanti.html` — **WASM browser build**
 - `build-wasm/bin/luanti.wasm` — compiled engine
-- `build-wasm/bin/luanti.data` — preloaded asset bundle
+- `build-wasm/bin/asset-manifest.json`, `build-wasm/bin/assets/*.data` — content-addressed streamed asset packages
 - `build-wasm/bin/{launcher.js,launcher.css,launcher-config.js,theater.js,videotexture.js,manifest.webmanifest,service-worker.js}` — launcher/PWA companions copied from `client/web/`
 
 ---
@@ -323,7 +323,7 @@ Key workflow files:
 
 ### WASM-Specific Architecture
 
-- **File System**: Read-only assets are bundled at link time via `--preload-file`. Read-write user data (`worlds/`, `minetest.conf`) is stored in an IDBFS mount at `/home/web_user/.luanti/`.
+- **File System**: Read-only assets are built into content-addressed packages (`util/wasm/build_packages.py`) and streamed into MEMFS on demand by `client/web/packages.js`. Read-write user data (`worlds/`, `minetest.conf`) is stored in an IDBFS mount at `/home/web_user/.luanti/`.
 - **Persistence**: `porting::emscripten_sync_filesystem()` must be called after world saves, settings changes, or periodically to flush IDBFS to IndexedDB.
 - **Rendering**: Uses GLES2 → WebGL via Emscripten's SDL2 port. IrrlichtMt already contains partial Emscripten support.
 - **Threading**: pthreads are supported but require `SHARED_MEMORY` and correct COOP/COEP headers on the serving page.

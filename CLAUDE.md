@@ -25,7 +25,7 @@ util/wasm/build_libzip.sh            # once per SDK/EM_CACHE: libzip is required
 cmake --preset Emscripten            # binaryDir is build-wasm; Release, client-only
 cmake --build build-wasm --parallel $(($(nproc) + 1))
 # or: npm run build
-# Output: build-wasm/bin/luanti.{html,js,wasm,data} + launcher/PWA companions
+# Output: build-wasm/bin/luanti.{html,js,wasm}, asset-manifest.json, assets/*.data + launcher/PWA companions
 ```
 Full guide: `doc/compiling/wasm.md`.
 
@@ -53,6 +53,8 @@ xvfb-run ./util/test_singleplayer.sh
 python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
 python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)"
 python3 util/wasm/test_demo_tools.py          # packaging/deploy tooling
+python3 util/wasm/test_packages_browser.py --browser "$(command -v google-chrome)"        # streamed packages + offline
+python3 util/wasm/test_service_worker_browser.py --browser "$(command -v google-chrome)" # stale-binary regression
 npm ci && npm run proxy:install               # once: lint/typecheck tooling + proxy deps
 npm run lint && npm run typecheck             # ESLint + tsc (checkJs) over client/web and util/wasm
 npm test                                      # WebSocket proxy (node --test)
@@ -90,7 +92,7 @@ irr/                    – IrrlichtMt rendering engine (embedded CMake subproje
 builtin/                – Lua code loaded by the engine at runtime
 lib/                    – Bundled third-party libraries (Lua 5.1, sha256, etc.)
 games/luanti_web/       – Default game for the web demo (showcase pack + theater)
-games/{flower_island,rollercoaster,log_ride,spire_tunnel}/ – Showcase games, also preloaded into WASM
+games/{flower_island,rollercoaster,log_ride,spire_tunnel}/ – Showcase games, each its own streamed WASM asset package
 games/devtest/          – Development test game
 client/web/             – Browser shell, launcher/PWA, network.js, persistence.js, theater/videotexture.js
 util/wasm/              – serve.py, build_libzip.sh, package_demo.py, proxy/, Playwright tests
@@ -101,7 +103,9 @@ client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 | File | Purpose |
 |------|---------|
 | `CMakePresets.json` | "Emscripten" preset (toolchain + flags) |
-| `src/CMakeLists.txt` | `EMSCRIPTEN` branches (~lines 335, 548, 811); link flags + `--preload-file` list (source of truth for the asset bundle) |
+| `src/CMakeLists.txt` | `EMSCRIPTEN` branches (~lines 335, 548, 811); link flags and the `luanti_packages` target |
+| `util/wasm/packages.json`, `build_packages.py` | Source of truth for the streamed asset packages (core, one per game, songs) → `assets/<name>.<hash>.data` + `asset-manifest.json` |
+| `client/web/packages.js`, `service-worker.js` | Package loader (a `--pre-js`) and the versioned, narrow service worker |
 | `src/porting_emscripten.cpp/h` | IDBFS mount, `emscripten_sync_filesystem()` |
 | `src/porting.cpp` | Sets `path_share="/"`, `path_user="/home/web_user/.luanti"` under WASM |
 | `src/network/socket.cpp` | Emscripten `UDPSocket` (loopback + WebSocket proxy) under `#ifdef __EMSCRIPTEN__` |
@@ -113,7 +117,7 @@ client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 | `util/content/generate_luanti_web_textures.py` | Regenerates every `games/luanti_web` texture |
 
 ### WASM Port Status (see `wasm_porting.md` — authoritative)
-- Compile, FS init, IDBFS persistence, preloaded assets: done
+- Compile, FS init, IDBFS persistence, streamed asset packages (no monolithic `luanti.data`): done
 - Main loop: `-sPROXY_TO_PTHREAD=1` + `-sOFFSCREEN_FRAMEBUFFER=1` (not ASYNCIFY / `emscripten_set_main_loop`)
 - Networking: WebSocket proxy (`util/wasm/proxy/`, Node `ws`), not WebRTC
 - Sound (Ogg/Vorbis ports, `ENABLE_SOUND=TRUE` in preset) and input/launcher: implemented

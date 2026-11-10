@@ -871,25 +871,17 @@ if(BUILD_CLIENT)
 			-lidbfs.js
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/packages.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/webgl_compat.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/audio_unlock.js"
 			"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/client/web/shell.html"
-			# Asset preloading — paths are relative to CMAKE_SOURCE_DIR at build
-			# time. Everything listed here lands in luanti.data, which every
-			# visitor downloads before the engine starts: check the content
-			# budget in wasm_porting.md before adding to this list. Runtime
-			# media (theater clips) goes in client/web/media instead.
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/builtin@/builtin"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/luanti_web@/games/luanti_web"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/devtest@/games/devtest"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/flower_island@/games/flower_island"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/rollercoaster@/games/rollercoaster"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/log_ride@/games/log_ride"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/games/spire_tunnel@/games/spire_tunnel"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/textures@/textures"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/fonts@/fonts"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/client/shaders@/client/shaders"
-			"SHELL:--preload-file ${CMAKE_SOURCE_DIR}/clientmods@/clientmods"
+			# Assets are NOT preloaded. util/wasm/packages.json lists the
+			# packages (core engine data, one per game, optional songs);
+			# util/wasm/build_packages.py turns them into content-addressed
+			# assets/<name>.<hash>.data files that client/web/packages.js streams
+			# in on demand. Check the content budget in wasm_porting.md before
+			# growing `core`. Runtime media (theater clips) stays in
+			# client/web/media.
 		)
 		# Build-type specific profile. See "Appendix: Flag Matrix" in
 		# wasm_porting.md before changing any of these.
@@ -932,6 +924,7 @@ if(BUILD_CLIENT)
 		set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
 			${CMAKE_SOURCE_DIR}/client/web/network.js
 			${CMAKE_SOURCE_DIR}/client/web/persistence.js
+			${CMAKE_SOURCE_DIR}/client/web/packages.js
 			${CMAKE_SOURCE_DIR}/client/web/webgl_compat.js
 			${CMAKE_SOURCE_DIR}/client/web/audio_unlock.js
 			${CMAKE_SOURCE_DIR}/client/web/shell.html
@@ -953,18 +946,31 @@ if(BUILD_CLIENT)
 				${CMAKE_SOURCE_DIR}/client/web/theater.js
 				${CMAKE_SOURCE_DIR}/client/web/videotexture.js
 				${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
-				${CMAKE_SOURCE_DIR}/client/web/service-worker.js
 				${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
 				${CMAKE_SOURCE_DIR}/client/web/.htaccess
 				$<TARGET_FILE_DIR:${PROJECT_NAME}>
 			# Theater clips are served from media/ at runtime rather than baked
-			# into luanti.data. The directory ships with only its README; a
+			# into the asset packages. The directory ships with only its README; a
 			# deployment drops real clips in beside it.
 			COMMAND ${CMAKE_COMMAND} -E copy_directory
 				${CMAKE_SOURCE_DIR}/client/web/media
 				$<TARGET_FILE_DIR:${PROJECT_NAME}>/media
 			COMMENT "Copying Luanti web launcher and PWA assets"
 		)
+		# Streamed asset packages + asset-manifest.json, and the service worker
+		# stamped with this build's id (it is not copied verbatim above). Always out of date on
+		# purpose (it hashes the source trees, so changing a game never needs an
+		# engine relink) and cheap when nothing changed.
+		find_package(Python3 REQUIRED COMPONENTS Interpreter)
+		add_custom_target(luanti_packages ALL
+			COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/util/wasm/build_packages.py
+				--root ${CMAKE_SOURCE_DIR}
+				--config ${CMAKE_SOURCE_DIR}/util/wasm/packages.json
+				--output $<TARGET_FILE_DIR:${PROJECT_NAME}>
+			COMMENT "Building Luanti asset packages"
+			VERBATIM
+		)
+		add_dependencies(luanti_packages ${PROJECT_NAME})
 	endif()
 endif(BUILD_CLIENT)
 
