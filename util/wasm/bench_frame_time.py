@@ -20,6 +20,14 @@ On a real GPU, locally::
 
 In CI (SwiftShader, headless) the numbers are only good for spotting large
 regressions between commits, never for comparing with a real GPU.
+
+The report's "server" entry says whether the internal server kept up during
+the path. Without WASMFS every SQLite read and write is a synchronous call
+on the browser main thread, which in the proxied render mode is also busy
+running GL, so the server can stall for seconds and the camera then stays
+near its start: two runs whose server rates differ widely did not render the
+same scene. --no-map-io stores the world in the "dummy" backends (nothing is
+written) to compare rendering alone.
 """
 
 from __future__ import annotations
@@ -28,6 +36,7 @@ import argparse
 import json
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import threading
@@ -54,6 +63,10 @@ local RX, RZ, HEIGHT = 44, 56, 24
 
 local rig, player_name, t0
 local finished = false
+-- Server progress during the path: globalsteps run and the longest gap
+-- between two of them. A server starved by the browser main thread steps
+-- rarely, and the rig (so the camera) then barely moves.
+local steps, last_us, worst_gap_us = 0, nil, 0
 
 core.register_entity("lw_bench:rig", {
 	initial_properties = {
@@ -105,10 +118,18 @@ core.register_globalstep(function()
 		return
 	end
 	local player = core.get_player_by_name(player_name)
-	local t = (core.get_us_time() - t0) / 1e6 / DURATION
+	local now = core.get_us_time()
+	steps = steps + 1
+	if last_us then
+		worst_gap_us = math.max(worst_gap_us, now - last_us)
+	end
+	last_us = now
+	local t = (now - t0) / 1e6 / DURATION
 	if t >= 1 or not player or not rig:get_pos() then
 		finished = true
-		core.log("action", "[lw_bench] path end")
+		core.log("action", string.format(
+			"[lw_bench] path end steps=%%d worst_gap_ms=%%.1f", steps,
+			worst_gap_us / 1000))
 		return
 	end
 	local pos = path_pos(t)
@@ -116,6 +137,33 @@ core.register_globalstep(function()
 	aim(player, pos)
 end)
 """
+
+# --no-map-io: a world.mt written before the world is first opened.
+NO_MAP_IO_WORLD_MT = f"""gameid = {GAME}
+backend = dummy
+player_backend = dummy
+mod_storage_backend = dummy
+"""
+
+PRESENT_STATS = ("Module.luantiPresentStats ? "
+	"Module.luantiPresentStats() : null")
+# Main-thread animation frames per second over 2 s, measured after the path:
+# what the compositor can still deliver while the engine runs.
+RAF_RATE = """() => new Promise(done => {
+	let frames = 0;
+	const start = performance.now();
+	function tick() {
+		frames++;
+		if (performance.now() - start < 2000) requestAnimationFrame(tick);
+		else done(Math.round(frames / 2 * 10) / 10);
+	}
+	requestAnimationFrame(tick);
+})"""
+
+DEFAULT_SETTINGS = ["fps_max = 1000", "fps_max_unfocused = 1000"]
+
+COMPAT_STATS = ("Module.luantiWebGLCompat ? "
+	"Module.luantiWebGLCompat.stats() : null")
 
 MOD_CONF = "name = lw_bench\ndescription = Frame-time benchmark path (generated)\n"
 
@@ -133,6 +181,18 @@ def wait_for_marker(page: Page, console: list[str], marker: str,
 		page.wait_for_timeout(50)
 	tail = "\n".join(line[:200] for line in console[-30:])
 	raise AssertionError(f"never saw {marker!r}\nconsole tail:\n{tail}")
+
+
+def server_progress(console: list[str], duration: float) -> dict | None:
+	match = None
+	for line in console:
+		match = re.search(r"\[lw_bench\] path end steps=(\d+) worst_gap_ms=([\d.]+)",
+			line) or match
+	if not match:
+		return None
+	steps = int(match.group(1))
+	return {"steps": steps, "stepHz": round(steps / duration, 2),
+		"worstGapMs": float(match.group(2))}
 
 
 def gpu_description(page: Page) -> dict:
@@ -182,22 +242,33 @@ def run(page: Page, url: str, console: list[str], args) -> dict:
 	assert page.evaluate("Module.luantiPerf?.available()"), \
 		"this build has no Module.luantiPerf"
 
-	settings = "".join(f"{s}\n" for s in args.setting)
-	page.evaluate("""([dir, lua, conf, configPath, settings]) => {
+	# Uncapped by default so the report measures what the build can do, not
+	# fps_max; the headless page also counts as unfocused. Later lines win.
+	settings = "".join(f"{s}\n" for s in DEFAULT_SETTINGS + args.setting)
+	world_mt = NO_MAP_IO_WORLD_MT if args.no_map_io else ""
+	page.evaluate("""([dir, lua, conf, configPath, settings, world, worldMt]) => {
 		FS.mkdirTree(dir);
 		FS.writeFile(dir + "/init.lua", lua);
 		FS.writeFile(dir + "/mod.conf", conf);
 		if (settings)
 			FS.writeFile(configPath, "# written by bench_frame_time.py\\n" + settings);
+		if (worldMt)
+			FS.writeFile(world + "/world.mt", worldMt);
 	}""", [MOD_DIR, MOD_LUA % {"warmup": args.warmup, "duration": args.duration},
-		MOD_CONF, CONFIG, settings])
+		MOD_CONF, CONFIG, settings, WORLD, world_mt])
 
 	page.click("#luanti-play-button")
 	page.wait_for_function(
 		"Module.luantiLauncher?.getState().phase === 'playing'", timeout=300_000)
 	wait_for_marker(page, console, "[lw_bench] path start", 300 + args.warmup)
 	start = page.evaluate("Module.luantiPerf.cursor()")
+	compat_start = page.evaluate(COMPAT_STATS)
+	shown_start = page.evaluate(PRESENT_STATS)
+	t_start = time.monotonic()
 	wait_for_marker(page, console, "[lw_bench] path end", args.duration + 60)
+	compat_end = page.evaluate(COMPAT_STATS)
+	shown_end = page.evaluate(PRESENT_STATS)
+	elapsed = time.monotonic() - t_start
 	samples = page.evaluate("since => Module.luantiPerf.samples(since)", start)
 	summary = page.evaluate("since => Module.luantiPerf.summary({since})", start)
 	if args.screenshot:
@@ -210,6 +281,23 @@ def run(page: Page, url: str, console: list[str], args) -> dict:
 		"timeline": timeline(frames),
 		"frameMs": [round(f["frameMs"], 2) for f in frames],
 		"webgl": page.evaluate("Module.luantiWebGLInfo || null"),
+		# Offscreen mode only: frames the page actually put on screen (the
+		# rest were replaced by a newer frame before an animation frame).
+		"presented": {
+			"shown": shown_end["shown"] - shown_start["shown"],
+			"dropped": shown_end["dropped"] - shown_start["dropped"],
+			"shownFps": round((shown_end["shown"] - shown_start["shown"]) / elapsed, 2),
+		} if shown_start and shown_end and shown_end["shown"] else None,
+		"rafHz": page.evaluate(RAF_RATE),
+		# Server globalsteps during the path. Frame times only compare when
+		# the server kept up: a starved server leaves the camera parked.
+		"server": server_progress(console, args.duration),
+		# Shim work during the path only (null when the shim is not loaded
+		# in the page, i.e. when GL does not run on the main thread).
+		"webglCompat": {key: compat_end[key] - compat_start[key]
+			for key in compat_end} if compat_start and compat_end else None,
+		"heapGrowable": page.evaluate(
+			"!!(Module.HEAPU8.buffer.growable || Module.HEAPU8.buffer.resizable)"),
 		"gpu": gpu_description(page),
 		"userAgent": page.evaluate("navigator.userAgent"),
 		"hardwareConcurrency": page.evaluate("navigator.hardwareConcurrency"),
@@ -242,6 +330,9 @@ def main() -> int:
 	parser.add_argument("--setting", action="append", default=[],
 		metavar="KEY=VALUE", help="minetest.conf line for this run (repeatable)")
 	parser.add_argument("--screenshot", help="save a screenshot at path end")
+	parser.add_argument("--no-map-io", action="store_true",
+		help="keep the world in the dummy backends: no map, player or mod "
+		"storage file I/O, so the server cannot stall on it")
 	args = parser.parse_args()
 	if not args.browser:
 		parser.error("no browser executable was found; pass --browser")
@@ -294,7 +385,8 @@ def main() -> int:
 		"config": {"view": int(args.view), "duration": args.duration,
 			"warmup": args.warmup, "viewport": [args.width, args.height],
 			"gpu": args.gpu, "headed": args.headed, "query": args.query,
-			"settings": args.setting},
+			"settings": DEFAULT_SETTINGS + args.setting,
+			"noMapIo": args.no_map_io},
 		"pageErrors": page_errors,
 		**result,
 	}
@@ -304,7 +396,11 @@ def main() -> int:
 	print(f"{args.label or 'bench'}: {s['frames']} frames in {s['seconds']} s, "
 		f"{s['fps']} fps; frame ms p50 {s['frameMs']['p50']} "
 		f"p95 {s['frameMs']['p95']} p99 {s['frameMs']['p99']}; "
-		f"swap ms p95 {s['swapMs']['p95']}; drawcalls p50 {s['drawcalls']['p50']}; "
+		f"present ms p95 {s['swapMs']['p95']}; drawcalls p50 {s['drawcalls']['p50']}; "
+		f"rAF {result['rafHz']} Hz; shown {(result['presented'] or {}).get('shownFps', '-')} fps; "
+		f"server {(result['server'] or {}).get('stepHz', '-')} steps/s, "
+		f"worst gap {(result['server'] or {}).get('worstGapMs', '-')} ms; "
+		f"{(result['webgl'] or {}).get('render', '?')} render; "
 		f"GPU {result['gpu'].get('renderer', '?')}")
 	print(f"report: {args.output}")
 	assert not page_errors, page_errors

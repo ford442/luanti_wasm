@@ -205,6 +205,15 @@ path follows server wall-clock time, so slower builds cover the same ground.
 Without `--gpu` it runs on SwiftShader, which is what CI does; those numbers
 are only comparable with other SwiftShader runs.
 
+Compare render modes with `--query '&render=proxy'` and
+`--query '&render=offscreen'`. The report's `server` entry gives the internal
+server's globalsteps per second during the path. In proxy mode the server can
+starve, because its SQLite I/O runs on the busy browser main thread; the
+camera then stays near its start and the frame times describe a different
+scene. `--no-map-io` keeps the world in the `dummy` backends to compare
+rendering alone. Offscreen mode also reports `presented` (frames shown on the
+page) and both report `rafHz`, the page's animation-frame rate after the path.
+
 The numbers come from `Module.luantiPerf` (`client/web/perf.js`), which any
 page or the browser console can query in game:
 
@@ -274,6 +283,14 @@ introduced, close old tabs, clear site data, and hard-refresh once.
 - The current target uses `PROXY_TO_PTHREAD` and an offscreen framebuffer to
   keep the synchronous engine stack off the browser UI thread. It does not use
   Asyncify or `emscripten_set_main_loop()`.
+- Which thread owns the WebGL context is chosen per page load with
+  `?render=proxy|offscreen|auto`; the default comes from the CMake option
+  `WASM_RENDER_THREAD` (default `proxy`). `proxy` keeps the context on the
+  browser main thread and proxies every GL call to it. `offscreen` creates it
+  on the engine worker and posts each finished frame to the page. `auto`
+  tries `offscreen` and falls back to `proxy`. `Module.luantiWebGLInfo.render`
+  reports what was created. Details and measurements: `wasm_porting.md`,
+  "Render thread".
 - Initial memory is 256 MiB and may grow to 1 GiB. Mobile browsers and
   memory-constrained devices can still terminate the tab.
 - An SDL version probe that reports SDL is too old can mask a failed linker

@@ -140,8 +140,20 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # Context creation, loss, the WebGL1 fallback, resize and pointer lock
+      # in both render modes (wasm_porting.md, "Render thread"). Not a gate
+      # until it has run green here: it was developed against Emscripten
+      # 3.1.61.
+      - name: WebGL context in both render modes (non-gating)
+        continue-on-error: true
+        run: |
+          python3 util/wasm/test_webgl_context.py --render proxy
+          python3 util/wasm/test_webgl_context.py --render offscreen
+
       # Not a gate: SwiftShader numbers only catch large regressions. The
-      # report is kept so a commit can be compared with its parent.
+      # report is kept so a commit can be compared with its parent. Compare
+      # the "server" entries before the frame times: a starved server leaves
+      # the camera parked (doc/compiling/wasm.md, "Frame-time benchmark").
       - name: Benchmark frame time (non-gating)
         continue-on-error: true
         run: |
@@ -150,6 +162,12 @@ jobs:
             --label "ci-swiftshader" \
             --output wasm-bench/frame-time.json \
             --screenshot wasm-bench/path-end.png
+          python3 util/wasm/bench_frame_time.py \
+            --browser "$(command -v google-chrome)" \
+            --query "&render=offscreen" \
+            --label "ci-swiftshader-offscreen" \
+            --output wasm-bench/frame-time-offscreen.json \
+            --screenshot wasm-bench/path-end-offscreen.png
 
       - name: Upload frame-time report
         if: always()
