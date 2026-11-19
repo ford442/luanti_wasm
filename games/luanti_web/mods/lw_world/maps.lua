@@ -24,6 +24,10 @@
 --  (west-southwest)  (southwest)         rainbow storm
 --                                        (southeast)
 --
+-- and two spurs off islands rather than the plaza, whose faces are full: the
+-- laser serpent west of the smoke caldera, out of its basalt tube, and the
+-- mirror hall east of the crystal bazaar, out of the end of its arcade.
+--
 -- Each map is one island with its own beach, in one sea, joined to the plaza
 -- by a paved causeway with a themed gate at the hub end. Fly is on for
 -- everyone, but every causeway is walkable, which is the point of the
@@ -278,6 +282,38 @@ function maps.causeways(api)
 			sign = "West-southwest: the cabaret club. A velvet stage with " ..
 				"chasing bulbs where Rubella and Lillith perform, a dance " ..
 				"floor, candlelit tables and a bar. It is late night over there.",
+		},
+		{
+			-- A spur, like the concert arena's: out of the mouth of the smoke
+			-- caldera's basalt tube on its west face (local 0, 18), straight
+			-- west over the water onto the laser serpent's walk. The gate
+			-- stands on the caldera's beach, in front of the tube.
+			map = "laser_serpent",
+			from = "smoke_caldera",
+			legs = {
+				{x0 = -104, z0 = 39, x1 = -97, z1 = 41},
+			},
+			gate = {x = -96, z = 40},
+			post = "lw_maps:laser_block",
+			sign = "West: the laser serpent. A serpent of glowing scales " ..
+				"coiled on a night ash field, with lasers sweeping the walk " ..
+				"past it. Punch the console at the end of the walk to change " ..
+				"the beams.",
+		},
+		{
+			-- A spur out of the east end of the crystal bazaar's arcade (local
+			-- 35, 18), straight east over the water to the mirror hall's
+			-- forecourt. The gate stands on the bazaar's east beach.
+			map = "mirror_hall",
+			from = "crystal_bazaar",
+			legs = {
+				{x0 = 92, z0 = 41, x1 = 99, z1 = 43},
+			},
+			gate = {x = 91, z = 42},
+			post = "lw_maps:crystal",
+			sign = "East: the mirror hall. A vault of mirror tiles at " ..
+				"twilight, a crystal skull under it, a gallery whose crystals " ..
+				"chase round the hall, and lasers circling the skull.",
 		},
 	}
 end
