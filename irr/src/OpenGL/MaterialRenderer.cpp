@@ -128,6 +128,58 @@ void COpenGL3MaterialRenderer::init(s32 &outMaterialTypeNr,
 		outMaterialTypeNr = Driver->addMaterialRenderer(this);
 }
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+bool COpenGL3MaterialRenderer::recompile(const c8 *vertexShaderProgram,
+		const c8 *pixelShaderProgram)
+{
+	std::vector<SUniformInfo> previous = std::move(UniformInfo);
+	UniformInfo.clear();
+	Skinning = false;
+
+	Program = GL.CreateProgram();
+	bool ok = Program != 0;
+	if (ok && vertexShaderProgram)
+		ok = createShader(GL_VERTEX_SHADER, vertexShaderProgram);
+	if (ok && pixelShaderProgram)
+		ok = createShader(GL_FRAGMENT_SHADER, pixelShaderProgram);
+	if (ok) {
+		for (u32 i = 0; i < EVA_COUNT; ++i)
+			GL.BindAttribLocation(Program, i, sBuiltInVertexAttributeNames[i]);
+		ok = linkProgram();
+	}
+	if (!ok) {
+		Program = 0;
+		UniformInfo = std::move(previous);
+		for (auto &ui : UniformInfo)
+			ui.location = -1;
+		return false;
+	}
+
+	// Same source, so normally the same uniforms; keep the old order so
+	// that indices handed out by getPixelShaderConstantID() stay valid.
+	std::vector<SUniformInfo> ordered;
+	ordered.reserve(core::max_(previous.size(), UniformInfo.size()));
+	std::vector<bool> used(UniformInfo.size(), false);
+	for (auto &old : previous) {
+		SUniformInfo ui{old.name, old.type, -1};
+		for (size_t i = 0; i < UniformInfo.size(); ++i) {
+			if (!used[i] && UniformInfo[i].name == old.name) {
+				ui = UniformInfo[i];
+				used[i] = true;
+				break;
+			}
+		}
+		ordered.push_back(std::move(ui));
+	}
+	for (size_t i = 0; i < UniformInfo.size(); ++i) {
+		if (!used[i])
+			ordered.push_back(std::move(UniformInfo[i]));
+	}
+	UniformInfo = std::move(ordered);
+	return true;
+}
+#endif
+
 bool COpenGL3MaterialRenderer::OnRender(IMaterialRendererServices *service, E_VERTEX_TYPE vtxtype)
 {
 	if (CallBack && Program)

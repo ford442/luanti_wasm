@@ -52,6 +52,9 @@
 #include <ICameraSceneNode.h>
 #include "util/tracy_wrapper.h"
 #include "item_visuals_manager.h"
+#ifdef __EMSCRIPTEN__
+#include "guiscalingfilter.h"
+#endif
 
 #if USE_SOUND
 	#include "client/sound/sound_openal.h"
@@ -395,6 +398,10 @@ Game::Game() :
 
 Game::~Game()
 {
+#ifdef __EMSCRIPTEN__
+	if (auto *drv = RenderingEngine::get_video_driver())
+		drv->setContextRestoreHandler(nullptr);
+#endif
 	delete client;
 	soundmaker.reset();
 	sound_manager.reset();
@@ -692,6 +699,20 @@ bool Game::init(GameStartData &start_data)
 	showOverlayMessage(N_("Loading..."), 0, 0);
 
 	shader_src = createShaderSource();
+
+#ifdef __EMSCRIPTEN__
+	// WebGL context restore (irr CIrrDeviceSDL::restoreAfterContextLoss()):
+	// the driver has recreated its GL objects; put our texture content and
+	// shader programs back into them. Runs on this thread, between frames.
+	if (auto *drv = RenderingEngine::get_video_driver()) {
+		drv->setContextRestoreHandler([this, drv]() {
+			const bool textures = texture_src->reuploadAfterContextLoss();
+			guiScalingCacheReupload(drv);
+			const bool shaders = shader_src->recompileAfterContextLoss();
+			return textures && shaders;
+		});
+	}
+#endif
 
 	itemdef_manager = createItemDefManager();
 	nodedef_manager = createNodeDefManager();

@@ -24,6 +24,13 @@ void guiScalingCache(const io::path &key, video::IVideoDriver *driver, video::II
 // Manually clear the cache, e.g. when switching to different worlds.
 void guiScalingCacheClear();
 
+#ifdef __EMSCRIPTEN__
+/* After a WebGL context restore, upload every cached scaled texture again
+ * from the source images kept here.
+ */
+void guiScalingCacheReupload(video::IVideoDriver *driver);
+#endif
+
 /* Get a cached, high-quality pre-scaled texture for display purposes.  If the
  * texture is not already cached, attempt to create it.  Returns a pre-scaled texture,
  * or the original texture if unable to pre-scale it.

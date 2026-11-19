@@ -106,6 +106,9 @@ public:
 		TEST_GL_ERROR(Driver);
 
 		initTexture(tmpImages->size());
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+		Layers = (u32)tmpImages->size();
+#endif
 
 		if (Type == ETT_2D_ARRAY) {
 			upload2DArrayTexture(tmpImages->size(), tmpImages->data());
@@ -425,6 +428,98 @@ public:
 		return StatesCache;
 	}
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	//! After a WebGL context loss: create a new GL texture with the same type,
+	//! format and size. The old name belonged to the lost context; it is
+	//! dropped, not deleted. Kept images (ETCF_ALLOW_MEMORY_COPY) are uploaded
+	//! again and render targets need no content.
+	//! \return -1 if the texture could not be created, 1 if it has its
+	//! content back, 0 if its owner still has to call reupload().
+	int recreateAfterContextLoss()
+	{
+		TextureName = 0;
+		StatesCache = SStatesCache();
+		if (LockImage) {
+			LockImage->drop();
+			LockImage = 0;
+		}
+		LockReadOnly = false;
+		LockLayer = 0;
+		if (!InternalFormat || Size.Width == 0 || Size.Height == 0)
+			return 1; // never had a GL texture
+
+		GL.GenTextures(1, &TextureName);
+		if (!TextureName)
+			return -1;
+
+		auto &cache = Driver->getCacheHandler()->getTextureCache();
+		const COpenGLCoreTexture *prevTexture = cache.get(0);
+		cache.set(0, this);
+
+		if (Type != ETT_2D_MS) {
+			GL.TexParameteri(TextureType, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			GL.TexParameteri(TextureType, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			if (IsRenderTarget) {
+				GL.TexParameteri(TextureType, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				GL.TexParameteri(TextureType, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				GL.TexParameteri(TextureType, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+				StatesCache.WrapU = ETC_CLAMP_TO_EDGE;
+				StatesCache.WrapV = ETC_CLAMP_TO_EDGE;
+				StatesCache.WrapW = ETC_CLAMP_TO_EDGE;
+			}
+		}
+
+		initTexture(Layers);
+
+		int restored = IsRenderTarget ? 1 : 0;
+		if (KeepImage && !Images.empty()) {
+			uploadLayers(Images);
+			restored = 1;
+		}
+
+		cache.set(0, prevTexture);
+		while (GL.GetError() != GL_NO_ERROR) {
+		}
+		return restored;
+	}
+
+	//! Upload content again after recreateAfterContextLoss(), from one image
+	//! per layer. Images are converted and scaled the way the constructor does.
+	bool reupload(const std::vector<IImage *> &srcImages)
+	{
+		if (!TextureName || IsRenderTarget || srcImages.size() != Layers ||
+				IImage::isCompressedFormat(ColorFormat))
+			return false;
+
+		std::vector<IImage *> converted(srcImages.size(), nullptr);
+		std::vector<IImage *> images(srcImages);
+		for (size_t i = 0; i < srcImages.size(); ++i) {
+			if (!srcImages[i])
+				return false;
+			if (srcImages[i]->getDimension() == Size && srcImages[i]->getColorFormat() == ColorFormat)
+				continue;
+			converted[i] = Driver->createImage(ColorFormat, Size);
+			if (srcImages[i]->getDimension() == Size)
+				srcImages[i]->copyTo(converted[i]);
+			else
+				srcImages[i]->copyToScaling(converted[i]);
+			images[i] = converted[i];
+		}
+
+		auto &cache = Driver->getCacheHandler()->getTextureCache();
+		const COpenGLCoreTexture *prevTexture = cache.get(0);
+		cache.set(0, this);
+		uploadLayers(images);
+		cache.set(0, prevTexture);
+
+		for (auto *image : converted) {
+			if (image)
+				image->drop();
+		}
+		return true;
+	}
+#endif
+
 protected:
 	ECOLOR_FORMAT getBestColorFormat(ECOLOR_FORMAT format)
 	{
@@ -612,6 +707,21 @@ protected:
 		}
 	}
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// Bound texture expected. Images are already in ColorFormat and Size.
+	void uploadLayers(const std::vector<IImage *> &images)
+	{
+		if (Type == ETT_2D_ARRAY) {
+			upload2DArrayTexture(images.size(), images.data());
+		} else {
+			for (size_t i = 0; i < images.size(); ++i)
+				uploadTexture((u32)i, 0, images[i]->getData());
+		}
+		if (HasMipMaps)
+			regenerateMipMapLevels();
+	}
+#endif
+
 	void uploadTexture(u32 layer, u32 level, void *data)
 	{
 		if (!data)
@@ -765,6 +875,10 @@ protected:
 
 	bool KeepImage;
 	std::vector<IImage*> Images;
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// Layer count passed to initTexture() (0 for render targets).
+	u32 Layers = 0;
+#endif
 
 	u8 MipLevelStored;
 

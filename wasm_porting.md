@@ -1154,8 +1154,76 @@ logged and exposed as `Module.luantiWebGLInfo`. `desynchronized` is not set
 (not available in the pinned Emscripten 6.0.3 attribute struct).
 
 On `webglcontextlost` the engine pauses presenting and the launcher shows an
-overlay, flushes IndexedDB, and offers a reload. The engine has no GL resource
-recreation path, so `webglcontextrestored` does not resume rendering in place.
+overlay, flushes IndexedDB, and offers a reload. In proxy mode
+`webglcontextrestored` then rebuilds the GL resources in place (next
+section) and the game resumes without a reload.
+
+### Context restore
+
+Proxy mode only. Offscreen, nothing ever restores the context (see the end of
+"Render thread"). While the context is lost, `CIrrDeviceSDL::run()` checks
+at the start of each frame whether the context is alive again
+(`emscripten_is_webgl_context_lost()`, or the restored event). As soon as it
+is, it runs `restoreAfterContextLoss()` on the engine thread, before anything
+is drawn. Waiting only for the event is not enough: the event reaches the
+engine thread while `SwapWindow()` idles, after one frame has already been
+drawn on the revived context with dead objects. That produced about 180 WebGL
+`INVALID_OPERATION` warnings, after which Chrome stops reporting errors for
+the context. The rebuild has three steps:
+
+1. Main thread (`restoreEmscriptenContextState()`): Emscripten's own state for
+   the context was created on the lost one. It re-enables the extensions
+   (`initExtensionsDone = false; GL.initExtensions()`), recreates the
+   `FULL_ES2` temporary buffers (`GL.generateTempBuffers`), and recreates the
+   `OFFSCREEN_FRAMEBUFFER` FBO, its colour and depth targets and the blit
+   program (`GL.createOffscreenFramebuffer`).
+2. `COpenGL3DriverBase::recreateAfterContextLoss()`: a new cache handler and
+   the initial GL state. Every GL name is forgotten, not deleted, and created
+   again inside the same object, so the `ITexture*` pointers and material IDs
+   the scene holds stay valid:
+   - Hardware buffers (`HWBufferList`), the quad index buffer and the
+     client-array and joint buffers drop their names. The mesh buffers still
+     hold their vertices, so each re-uploads on its next draw. Nothing is
+     re-meshed.
+   - The built-in and 2D programs are recompiled from the same
+     `client/shaders/Irrlicht` files (`COpenGL3MaterialRenderer::recompile`).
+     Uniform indices keep their old order, because callbacks cache them.
+   - Every texture gets a new GL texture of the same type, format and size.
+     Kept images (font pages, `ETCF_ALLOW_MEMORY_COPY`) are uploaded again,
+     render targets need none, and textures named after a file (menu images)
+     are read again from that file.
+   - Render targets get new FBOs and reattach on their next use.
+3. The handler `Game` registers (`setContextRestoreHandler`):
+   `TextureSource::reuploadAfterContextLoss()` rebuilds every texture's image
+   from the source images it caches (array textures layer by layer) and
+   uploads it into the same texture. `guiScalingCacheReupload()` rescales the
+   GUI scaling cache from its kept source images.
+   `ShaderSource::recompileAfterContextLoss()` regenerates each shader's
+   source and recompiles it into the material it already has
+   (`rebuildShaders()` would hand out new material IDs). It also bumps
+   `g_shader_program_generation`, so every cached uniform value is sent again.
+
+`g_webglContextLost` is cleared only after all three steps succeed and the
+context is still alive. The launcher shows "Restoring graphics…" during the
+rebuild and hides the overlay after the next successful
+`emscripten_webgl_commit_frame()` (`notifyContextRestored`). If any step fails
+(`notifyContextRestoreFailed`), the overlay and its reload button stay, and
+persistence has already been flushed when the context was lost. The minimap
+redraws its own textures on its next update.
+
+Copies this relies on, none of them new: `SourceImageCache::m_images`,
+`ShaderSource::m_sourcecache` and `m_shaderinfo_cache`,
+`CVertexBuffer`/`CIndexBuffer::Data`, `CGUITTGlyphPage` images, and
+`g_imgCache`. Spike notes: issue #95.
+
+`?glrestore=off` (`Module.luantiWebGL.restore = "off"`) keeps the reload-only
+behaviour. `?glrestore=fail` makes every rebuild fail, which is how
+`test_webgl_context.py --scenario lose` tests that path. `--scenario restore`
+loses and restores the context, then checks for no reload, a drawn world, no
+stale-object WebGL warnings, a dig the server logs, and the saved world. On
+SwiftShader (2026-11-19) it passed: 170 → 195 colours, 2 digs. The dig is the
+flaky part in proxy mode, because the internal server starves (see "Frame-time
+baseline"); a control run with no context loss also once saw no dig.
 
 ### Render thread
 
@@ -1226,7 +1294,8 @@ Context loss in offscreen mode: the worker never runs the `webglcontextlost`
 event, so `SwapWindow()` polls `isContextLost()` and calls
 `Module.luantiLauncher.notifyContextLost()`, which shows the same overlay as
 the DOM event. The context is never restored in this mode (nothing calls
-`preventDefault()` on the event); reloading is the recovery either way.
+`preventDefault()` on the event); reloading is the recovery here, while proxy
+mode rebuilds in place (see "Context restore").
 `Module.luantiLauncher.debugLoseContext()` triggers a loss in either mode.
 
 Per-frame main-thread queries are gone in both modes: canvas layout,

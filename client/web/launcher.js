@@ -99,7 +99,9 @@
 	// Render overrides read by CIrrDeviceSDL.cpp, for tests and benchmarks:
 	// ?render=proxy|offscreen|auto picks the thread that owns WebGL (default:
 	// the build's WASM_RENDER_THREAD), ?webgl=1|2 forces a single WebGL
-	// version, ?swapsleep=N sleeps N ms after each proxied frame.
+	// version, ?swapsleep=N sleeps N ms after each proxied frame,
+	// ?glrestore=off keeps the reload-only response to a lost WebGL context and
+	// ?glrestore=fail makes every restore fail (tests of the fallback).
 	var webglOptions = Module["luantiWebGL"] || {};
 	var renderMode = query.get("render");
 	if (renderMode === "proxy" || renderMode === "offscreen" || renderMode === "auto")
@@ -110,6 +112,11 @@
 	var swapSleep = Number(query.get("swapsleep"));
 	if (swapSleep > 0 && swapSleep <= 100)
 		webglOptions["swapSleepMs"] = swapSleep;
+	var glRestoreOption = query.get("glrestore");
+	if (glRestoreOption === "0" || glRestoreOption === "off")
+		webglOptions["restore"] = "off";
+	else if (glRestoreOption === "fail")
+		webglOptions["restore"] = "fail";
 	Module["luantiWebGL"] = webglOptions;
 
 	function safeStorageGet(key) {
@@ -284,10 +291,29 @@
 			return {"frames": count(), "lastDtimeMs": last(), "paused": enginePaused};
 		},
 		"getGLState": function() {
-			return {"lost": glLostCount, "restored": glRestoredCount};
+			return {
+				"lost": glLostCount,
+				"restored": glRestoredCount,
+				"recovered": glRecoveredCount,
+				"restoreFailed": glRestoreFailedCount,
+				"overlay": !ui.glLost.hidden
+			};
 		},
 		// Offscreen render mode: the engine's context lives on its worker, so
 		// the DOM event below never fires and the engine reports the loss.
+		// CIrrDeviceSDL::restoreAfterContextLoss() reports its progress.
+		"notifyContextRestoring": function() {
+			showGlRestoreText("Restoring graphics…");
+		},
+		"notifyContextRestored": function() {
+			handleContextRecovered();
+		},
+		"notifyContextRestoreFailed": function() {
+			glRestoreFailedCount++;
+			appendLog("error", ["Luanti: graphics could not be restored"]);
+			showGlRestoreText("Graphics could not be restored, so the game has to reload. " +
+				(glLostSaved ? "Your world has been saved." : "Saving your world…"));
+		},
 		"notifyContextLost": function() {
 			handleContextLost();
 		},
@@ -1537,6 +1563,9 @@
 	// World data is flushed to IndexedDB first.
 	var glLostCount = 0;
 	var glRestoredCount = 0;
+	var glRecoveredCount = 0;
+	var glRestoreFailedCount = 0;
+	var glLostDefaultText = ui.glLostText.textContent;
 	var glLostSaved = false;
 	var glOverlayActive = false;
 	// The engine keeps asking for pointer lock while the game runs; with the
@@ -1561,11 +1590,17 @@
 		event.preventDefault();
 		handleContextLost();
 	});
+	function showGlRestoreText(text) {
+		if (started && !ui.glLost.hidden)
+			ui.glLostText.textContent = text;
+	}
 	function handleContextLost() {
 		glLostCount++;
 		appendLog("error", ["Luanti: WebGL context lost"]);
 		if (!started)
 			return;
+		glLostSaved = false;
+		ui.glLostText.textContent = glLostDefaultText;
 		ui.glLost.hidden = false;
 		ui.glLostReload.disabled = true;
 		ui.glLostReload.textContent = "Saving…";
@@ -1586,10 +1621,22 @@
 	Module.canvas.addEventListener("webglcontextrestored", function() {
 		glRestoredCount++;
 		appendLog("info", ["Luanti: WebGL context restored"]);
-		if (started)
-			ui.glLostText.textContent = "Graphics are back, but the game has to reload its textures. " +
-				(glLostSaved ? "Your world has been saved." : "Saving your world…");
+		// The engine rebuilds its GL resources next and reports back through
+		// notifyContextRestored / notifyContextRestoreFailed.
+		if (webglOptions["restore"] === "off")
+			showGlRestoreText("Graphics are back, but the game has to reload its textures. " +
+				(glLostSaved ? "Your world has been saved." : "Saving your world…"));
+		else
+			showGlRestoreText("Restoring graphics…");
 	});
+	// The first frame after a successful restore has been presented.
+	function handleContextRecovered() {
+		glRecoveredCount++;
+		appendLog("info", ["Luanti: graphics restored"]);
+		ui.glLost.hidden = true;
+		ui.glLostText.textContent = glLostDefaultText;
+		glOverlayActive = false;
+	}
 	ui.glLostReload.addEventListener("click", function() {
 		location.reload();
 	});

@@ -208,9 +208,12 @@ interface LuantiLauncher {
 	/** Measured frame clock of the engine loop; null until the runtime exists. */
 	getFrameClock(): { frames: number; lastDtimeMs: number; paused: boolean } | null;
 	/** WebGL context-loss counters since page load. */
-	getGLState(): { lost: number; restored: number };
+	getGLState(): { lost: number; restored: number; recovered: number; restoreFailed: number; overlay: boolean };
 	/** Called by the engine when its offscreen (worker-owned) context is lost. */
 	notifyContextLost(): void;
+	notifyContextRestoring(): void;
+	notifyContextRestored(): void;
+	notifyContextRestoreFailed(): void;
 	/** Test hook: lose the engine's context; false if the browser cannot. */
 	debugLoseContext(): boolean;
 	getState(): {
@@ -300,11 +303,13 @@ interface LuantiModule {
 	luantiUnpauseAudio?: (reason?: string) => number;
 	/** runtime_media.js: fetch media sets on demand for mods (core.web_media_request). */
 	luantiRuntimeMedia?: LuantiRuntimeMedia;
-	/** Render overrides read by CIrrDeviceSDL.cpp (`?webgl=`, `?render=`, `?swapsleep=`). */
+	/** Render overrides read by CIrrDeviceSDL.cpp (`?webgl=`, `?render=`, `?swapsleep=`, `?glrestore=`). */
 	luantiWebGL?: {
 		major?: 1 | 2;
 		render?: "proxy" | "offscreen" | "auto";
 		swapSleepMs?: number;
+		/** Context-loss response: rebuild GL resources (default), reload only, or force a failed rebuild. */
+		restore?: "off" | "fail";
 	};
 	/** Written by CIrrDeviceSDL.cpp: the attributes of the context actually created. */
 	luantiWebGLInfo?: {
