@@ -1289,6 +1289,19 @@
 		refreshWorlds();
 	}
 
+	// Tell the engine what kind of pointer the page has; read once from C++
+	// (porting::emscripten_input_probe) to choose touch defaults.
+	function probeInput() {
+		var coarse = false;
+		try {
+			coarse = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+		} catch (_) {}
+		return {
+			maxTouchPoints: Math.max(0, navigator.maxTouchPoints | 0),
+			coarsePointer: coarse
+		};
+	}
+
 	ui.form.addEventListener("submit", function(event) {
 		event.preventDefault();
 		if (started || launchInFlight)
@@ -1332,6 +1345,7 @@
 							if (typeof Module["callMain"] !== "function")
 								throw new Error("The engine is still preparing. Try again in a moment.");
 							started = true;
+							Module["luantiInput"] = probeInput();
 							Module["callMain"](launchArgs);
 						} catch (error) {
 							abortLaunch(error);
