@@ -6,7 +6,7 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Eleven authored maps ship with the showcase pack, as islands around the hub
+Thirteen authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
@@ -16,8 +16,9 @@ in about three minutes.
                                                          |  (spur from the
   [ thunder chapel ]---.                  .---[ Around arena ]  arena's east side)
     north-northwest    |                  |     north-northeast
-  [ smoke caldera ]---.|    [ hub tour ]  |   .---[ crystal bazaar ]
-      northwest       ||         |        |   |        northeast
+  [ laser serpent ]--[ smoke caldera ]---.|   .---[ crystal bazaar ]--[ mirror hall ]
+  (spur from the       northwest    ||    |   |        northeast     (spur from the
+   caldera's tube)                  ||    |   |                       arcade's east end)
         [ Halloween ]-++---[ hub plaza ]--'---+---[ fruit garden ]
              west            |    |     |               east
                              |    |     '----------.
@@ -29,6 +30,10 @@ in about three minutes.
   [ cabaret club ]  west of the lighthouse: its causeway leaves the plaza's
    west-southwest   south-west corner, south of the Halloween lane's
 ```
+
+The laser serpent and the mirror hall are the pack's two Weeks on Fire
+islands. Neither has a causeway from the plaza, whose faces are full: like the
+concert arena, each is a spur off the island next to it.
 
 Every causeway is walkable. Fly, fast and noclip are on for everyone, but the
 tour never needs them.
@@ -48,6 +53,8 @@ tour never needs them.
 | Thunder chapel | `halloween_storm` | `map_halloween_storm.mts` | 36 × 20 × 36 | `(-60, 5, 77)` | `(-41, 9, 77)` | stormy Halloween night (`0.1`, bruised violet sky, close fog at 64, rain, lightning and thunder) |
 | Cabaret club | `cabaret` | `map_cabaret.mts` | 27 × 11 × 27 | `(-100, 5, -55)` | `(-74, 9, -41)` | late night (`0.06`, deep red sky, close fog at 56); indoors, lit by its own lamps |
 | Concert arena | `concert_arena` | `map_concert_arena.mts` | 49 × 13 × 49 | `(35, 5, 120)` | `(59, 9, 120)` | night (`0.08`, magenta sky, light fog at 140) |
+| Laser serpent | `laser_serpent` | `map_laser_serpent.mts` | 35 × 16 × 35 | `(-139, 5, 23)` | `(-105, 9, 40)` | night (`0.1`, deep red and magenta sky, light fog at 96) |
+| Mirror hall | `mirror_hall` | `map_mirror_hall.mts` | 31 × 18 × 31 | `(100, 5, 27)` | `(100, 9, 42)` | twilight (`0.2`, violet sky over a cyan horizon, fog at 100) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -496,6 +503,85 @@ arena and out of its east side (the gate there points north), or with
   "AROUND!" sign over the stage and as the marquee, both portraits, and eleven
   Lace Waterfall banners on the backdrop and the side trusses.
 
+### Laser serpent
+
+The first of the two Weeks on Fire islands: a laser serpent on a night ash
+field, west of the smoke caldera. Walk through the volcano and out of its
+basalt tube, and the spur runs straight on from the tube's mouth, over the
+water, onto the serpent's walk. The box is 35 × 16 × 35 (19,600 cells).
+
+* **The serpent** coils two and a quarter times round a basalt obelisk north
+  of the walk, from its tail on the ground to a neck nine nodes up, and rears
+  its head out east towards the causeway with its mouth open: laser emitters
+  for eyes, bone fangs and a forked neon tongue. Its body is two courses of
+  scales. A `chase` controller over each outer scale runs the light up the
+  coil from tail to neck, which is the `lw_maps:serpent_scale` lamp pair on
+  the bazaar's controller.
+* **The walk** is packed basalt from the causeway to a dais at the far end,
+  edged both sides with neon tubes lying on the ground (thin and not walkable,
+  so you can step over them). The beams sweep across it.
+* **The lasers** are the Around arena's show (`lasers` in the registry), four
+  emitters in red, magenta, orange and violet, with three patterns instead of
+  one:
+  * `coil`, the default: the emitters climb the serpent's coil, tail to neck,
+    a lap every 16 s, and each beam lands on the walk and slithers along it
+    the other way.
+  * `sweep`: the arena's pattern, the emitters racing round the four corner
+    pylons' laser caps, the beams circling a point on the walk.
+  * `fan`: every emitter in the serpent's mouth, the beams swinging along the
+    walk together.
+* **The console** (`lw_maps:serpent_switch`) stands on the dais. Punch it or
+  right click it and the show moves on to the next pattern, and everyone on
+  the field is told which. The pattern belongs to the server, not to one
+  player, so everyone sees the same beams. It is not saved, and a restart
+  starts again on `coil`.
+* **Ember pits** south of the walk: ember blocks (`lw_maps:ember_block` and
+  its ashen twin) in a ring of basalt, each under a `flicker` controller, the
+  caldera's lava trick at a campfire's size. They are solid, cool and
+  harmless. Dead trees and low sand dunes finish the field.
+* **An HOA memo** (`lw_maps:hoa_memo`) stands on a pedestal by the causeway,
+  facing the walk. Punch it or right click it for the next notice: each board
+  starts on a different memo and goes round all twelve before it repeats. The
+  text goes to chat and to the board's infotext.
+
+The lasers run only while someone is on the field, like the arenas'. A punch
+on the console with nobody else there changes nothing anyone else can see.
+
+### Mirror hall
+
+The second Weeks on Fire island: a vaulted hall of mirror tiles at twilight,
+after the film's mirror-mosaic hall (Shah Cheragh), east of the crystal
+bazaar. Walk down the bazaar's arcade and out of its east end, and the spur
+runs straight on, over the water, onto the hall's forecourt. The box is
+31 × 18 × 31 (17,298 cells).
+
+* **The forecourt** is a paved path between two reflecting pools (still
+  water on glass), with lanterns on columns at their corners and an HOA memo
+  by the north pool.
+* **The hall** is the bazaar's glass-between-ribs vault, closed in and
+  silvered. The walls are mirror tiles (`lw_maps:mirror`, the polished stone
+  tile under the glass tile's highlights, with a faint glow) between violet
+  wool pilasters, with a gold band where the vault springs. The vault is a
+  low ellipse across the hall, mirror between violet ribs, with crystals set
+  into it that catch the light. The floor is a checker of mirror and polished
+  stone. The way in is a gold-framed portal in the west wall, pointed at the
+  top.
+* **The crystal skull** sits on a gold-edged plinth in the middle of the hall,
+  facing the portal: glowing crystal (`lw_maps:crystal`) with bone teeth and
+  laser emitters for eyes, which show through the glass. Uplights stand at the
+  plinth's corners.
+* **The gallery** runs round the north, east and south walls one storey up,
+  reached by a stair along the north wall from the hall floor. It has an
+  arcade of columns under it. Its parapet alternates glass and crystal, and a
+  `chase` controller over each crystal sends the light round the gallery in
+  one lap (the `crystal` / `crystal_dim` lamp pair).
+* **The lasers.** Three emitters in cyan, violet and white circle under the
+  vault, and their beams circle the skull on the floor: the arenas' `sweep`,
+  at a slower lap. There is no console here.
+
+The two islands add eleven nodes and no textures. Each one is a palette tile
+re-tinted (see Nodes the pack adds). Neither island plays a song.
+
 ## Getting there
 
 * Walk. A causeway leaves the plaza for every map, each with a gate whose
@@ -503,7 +589,9 @@ arena and out of its east side (the gate there points north), or with
   says what is over there. The islands sit in one sea, so between them there is
   water rather than a view of the void.
 * `/maps` lists the maps; `/maps <id>` travels to one (`/maps halloween_storm`
-  for the thunder chapel, `/maps cabaret` for the cabaret club). It emerges the area
+  for the thunder chapel, `/maps cabaret` for the cabaret club,
+  `/maps laser_serpent` and `/maps mirror_hall` for the Weeks on Fire
+  islands). It emerges the area
   around the spawn first and moves the visitor only once that is done, because
   the islands are far enough out that a visitor moved straight away can arrive
   before the chunk does and fall through the place it will be.
@@ -529,8 +617,8 @@ Geometry is why: the maps are cones, ellipsoids and a helical ramp, and doing
 that arithmetic once at build time keeps it off the browser's application
 worker, where chunk generation competes with the compositor. `.mts` is the
 committed form because it keeps `param2` (a theater seat still faces the stage,
-a chase controller knows its place in the loop) and compresses all nine maps
-to about 17 KiB.
+a chase controller knows its place in the loop) and compresses all thirteen maps
+to about 23 KiB.
 
 Once they are stamped into a world, `/lw_schem place map_halloween` puts the
 committed file back over an existing world, the same as any other piece.
@@ -570,12 +658,18 @@ has to learn about it. In order:
    stage is `amps = {left, right, song}`, the two sound sources one node above
    its cabs, or `amps = {left, right, playlist}` for a stage whose songs are
    added later (see Cabaret club), and racing lights are `lasers = {track, target, colors, ...}`
-   (see Around arena). The schematic defaults to `map_<id>`.
+   (see Around arena). Add `patterns = {...}` and the geometry they need to
+   `lasers`, and an `lw_maps:serpent_switch` anywhere on the map cycles them
+   (see Laser serpent). The schematic defaults to `map_<id>`.
 4. **Causeway.** A `maps.causeways()` entry in `mods/lw_world/maps.lua`: a list
    of legs from the plaza's edge to the map's, a gate inside the plaza, a post
    and a poster. The north side of the plaza is the hub tour, so a map that is
    not due west, south or east leaves by a side of the plaza and turns in open
-   water. The water, the beach and the rails follow from the legs.
+   water. The plaza has no free faces left, so a new map is a spur: give the
+   entry `from = <map id>`, start its first leg three nodes off that map's
+   footprint, and stand the gate on its beach (see the concert arena, laser
+   serpent and mirror hall). The water, the beach and the rails follow from
+   the legs.
 5. **`/maps`.** Nothing to do: it lists every registered map and emerges the
    spawn's neighbourhood before it moves anyone.
 6. **Landmarks.** An entry in `LANDMARKS` in `test_luanti_web_maps.py` naming
@@ -620,7 +714,7 @@ generated map, or an `lw_maps` node from those games.
 
 ## Nodes the pack adds
 
-`lw_maps` registers fifty-two nodes. They are deliberately **not** in the
+`lw_maps` registers sixty-three nodes. They are deliberately **not** in the
 `lw_palette` group — that group builds the material library's pedestals and the
 room is full — so they appear in the palette inventory (`i`) but not in the
 library. Everything else the maps are built from is a `lw_nodes` tile.
@@ -646,6 +740,14 @@ library. Everything else the maps are built from is a `lw_nodes` tile.
 | `around_sign_1` … `_5` | "AROUND!", over the arena's stage and its entrance |
 | `lace_banner_1` … `_3` | the Lace Waterfall banners on the backdrop and the side trusses |
 | `portrait_rubella_1` … `_8`, `portrait_lillith_1` … `_8` | the band's portraits on the backdrop |
+| `serpent_scale`, `serpent_scale_off` | the laser serpent's body, chased from tail to neck |
+| `laser_block` | static laser emitters: the serpent's and the skull's eyes, the pylon caps, the gate posts |
+| `neon_tube` | the serpent's walk edging and its tongue (thin, not walkable) |
+| `ember_block`, `ember_block_off` | the ember pits, under flicker controllers |
+| `mirror` | the mirror hall's walls, vault and floor |
+| `crystal`, `crystal_dim` | the mirror hall's skull, vault glints and chasing parapet |
+| `hoa_memo` | a notice board that reads out the next HOA memo when punched |
+| `serpent_switch` | the console that changes the laser serpent's pattern |
 
 The banner cells are cut from one image each by `lw_maps.register_banner`
 with `[sheet`, in reading order from the top left, and are not in the
@@ -655,7 +757,8 @@ Ten new textures cover all of it: the rest are the existing tiles re-tinted
 with `[multiply`, the same trick the sixteen wool cubes use. An eleventh,
 `lw_rain.png`, is the rainbow storm's rain and lightning, and no node uses it.
 Four more are the arena's banners: `lw_around_sign.png`, `lw_lace_banner.png`
-and the two portraits.
+and the two portraits. The eleven Weeks on Fire nodes add none: all of them
+are palette tiles re-tinted.
 They are regenerated by `util/content/generate_luanti_web_textures.py` along with
 everything else.
 
@@ -665,8 +768,9 @@ Both controllers are airlike nodes that drive the lamp one node below them,
 from a node timer, which only runs while the block is loaded — a map nobody is
 on costs nothing. They switch a lamp for its twin from a registered pair
 (`lw_maps.register_lamp_pair(lit, unlit)`); the jack-o'-lantern and the
-pumpkin are the first pair, the bazaar's lantern, the caldera's lava and the
-arena's truss light the others, and a map that wants its own kind of lamp registers two nodes and
+pumpkin are the first pair, the bazaar's lantern, the caldera's lava, the
+arena's truss light, the serpent's scales, the embers and the mirror hall's
+crystals the others, and a map that wants its own kind of lamp registers two nodes and
 reuses both controllers. Neither will grow a lamp where a visitor dug one
 out.
 
@@ -689,11 +793,14 @@ loader under Lua 5.1:
 
 | | arrays (before) | run-length (now) |
 |---|---|---|
-| eleven maps kept for the session | 10.0 MiB | **110 KiB** |
+| eleven maps kept for the session | 10.0 MiB | 110 KiB |
+| thirteen maps kept (with the Weeks on Fire islands) | — | **127 KiB** |
 | busiest map (halloween, 25,920 cells) | 1.0 MiB | 17 KiB |
 | snow mountain (44,800 cells) | 2.0 MiB | 16 KiB |
 | concert arena (31,213 cells) | 1.0 MiB | 9 KiB |
 | Around arena (7,500 cells) | 0.25 MiB | 5 KiB |
+| laser serpent (19,600 cells) | — | 7 KiB |
+| mirror hall (17,298 cells) | — | 10 KiB |
 | load peak, snow mountain | 12.6 MiB | 10.9 MiB |
 
 What is left of the load peak is the engine's: while a map loads,
@@ -714,7 +821,7 @@ saved with (plus a synthetic piece with runs past 255 cells, never-place and
 * one map's box passes **65,536** cells (`MAX_MAP_VOLUME`);
 * the pack's total box volume passes **512,000** cells (`NODE_BUDGET`). This
   is a creep guard on how much world has to be generated and meshed, no longer
-  a heap figure: the eleven maps are 271,268 cells, room for about eight more
+  a heap figure: the thirteen maps are 308,166 cells, room for about six more
   the size of the concert arena.
 
 The limits used to be set by the box: a 120,000-cell cap before the cost was
@@ -722,9 +829,11 @@ measured, then 200,000 to 272,000 cells against an 8 to 10.5 MiB kept-heap cap,
 raised one map at a time (the Around arena, thunder chapel, cabaret club and
 concert arena each took a MiB or a quarter of one). With run-length storage the
 heap stopped being the constraint, so the heap cap was re-based on the
-measurement (110 KiB, capped at 512) and the cell cap at 512,000. Raise them on
+measurement (110 KiB for eleven maps, capped at 512) and the cell cap at
+512,000. The two Weeks on Fire islands took it to 127 KiB and 308,166 cells,
+inside both caps. Raise them on
 purpose, with a new measurement in `wasm_porting.md`, rather than squeeze a map
-to fit. The schematics themselves are 20.0 KiB on disk and the fifteen textures
+to fit. The schematics themselves are 22.8 KiB on disk and the fifteen textures
 under 8 KiB. The sounds are the lighthouse horn (4 KiB) and the chapel's three
 thunder rolls (24 KiB). The chapel's organ slot and the cabaret's song slot are
 empty and cost nothing until files are dropped into them (see Thunder chapel
