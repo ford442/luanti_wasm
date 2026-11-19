@@ -52,6 +52,7 @@ xvfb-run ./util/test_singleplayer.sh
 # WASM browser tests (Playwright 1.59.0 + Chrome; run after a WASM build)
 python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
 python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)"
+python3 util/wasm/test_proxy_join.py --browser "$(command -v google-chrome)"             # join a native luantiserver through the proxy (needs bin/luantiserver, npm ci --prefix util/wasm/proxy)
 python3 util/wasm/test_demo_tools.py          # packaging/deploy tooling, size report, startup compare
 node --test util/wasm/test_startup.mjs        # SIMD + memory-ceiling probe logic
 python3 util/wasm/test_memory_probe_browser.py --browser "$(command -v google-chrome)"  # 2 GiB refused -> still starts

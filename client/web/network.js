@@ -24,8 +24,17 @@
 		"sentPackets": 0,
 		"receivedPackets": 0,
 		"droppedPackets": 0,
-		"error": null
+		"error": null,
+		// The tag the proxy gave for closing the link (origin, per_ip_limit,
+		// global_limit, target_denied, rate_limited, ...) and the WebSocket
+		// close code, when the link ended on the proxy's initiative.
+		"reason": null,
+		"closeCode": null
 	};
+	// A refused or unreachable proxy is not retried on every datagram: the
+	// engine resends its handshake several times a second.
+	var RETRY_FIRST_MS = 1000;
+	var RETRY_MAX_MS = 30000;
 
 	function readConfiguredUrl() {
 		var queryUrl = null;
@@ -63,7 +72,9 @@
 			"sentPackets": snapshot["sentPackets"],
 			"receivedPackets": snapshot["receivedPackets"],
 			"droppedPackets": snapshot["droppedPackets"],
-			"error": snapshot["error"]
+			"error": snapshot["error"],
+			"reason": snapshot["reason"],
+			"closeCode": snapshot["closeCode"]
 		};
 	}
 
@@ -95,14 +106,119 @@
 		}
 	}
 
-	function emitState(state, error) {
+	function emitState(state, error, info) {
 		snapshot["state"] = state;
 		snapshot["url"] = configuredUrl || null;
 		snapshot["error"] = error ? String(error.message || error) : null;
+		snapshot["reason"] = info ? info["reason"] || null : null;
+		snapshot["closeCode"] = info && typeof info["code"] === "number" ? info["code"] : null;
 		var detail = copyState();
 		updateShell(detail);
+		// The launcher shows the message where the player is looking: the
+		// loading shell and game shell cover the connect panel once a join starts.
+		var launcher = Module["luantiLauncher"];
+		if (launcher && typeof launcher["reportProxyStatus"] === "function") {
+			try {
+				launcher["reportProxyStatus"](detail);
+			} catch (reportError) {
+				console.error("Luanti multiplayer proxy: launcher report failed:", reportError);
+			}
+		}
 		if (typeof window !== "undefined" && window.dispatchEvent)
 			window.dispatchEvent(new CustomEvent("luanti:network", {"detail": detail}));
+	}
+
+	function proxyHost() {
+		try {
+			return new URL(configuredUrl).host;
+		} catch (_) {
+			return configuredUrl || "the proxy";
+		}
+	}
+
+	function pageOrigin() {
+		var origin = typeof location !== "undefined" ? location.origin : "";
+		return origin && origin !== "null" ? origin : "";
+	}
+
+	// The proxy closes every link it ends with "<tag>: <detail>"
+	// (util/wasm/proxy/README.md, "Close reasons"). A browser cannot read the
+	// HTTP status of a failed upgrade, so this text and the close code are all
+	// there is to tell a refusing proxy from a dead one.
+	// `opened` is whether the WebSocket ever reached the open state.
+	// Returns {state, reason, message, retry}: `retry` is false for a close the
+	// proxy ended in an ordinary way, where the next datagram may reconnect at once.
+	function describeClose(code, reasonText, opened) {
+		var host = proxyHost();
+		var parsed = /^([a-z][a-z_]*)(?:: (.*))?$/.exec(String(reasonText || ""));
+		var tag = parsed ? parsed[1] : null;
+		var detail = parsed ? parsed[2] || "" : String(reasonText || "");
+		var proxy = "The proxy at " + host;
+		var message;
+		var state = "error";
+		var retry = true;
+		switch (tag) {
+		case "origin":
+			var origin = pageOrigin();
+			message = proxy + " does not allow " + (origin ? "pages from " + origin : "this page") +
+				". Its operator has to add this origin to the proxy's allowed origins.";
+			break;
+		case "per_ip_limit":
+			message = proxy + " already has the most connections it allows from your network. " +
+				"Close other Luanti tabs, or try again shortly.";
+			break;
+		case "global_limit":
+			message = proxy + " is full right now. Try again shortly.";
+			break;
+		case "target_denied":
+			message = proxy + " will not forward to that server" +
+				(detail ? " (" + detail + ")" : "") + ".";
+			break;
+		case "rate_limited":
+			message = proxy + " cut the connection because too much traffic was sent too quickly.";
+			break;
+		case "handshake_timeout":
+			message = proxy + " closed the connection because the handshake took too long.";
+			break;
+		case "protocol":
+			message = proxy + " rejected a message it could not understand" +
+				(detail ? " (" + detail + ")" : "") + ".";
+			break;
+		case "udp_error":
+			message = proxy + " could not use its UDP socket" + (detail ? " (" + detail + ")" : "") + ".";
+			break;
+		case "idle":
+			message = proxy + " closed the connection after a period with no traffic.";
+			state = "closed";
+			retry = false;
+			break;
+		case "shutdown":
+			message = proxy + " is shutting down or restarting. Try again shortly.";
+			state = "closed";
+			break;
+		default:
+			if (reasonText) {
+				message = proxy + " closed the connection: " + reasonText + ".";
+			} else if (!opened) {
+				// Down, wrong address, a TLS failure, or an upgrade refused by
+				// something in front of the proxy: the browser reports all of
+				// them as close code 1006 with no reason.
+				message = "Could not connect to the proxy at " + host +
+					". It may be down, or the address may be wrong.";
+			} else if (code === 1000 || code === 1001) {
+				message = proxy + " closed the connection.";
+				state = "closed";
+				retry = false;
+			} else {
+				message = "Lost the connection to the proxy at " + host + ".";
+			}
+		}
+		return {"state": state, "reason": tag, "message": message, "retry": retry};
+	}
+
+	function scheduleRetry(link) {
+		link["backoff"] = Math.min(RETRY_MAX_MS, (link["backoff"] || RETRY_FIRST_MS / 2) * 2);
+		link["retryAt"] = Date.now() + link["backoff"];
 	}
 
 	function ipv4Number(address) {
@@ -188,18 +304,22 @@
 			return true;
 
 		link["state"] = "connecting";
+		link["opened"] = false;
+		link["failure"] = null;
 		emitState("connecting", null);
 		var ws;
 		try {
 			ws = new WebSocket(configuredUrl);
 		} catch (error) {
 			link["state"] = "error";
+			scheduleRetry(link);
 			emitState("error", error);
 			return false;
 		}
 		link["ws"] = ws;
 		ws.binaryType = "arraybuffer";
 		ws.onopen = function() {
+			link["opened"] = true;
 			ws.send("PROXY IPV4 UDP 1");
 		};
 		ws.onmessage = function(event) {
@@ -208,6 +328,8 @@
 					if (event.data !== "PROXY OK 1")
 						throw new Error("Proxy rejected protocol version 1");
 					link["state"] = "ready";
+					link["backoff"] = 0;
+					link["retryAt"] = 0;
 					sendMappings(link);
 					link["queue"].forEach(function(frame) { ws.send(frame); });
 					link["queue"] = [];
@@ -228,20 +350,35 @@
 				snapshot["receivedPackets"]++;
 				deliver(link["handle"], frame);
 			} catch (error) {
+				link["failure"] = error;
 				reportDrop(error);
 				ws.close(1002, "protocol error");
 			}
 		};
-		ws.onerror = function() {
-			link["state"] = "error";
-			emitState("error", new Error("WebSocket connection failed"));
-		};
+		// Always followed by onclose, which has the close code and reason.
+		ws.onerror = function() {};
 		ws.onclose = function(event) {
 			link["ws"] = null;
-			if (link["state"] !== "error") {
-				link["state"] = "closed";
-				emitState("closed", event.reason || "Proxy connection closed");
+			// Datagrams queued for a link that never became ready are stale by
+			// the time the next attempt succeeds; the engine resends what matters.
+			snapshot["droppedPackets"] += link["queue"].length;
+			link["queue"] = [];
+			var failure = link["failure"];
+			link["failure"] = null;
+			if (failure) {
+				// This end gave up on a malformed proxy message; keep that
+				// message instead of the echo of our own close frame.
+				link["state"] = "error";
+				scheduleRetry(link);
+				emitState("error", failure, {"reason": "protocol", "code": event.code});
+				return;
 			}
+			var verdict = describeClose(event.code, event.reason, !!link["opened"]);
+			link["state"] = verdict["state"];
+			if (verdict["retry"])
+				scheduleRetry(link);
+			emitState(verdict["state"], new Error(verdict["message"]),
+				{"reason": verdict["reason"], "code": event.code});
 		};
 		return true;
 	}
@@ -255,6 +392,8 @@
 		link["ws"] = null;
 		link["state"] = "closed";
 		link["queue"] = [];
+		link["backoff"] = 0;
+		link["retryAt"] = 0;
 	}
 
 	var api = {
@@ -301,6 +440,10 @@
 			}
 			if (!configuredUrl)
 				return false;
+			if (link["retryAt"] && Date.now() < link["retryAt"] && !link["ws"]) {
+				snapshot["droppedPackets"]++;
+				return false;
+			}
 			try {
 				var bytes = new Uint8Array(length);
 				bytes.set(HEAPU8.subarray(pointer, pointer + length));

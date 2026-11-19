@@ -70,3 +70,14 @@ export function isHostname(value) {
 	return value.length > 0 && value.length <= 253 &&
 		/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(value);
 }
+
+// A WebSocket close reason is at most 123 bytes of UTF-8. Every close the proxy
+// starts carries "<tag>: <message>", where the tag is the one it logs and counts
+// (README.md, "Close reasons"). A browser cannot read the HTTP status of a
+// refused upgrade, so this text is the only way a page learns why it was refused.
+export function closeReason(tag, message = "") {
+	const characters = Array.from(message ? `${tag}: ${message}` : tag);
+	while (Buffer.byteLength(characters.join("")) > 123)
+		characters.pop();
+	return characters.join("");
+}

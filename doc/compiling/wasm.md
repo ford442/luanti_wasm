@@ -211,6 +211,39 @@ records the last run step by step, along with the known failures that block it
 and the browsers still to be covered. Update that file whenever the gate is
 re-run, and keep the demo gated until it passes.
 
+## Joining a server through the proxy
+
+```bash
+npm ci --prefix util/wasm/proxy   # once
+cmake -S . -B build-server -G Ninja -DCMAKE_BUILD_TYPE=Release -DRUN_IN_PLACE=TRUE \
+  -DBUILD_CLIENT=FALSE -DBUILD_SERVER=TRUE -DBUILD_UNITTESTS=FALSE \
+  -DENABLE_CURSES=FALSE -DENABLE_GETTEXT=FALSE -DENABLE_CURL=FALSE \
+  -DENABLE_LEVELDB=FALSE -DENABLE_POSTGRESQL=FALSE -DENABLE_REDIS=FALSE \
+  -DENABLE_LUAJIT=FALSE -DENABLE_SYSTEM_GMP=FALSE -DENABLE_SYSTEM_JSONCPP=FALSE
+cmake --build build-server --parallel      # writes bin/luantiserver
+python3 util/wasm/test_proxy_join.py --browser "$(command -v google-chrome)"
+```
+
+This is the browser leg of the Phase 4 public-server acceptance, with everything
+on 127.0.0.1. It starts a native `luantiserver` (devtest, a flat world), the
+proxy (`npm start` in `util/wasm/proxy`, allowed to reach only that server and
+only from the test page's origin) and the built client, then fills in the
+launcher's **Join server** form like a player: address, port, name and a custom
+proxy URL. It passes when the client completes the proxy handshake
+(`Module.luantiNetwork.getState().state === "ready"`), the engine logs
+`TOCLIENT_HELLO` and `World ready; entering game loop`, the server logs the
+player joining, and a chat line typed in the browser appears in the server log.
+
+Two more scenarios run by default (`--scenario join|origin|proxy-down` picks
+one): a proxy that does not allow the page's origin, and an address nothing
+listens on. Each has to produce its own sentence in
+`Module.luantiLauncher.getState().proxy.message` and in the on-page alert, and
+the client must back off instead of redialling the proxy for every datagram.
+
+The test says nothing about TLS, a remote server, or whether a proxy is safe to
+publish; the operator checklist in `util/wasm/proxy/README.md` still applies.
+CI runs it in the `wasm` workflow with a cached Release server build.
+
 ## Frame-time benchmark
 
 ```bash

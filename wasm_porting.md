@@ -306,6 +306,24 @@ COOP/COEP, deploy the proxy behind WSS near the test server, join by hostname,
 and validate at least ten minutes of movement and chat. The proxy's shell status
 and `Module.luantiNetwork.getState()` expose link RTT and packet counters.
 
+**Browser join test (127.0.0.1):** `util/wasm/test_proxy_join.py` drives the
+launcher's Join server form against a native `luantiserver` through the real
+proxy: PROXY OK handshake, `TOCLIENT_HELLO`, the world, and a chat line typed in
+the browser arriving in the server log; a refused origin and a dead proxy each
+produce their own launcher message (`Module.luantiLauncher.getState().proxy`).
+The `wasm` workflow runs it. It does not cover TLS, a remote host, the
+ten-minute soak above, or whether a proxy is safe to publish, so the
+"Public-server browser play acceptance" box below stays open until a deployed
+run is recorded.
+
+Two defects were found by writing it. A browser cannot read the HTTP status of a
+refused WebSocket upgrade (close code 1006, no reason), so the proxy now refuses
+an origin or a full table with a tagged close frame instead of a 403/429/503
+(util/wasm/proxy/README.md, "Close reasons"). And `UDPSocket::Send` treated every
+127.x destination as in-process, so a server on the player's own machine (the
+proxy's documented default target, `127.0.0.1:30000`) was dropped instead of
+sent to the proxy; only ports an in-process socket has held are in-process now.
+
 ### Phase 5: Sound
 
 Goal: In-game audio works.

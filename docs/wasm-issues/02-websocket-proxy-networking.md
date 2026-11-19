@@ -9,9 +9,11 @@ acceptance remains outstanding.
 
 ## Implemented MVP
 
-- [x] The Emscripten `UDPSocket` implementation keeps localhost traffic in an
-  in-process queue for singleplayer and sends remote IPv4 datagrams through the
-  browser bridge. Native socket behavior is unchanged.
+- [x] The Emscripten `UDPSocket` implementation keeps traffic between in-process
+  sockets (singleplayer's internal server and its client) in an in-process queue
+  and sends every other IPv4 datagram, a server on the player's own
+  `127.0.0.1` included, through the browser bridge. Native socket behavior is
+  unchanged.
 - [x] `client/web/network.js` is linked as `--pre-js`. It owns WebSocket
   negotiation, framing, DNS mappings, connection state, counters, and proxy RTT.
 - [x] The generated shell accepts a proxy URL. The same value can be supplied as
@@ -22,6 +24,13 @@ acceptance remains outstanding.
   self-hosting instructions.
 - [x] Focused tests cover framing, handshake validation, resolver validation,
   browser bridge behavior, and a real WebSocket-to-UDP echo round trip.
+- [x] `util/wasm/test_proxy_join.py` joins a native `luantiserver` from the built
+  client through the real proxy on 127.0.0.1 (handshake, join, chat), and checks
+  that a refused origin and an unreachable proxy are reported in the launcher.
+  It runs in the `wasm` workflow.
+- [x] A refused connection is readable in the page: the proxy refuses with a
+  tagged WebSocket close frame instead of an HTTP status, which a browser cannot
+  see (`util/wasm/proxy/README.md`, "Close reasons").
 - [ ] Run the complete generated Luanti client against a deployed `wss://`
   proxy and a public Luanti server, then record latency and play acceptance.
 
@@ -32,8 +41,8 @@ platform implementation below it differs:
 
 ```text
 Luanti Connection / UDPSocket
-  |- 127.0.0.0/8 -> shared-memory datagram queue (internal server)
-  `- remote IPv4 -> client/web/network.js -> WebSocket -> Node proxy -> UDP server
+  |- port held by an in-process socket -> shared-memory datagram queue (internal server)
+  `- any other IPv4, 127.0.0.1 included -> client/web/network.js -> WebSocket -> Node proxy -> UDP server
 ```
 
 The application still runs on the Emscripten pthread. Synchronous main-thread
@@ -93,9 +102,17 @@ The state snapshot and `luanti:network` window-event detail are:
   sentPackets: number,
   receivedPackets: number,
   droppedPackets: number,
-  error: string | null
+  error: string | null,   // a sentence for the player when the link failed
+  reason: string | null,  // the tag the proxy closed with (origin, per_ip_limit, ...)
+  closeCode: number | null // WebSocket close code; 1006 means never connected
 }
 ```
+
+A refusal arrives as `state: "error"` with the matching `reason` and a specific
+`error` ("The proxy at ... does not allow pages from ..."); a proxy that cannot
+be reached has `reason: null` and `closeCode: 1006`. The same snapshot, with
+`message` for `error`, is `Module.luantiLauncher.getState().proxy`. After a
+failure the bridge waits 1 s, doubling to 30 s, before dialling again.
 
 `droppedPackets` counts local queue overflow and malformed/unserviceable proxy
 frames. WebSocket is a reliable byte stream, so the bridge cannot directly
@@ -141,6 +158,7 @@ echo smoke:
 ```bash
 python3 util/wasm/test_network_browser.py
 python3 util/wasm/test_client_browser.py --build build-wasm
+python3 util/wasm/test_proxy_join.py     # needs bin/luantiserver; see doc/compiling/wasm.md
 ```
 
 Final demo acceptance still requires a TLS-deployed proxy and a consenting

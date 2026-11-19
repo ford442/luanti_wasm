@@ -15,7 +15,7 @@ import {
 	ServerRegistry, TargetPolicy, isPublicIPv4, originAllowed, parseAllowedOrigins,
 	parseAllowedTargets, parsePortRanges,
 } from "./policy.mjs";
-import {decodeFrame, encodeFrame, parseHandshake, parseResolve} from "./protocol.mjs";
+import {closeReason, decodeFrame, encodeFrame, parseHandshake, parseResolve} from "./protocol.mjs";
 
 export {isPublicIPv4, parseAllowedTargets};
 
@@ -42,7 +42,12 @@ export function defaultConfig(env = process.env) {
 		allowedOrigins: parseAllowedOrigins(env.LUANTI_PROXY_ALLOWED_ORIGINS || ""),
 		serverListUrl: env.LUANTI_PROXY_SERVER_LIST_URL || "",
 		serverListRefreshMs: number("LUANTI_PROXY_SERVER_LIST_REFRESH_SECONDS", 600, 10, 86400) * 1000,
-		maxPacketsPerSecond: number("LUANTI_PROXY_MAX_PACKETS_PER_SECOND", 256, 1, 10000),
+		// The client acknowledges every reliable packet it receives, so joining a
+		// server sends about as many datagrams per second as the server's media
+		// and map download delivers: a small devtest join peaks near 600/s and a
+		// media-heavy server needs several times that. Exceeding the budget closes
+		// the session (it cannot resume: a new WebSocket is a new UDP port).
+		maxPacketsPerSecond: number("LUANTI_PROXY_MAX_PACKETS_PER_SECOND", 2048, 1, 100000),
 		maxBytesPerSecond: number("LUANTI_PROXY_MAX_BYTES_PER_SECOND", 1048576, 1024, 100000000),
 		maxConnections: number("LUANTI_PROXY_MAX_CONNECTIONS", 256, 1, 100000),
 		maxConnectionsPerIp: number("LUANTI_PROXY_MAX_CONNECTIONS_PER_IP", 8, 1, 10000),
@@ -227,7 +232,7 @@ export class UDPProxySession {
 			this.udp = null;
 		}
 		if (this.websocket && this.websocket.readyState < WebSocket.CLOSING)
-			this.websocket.close(code, String(reason).slice(0, 123));
+			this.websocket.close(code, closeReason(tag, String(reason)));
 		this.websocket = null;
 		this.onClosed(this, tag);
 	}
@@ -275,33 +280,33 @@ export function createProxyServer(userOptions = {}) {
 		}
 	});
 
+	// Refusals complete the upgrade and then close with a tagged reason. Failing
+	// the upgrade with an HTTP 403/429/503 would be invisible to a page: the
+	// browser reports only close code 1006 and hides the status and body, so the
+	// player could not be told whether the proxy is down, full or refusing them.
+	// The refused socket gets no session, no UDP socket and no message handler.
 	const server = new WebSocketServer({
 		server: httpServer, maxPayload: 65519, perMessageDeflate: false,
-		verifyClient: (info, callback) => {
-			const ip = clientAddress(info.req, options.trustProxy);
-			const reject = (reason, status, message) => {
-				metrics.inc("luanti_proxy_connections_rejected_total", {reason});
-				log("warn", "connection_rejected", {reason, ip, origin: info.origin || null});
-				callback(false, status, message);
-			};
-			if (!originAllowed(options.allowedOrigins, info.origin))
-				return reject("origin", 403, "Origin not allowed");
-			const full = tracker.check(ip);
-			if (full)
-				return reject(full, full === "global_limit" ? 503 : 429, "Too many connections");
-			callback(true);
-		},
 	});
+
+	const refuse = (websocket, ip, origin, tag, code, message) => {
+		metrics.inc("luanti_proxy_connections_rejected_total", {reason: tag});
+		log("warn", "connection_rejected", {reason: tag, ip, origin});
+		websocket.on("error", () => {});
+		websocket.close(code, closeReason(tag, message));
+		// A client that never answers the close frame must not hold the socket.
+		setTimeout(() => websocket.terminate(), 2000).unref();
+	};
 
 	server.on("connection", (websocket, request) => {
 		const ip = clientAddress(request, options.trustProxy);
-		// verifyClient checked too, but connections can arrive in the same tick.
+		const origin = request.headers.origin || null;
+		if (!originAllowed(options.allowedOrigins, origin))
+			return refuse(websocket, ip, origin, "origin", 1008, "Origin not allowed");
 		const full = tracker.acquire(ip);
 		if (full) {
-			metrics.inc("luanti_proxy_connections_rejected_total", {reason: full});
-			log("warn", "connection_rejected", {reason: full, ip});
-			websocket.close(1013, "Too many connections");
-			return;
+			return refuse(websocket, ip, origin, full, 1013, full === "global_limit" ?
+				"Proxy is full" : "Too many connections from your address");
 		}
 		metrics.inc("luanti_proxy_connections_total");
 		const session = new UDPProxySession(websocket, options, {
@@ -315,7 +320,7 @@ export function createProxyServer(userOptions = {}) {
 			},
 		});
 		sessions.add(session);
-		log("info", "session_opened", {ip, origin: request.headers.origin || null});
+		log("info", "session_opened", {ip, origin});
 		websocket.on("message", (data, isBinary) => session.receive(data, isBinary));
 		websocket.on("error", () => session.close(1011, "", "socket_error"));
 		websocket.on("close", () => session.close(1000, "", "client_closed"));

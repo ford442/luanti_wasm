@@ -76,7 +76,25 @@ window.LUANTI_WEB_CONFIG = {
 This file is public: do not put credentials in it. The launcher starts with
 singleplayer-only networking when no hosted proxy is configured. Direct
 connect and the public server list then explain that remote play needs a WSS
-proxy rather than failing later in the engine.
+proxy rather than failing later in the engine. The repository ships with
+`defaultProxy: ""` and no `proxies`; a deployment sets them when it deploys,
+and no proxy address belongs in the client source.
+
+A proxy that is not on the player's own machine (not `localhost`, `127.x` or
+`::1`) can read the game: Luanti's protocol is unencrypted, so the proxy sees
+gameplay and chat in the clear. The **Join server** panel says so whenever the
+selected proxy is not loopback.
+
+When the proxy refuses a join or cannot be reached, the launcher reports why
+instead of a generic connection error. `Module.luantiLauncher.getState().proxy`
+holds `{state, url, message, reason, closeCode}`: `message` is the sentence
+shown to the player (for example that the proxy does not allow this page's
+origin, is full, will not forward to that server, or could not be reached),
+and `reason` is the tag the proxy closed with (`origin`, `per_ip_limit`,
+`global_limit`, `target_denied`, `rate_limited`, ...; `null` when it said
+nothing). The same text is in `Module.luantiNetwork.getState().error` and the
+`luanti:network` event. The close reasons are listed in
+`util/wasm/proxy/README.md`.
 
 ## Browser behavior
 
