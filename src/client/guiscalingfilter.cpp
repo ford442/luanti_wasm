@@ -61,6 +61,57 @@ void guiScalingCacheClear()
  * texture is not already cached, attempt to create it.  Returns a pre-scaled texture,
  * or the original texture if unable to pre-scale it.
  */
+static video::IImage *scaleImage(video::IVideoDriver *driver, video::IImage *srcimg,
+		video::ECOLOR_FORMAT format, const core::rect<s32> &srcrect,
+		const core::rect<s32> &destrect)
+{
+	video::IImage *destimg = driver->createImage(format,
+			core::dimension2d<u32>((u32)destrect.getWidth(),
+			(u32)destrect.getHeight()));
+	imageScaleNNAA(srcimg, srcrect, destimg);
+
+	// Some platforms are picky about textures being powers of 2, so expand
+	// the image dimensions to the next power of 2, if necessary.
+	if (!driver->queryFeature(video::EVDF_TEXTURE_NPOT)) {
+		video::IImage *po2img = driver->createImage(format,
+				core::dimension2d<u32>(npot2((u32)destrect.getWidth()),
+				npot2((u32)destrect.getHeight())));
+		po2img->fill(video::SColor(0, 0, 0, 0));
+		destimg->copyTo(po2img);
+		destimg->drop();
+		destimg = po2img;
+	}
+	return destimg;
+}
+
+#ifdef __EMSCRIPTEN__
+void guiScalingCacheReupload(video::IVideoDriver *driver)
+{
+	static const char marker[] = "@guiScalingFilter:";
+	u32 n = 0;
+	for (auto &it : g_txrCache) {
+		const std::string name = it.first.c_str();
+		const size_t pos = name.find(marker);
+		if (pos == std::string::npos)
+			continue;
+		auto img = g_imgCache.find(io::path(name.substr(0, pos).c_str()));
+		int x, y, w, h, dw, dh;
+		if (img == g_imgCache.end() || sscanf(name.c_str() + pos + sizeof(marker) - 1,
+				"%d:%d:%d:%d:%d:%d", &x, &y, &w, &h, &dw, &dh) != 6 ||
+				dw <= 0 || dh <= 0)
+			continue; // the original texture itself (see below), restored elsewhere
+		video::IImage *destimg = scaleImage(driver, img->second,
+				it.second->getColorFormat(), core::rect<s32>(x, y, x + w, y + h),
+				core::rect<s32>(0, 0, dw, dh));
+		if (driver->reuploadTexture(it.second, {destimg}))
+			n++;
+		destimg->drop();
+	}
+	infostream << "guiScalingCacheReupload: " << n << " of " << g_txrCache.size()
+		<< " scaled textures" << std::endl;
+}
+#endif
+
 video::ITexture *guiScalingResizeCached(video::IVideoDriver *driver,
 		video::ITexture *src, const core::rect<s32> &srcrect,
 		const core::rect<s32> &destrect)
@@ -111,22 +162,8 @@ video::ITexture *guiScalingResizeCached(video::IVideoDriver *driver,
 		g_txrCache[scalename] = src;
 		return src;
 	}
-	video::IImage *destimg = driver->createImage(src->getColorFormat(),
-			core::dimension2d<u32>((u32)destrect.getWidth(),
-			(u32)destrect.getHeight()));
-	imageScaleNNAA(srcimg, srcrect, destimg);
-
-	// Some platforms are picky about textures being powers of 2, so expand
-	// the image dimensions to the next power of 2, if necessary.
-	if (!driver->queryFeature(video::EVDF_TEXTURE_NPOT)) {
-		video::IImage *po2img = driver->createImage(src->getColorFormat(),
-				core::dimension2d<u32>(npot2((u32)destrect.getWidth()),
-				npot2((u32)destrect.getHeight())));
-		po2img->fill(video::SColor(0, 0, 0, 0));
-		destimg->copyTo(po2img);
-		destimg->drop();
-		destimg = po2img;
-	}
+	video::IImage *destimg = scaleImage(driver, srcimg, src->getColorFormat(),
+			srcrect, destrect);
 
 	// Convert the scaled image back into a texture.
 	scaled = driver->addTexture(scalename, destimg);

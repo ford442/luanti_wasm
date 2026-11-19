@@ -2098,6 +2098,147 @@ const SMaterial &COpenGL3DriverBase::getCurrentMaterial() const
 	return Material;
 }
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+bool COpenGL3DriverBase::recompileFromFiles(COpenGL3MaterialRenderer *renderer,
+		const io::path &vertexShaderName, const io::path &fragmentShaderName)
+{
+	c8 *vs = nullptr, *fs = nullptr;
+	loadShaderData(vertexShaderName, fragmentShaderName, &vs, &fs);
+	const bool ok = vs && fs && renderer->recompile(vs, fs);
+	delete[] vs;
+	delete[] fs;
+	return ok;
+}
+
+bool COpenGL3DriverBase::recreateAfterContextLoss()
+{
+	// Every GL name held below belongs to the lost context. Names are
+	// forgotten rather than deleted (deleting them on the new context would
+	// at best be an error), then created again in place so that textures,
+	// buffers and material IDs held by the scene stay valid.
+	while (GL.GetError() != GL_NO_ERROR) {
+	}
+	os::Printer::log("Recreating GL resources after WebGL context loss", ELL_INFORMATION);
+
+	if (CacheHandler)
+		CacheHandler->getTextureCache().clear();
+	delete CacheHandler;
+	CacheHandler = new COpenGL3CacheHandler(this);
+
+	GL.PixelStorei(GL_PACK_ALIGNMENT, 1);
+	GL.ClearDepthf(1.0f);
+	GL.FrontFace(GL_CW);
+
+	// Buffers: the vertex and index data are still in the mesh buffers, and
+	// updateHardwareBuffer() uploads again when a link has no GL buffer.
+	QuadIndexVBO.forget();
+	initQuadsIndices();
+	ClientVertexVBO.forget();
+	ClientIndexVBO.forget();
+	JointTransformsUBO.forget();
+	for (auto *link : HWBufferList)
+		static_cast<SHWBufferLink_opengl *>(link)->Vbo.forget();
+
+	// Built-in programs, from the same files createMaterialRenderers() used.
+	static const char *const builtInFragmentShaders[] = {
+		"Solid.fsh",
+		"TransparentAlphaChannel.fsh",
+		"TransparentAlphaChannelRef.fsh",
+		"TransparentVertexAlpha.fsh",
+		"OneTextureBlend.fsh",
+	};
+	static_assert(sizeof(builtInFragmentShaders) / sizeof(builtInFragmentShaders[0]) == numBuiltInMaterials);
+	bool ok = true;
+	for (u32 i = 0; i < numBuiltInMaterials && i < MaterialRenderers.size(); ++i) {
+		auto *renderer = dynamic_cast<COpenGL3MaterialRenderer *>(MaterialRenderers[i].Renderer);
+		if (renderer && !recompileFromFiles(renderer, "Solid.vsh", builtInFragmentShaders[i])) {
+			os::Printer::log("Could not recompile built-in material", builtInFragmentShaders[i], ELL_ERROR);
+			ok = false;
+		}
+	}
+	if (!recompileFromFiles(MaterialRenderer2DTexture, "Renderer2D.vsh", "Renderer2D.fsh") ||
+			!recompileFromFiles(MaterialRenderer2DNoTexture, "Renderer2D.vsh", "Renderer2D_noTex.fsh")) {
+		os::Printer::log("Could not recompile the 2D renderers", ELL_ERROR);
+		ok = false;
+	}
+	MaterialRenderer2DActive = nullptr;
+
+	// Textures keep their objects; meshes and GUI elements hold pointers.
+	u32 needContent = 0;
+	for (u32 i = 0; i < Textures.size(); ++i) {
+		auto *texture = static_cast<COpenGL3Texture *>(Textures[i].Surface);
+		const int state = texture->recreateAfterContextLoss();
+		if (state < 0) {
+			os::Printer::log("Could not recreate texture", texture->getName().getPath(), ELL_ERROR);
+			ok = false;
+		} else if (state == 0) {
+			// A texture loaded from a file (menu images) can come back from
+			// the same file; anything else is up to the restore handler.
+			const io::path &path = texture->getName().getPath();
+			IImage *image = nullptr;
+			if (!path.empty() && FileSystem->existFile(path))
+				image = createImageFromFile(path);
+			if (image && texture->getType() == ETT_2D) {
+				texture->reupload({image});
+			} else {
+				needContent++;
+			}
+			if (image)
+				image->drop();
+		}
+	}
+
+	for (u32 i = 0; i < RenderTargets.size(); ++i) {
+		if (!static_cast<COpenGL3RenderTarget *>(RenderTargets[i])->recreateAfterContextLoss())
+			ok = false;
+	}
+
+	char buf[160];
+	snprintf_irr(buf, sizeof(buf), "Recreated %u textures (%u without a CPU copy), "
+			"%u render targets, %u hardware buffers",
+			Textures.size(), needContent, RenderTargets.size(), (u32)HWBufferList.size());
+	os::Printer::log(buf, ELL_INFORMATION);
+
+	// The application re-uploads its textures and recompiles its shaders.
+	if (ok && ContextRestoreHandler && !ContextRestoreHandler())
+		ok = false;
+
+	CurrentRenderMode = ERM_NONE;
+	ResetRenderStates = true;
+	Transformation3DChanged = true;
+	setRenderStates3DMode();
+	setFog(FogColor, FogType, FogStart, FogEnd, FogDensity, PixelFog, RangeFog);
+	// The default framebuffer is the context's own; make sure the next frame
+	// binds it and sets a viewport again.
+	setRenderTargetEx(nullptr, ECBF_NONE);
+
+	while (GL.GetError() != GL_NO_ERROR) {
+	}
+	return ok;
+}
+
+void COpenGL3DriverBase::setContextRestoreHandler(std::function<bool()> handler)
+{
+	ContextRestoreHandler = std::move(handler);
+}
+
+bool COpenGL3DriverBase::reuploadTexture(ITexture *texture, const std::vector<IImage *> &images)
+{
+	if (!texture)
+		return false;
+	return static_cast<COpenGL3Texture *>(texture)->reupload(images);
+}
+
+bool COpenGL3DriverBase::recompileShaderMaterial(s32 material, const c8 *vertexShaderProgram,
+		const c8 *pixelShaderProgram)
+{
+	if (material < 0 || (u32)material >= MaterialRenderers.size())
+		return false;
+	auto *renderer = dynamic_cast<COpenGL3MaterialRenderer *>(MaterialRenderers[material].Renderer);
+	return renderer && renderer->recompile(vertexShaderProgram, pixelShaderProgram);
+}
+#endif
+
 COpenGL3CacheHandler *COpenGL3DriverBase::getCacheHandler() const
 {
 	return CacheHandler;

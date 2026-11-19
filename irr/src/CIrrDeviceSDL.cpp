@@ -1110,30 +1110,110 @@ static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE createBrowserWebGLContext(
 }
 
 // Set from the webglcontextlost event (delivered to the thread that
-// registered it). The engine cannot rebuild its GL resources, so after a loss
-// rendering stays paused until the page is reloaded. File-level state because
-// Emscripten cannot reliably unregister these handlers; there is one device
-// per page.
+// registered it). While set, nothing is presented. In proxy mode the
+// restored event sets g_webglContextRestored, and SwapWindow() rebuilds the
+// GL resources (restoreAfterContextLoss()); the flag is cleared only when that
+// succeeds. File-level state because Emscripten cannot reliably unregister
+// these handlers; there is one device per page.
 static std::atomic<bool> g_webglContextLost{false};
+static std::atomic<bool> g_webglContextRestored{false};
+// After a successful restore: tell the page once the next frame is presented.
+static bool g_notifyRestoredOnCommit = false;
+// A restore failed or is not possible in this mode; wait for the next loss.
+static bool g_restoreGivenUp = false;
+
+// Module.luantiWebGL.restore (?glrestore=): "off" keeps the reload-only
+// behaviour, "fail" makes every restore fail (tests). Default: restore.
+enum class ContextRestoreMode { Off, On, Fail };
+static ContextRestoreMode browserContextRestoreMode()
+{
+	const int mode = MAIN_THREAD_EM_ASM_INT({
+		var o = Module['luantiWebGL'];
+		var r = o && o['restore'];
+		if (r === 'off' || r === false)
+			return 0;
+		return r === 'fail' ? 2 : 1;
+	});
+	return mode == 0 ? ContextRestoreMode::Off :
+		mode == 2 ? ContextRestoreMode::Fail : ContextRestoreMode::On;
+}
 
 static EM_BOOL webglContextEventCallback(int eventType, const void *, void *)
 {
 	if (eventType == EMSCRIPTEN_EVENT_WEBGLCONTEXTLOST) {
 		g_webglContextLost = true;
+		g_webglContextRestored = false;
+		g_restoreGivenUp = false;
 		os::Printer::log("WebGL context lost; rendering paused", ELL_ERROR);
 		// Returning true calls preventDefault(), which is what allows the
 		// browser to later restore the context at all.
 		return EM_TRUE;
 	}
 	if (eventType == EMSCRIPTEN_EVENT_WEBGLCONTEXTRESTORED) {
-		// Textures, buffers, shaders and FBOs are gone and Irrlicht keeps no
-		// recreate path, so stay paused; the page offers a reload (world data
-		// is flushed to IndexedDB first).
-		os::Printer::log("WebGL context restored but engine GL state is stale; "
-			"reload required", ELL_WARNING);
+		// Textures, buffers, shaders and FBOs are gone; SwapWindow() rebuilds
+		// them on this thread before anything is presented again.
+		os::Printer::log("WebGL context restored", ELL_INFORMATION);
+		if (g_webglContextLost)
+			g_webglContextRestored = true;
 		return EM_TRUE;
 	}
 	return EM_FALSE;
+}
+
+// Proxy mode, after webglcontextrestored: Emscripten's own state for the
+// context (on the main thread, which owns it) was created on the lost one.
+// Re-enable the extensions, recreate the FULL_ES2 temporary buffers and the
+// OFFSCREEN_FRAMEBUFFER target that emscripten_webgl_commit_frame() blits.
+static bool restoreEmscriptenContextState(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE handle)
+{
+	return MAIN_THREAD_EM_ASM_INT({
+		var context = GL.contexts[$0];
+		var gl = context && context.GLctx;
+		if (!gl || gl.isContextLost())
+			return 0;
+		try {
+			// Bindings and pixel-store state Emscripten mirrors; a restored
+			// context starts from WebGL's defaults.
+			GL.currArrayBuffer = 0;
+			GL.currElementArrayBuffer = 0;
+			gl.currentArrayBufferBinding = 0;
+			gl.currentElementArrayBufferBinding = 0;
+			gl.currentPixelPackBufferBinding = 0;
+			gl.currentPixelUnpackBufferBinding = 0;
+			if (context.clientBuffers) {
+				for (var i = 0; i < context.clientBuffers.length; i++) {
+					context.clientBuffers[i].enabled = false;
+					context.clientBuffers[i].clientside = false;
+				}
+			}
+			if (GL.unpackAlignment)
+				gl.pixelStorei(0x0CF5, GL.unpackAlignment);
+			context.initExtensionsDone = false;
+			GL.initExtensions(context);
+			if (typeof GL.generateTempBuffers === 'function')
+				GL.generateTempBuffers(false, context);
+			if (context.attributes && context.attributes.renderViaOffscreenBackBuffer &&
+					typeof GL.createOffscreenFramebuffer === 'function')
+				GL.createOffscreenFramebuffer(context);
+		} catch (e) {
+			console.error('Luanti: could not rebuild Emscripten WebGL state', e);
+			return 0;
+		}
+		return 1;
+	}, handle) != 0;
+}
+
+// The launcher's overlay follows the restore: "Restoring graphics…" while it
+// runs, hidden after the next presented frame, or a reload button if it fails.
+static void notifyPageContextRestore(int state)
+{
+	MAIN_THREAD_ASYNC_EM_ASM({
+		var launcher = Module['luantiLauncher'];
+		var name = $0 == 0 ? 'notifyContextRestoring' :
+			$0 == 1 ? 'notifyContextRestored' : 'notifyContextRestoreFailed';
+		if (launcher && typeof launcher[name] === 'function')
+			launcher[name]();
+	}, state);
 }
 
 // Offscreen mode: the worker never runs its event loop, so the context-lost
@@ -1246,6 +1326,7 @@ bool CIrrDeviceSDL::createWindowWithContext()
 	updateSizeAndScale();
 
 	g_webglContextLost = false;
+	g_webglContextRestored = false;
 	static bool contextEventsRegistered = false;
 	if (!contextEventsRegistered) {
 		contextEventsRegistered = true;
@@ -1396,6 +1477,18 @@ bool CIrrDeviceSDL::run()
 	os::Timer::tick();
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// Rebuild before this frame draws anything with the dead GL objects.
+	// The restored event reaches this thread only while SwapWindow() idles,
+	// i.e. after a frame has already been drawn on the revived context, so
+	// also ask the context itself (one proxied query per frame, only while
+	// lost).
+	if (g_webglContextLost && !g_offscreenRender && !g_restoreGivenUp) {
+		const auto webgl = reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context);
+		if (g_webglContextRestored.exchange(false) ||
+				(webgl && !emscripten_is_webgl_context_lost(webgl)))
+			restoreAfterContextLoss();
+	}
+
 	// Align CSS size with the engine. updateSizeAndScale must not assign
 	// canvas.width unless the backing store actually changed — that reset
 	// clears the offscreen FBO and flickers 2D quads (HUD text).
@@ -1962,6 +2055,9 @@ void CIrrDeviceSDL::SwapWindow()
 			logged = true;
 			os::Printer::log("emscripten_webgl_commit_frame failed", ELL_ERROR);
 		}
+	} else if (g_notifyRestoredOnCommit) {
+		g_notifyRestoredOnCommit = false;
+		notifyPageContextRestore(1);
 	}
 
 	// commit_frame is synchronous, so the frame has already been composited
@@ -1998,6 +2094,50 @@ void CIrrDeviceSDL::SwapWindow()
 	SDL_GL_SwapWindow(Window);
 #endif
 }
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+void CIrrDeviceSDL::restoreAfterContextLoss()
+{
+	// Only the proxied context is ever restored: offscreen, the worker never
+	// runs the context-lost event whose preventDefault() would allow it.
+	const ContextRestoreMode mode = browserContextRestoreMode();
+	if (g_offscreenRender || mode == ContextRestoreMode::Off) {
+		os::Printer::log("WebGL context restored but GL resources are not "
+			"rebuilt in this mode; reload required", ELL_WARNING);
+		g_restoreGivenUp = true;
+		notifyPageContextRestore(2);
+		return;
+	}
+
+	notifyPageContextRestore(0);
+	const double start = emscripten_get_now();
+	const auto webgl = reinterpret_cast<EMSCRIPTEN_WEBGL_CONTEXT_HANDLE>(Context);
+	bool ok = webgl && VideoDriver && restoreEmscriptenContextState(webgl) &&
+		emscripten_webgl_make_context_current(webgl) == EMSCRIPTEN_RESULT_SUCCESS &&
+		VideoDriver->recreateAfterContextLoss();
+	if (mode == ContextRestoreMode::Fail) {
+		os::Printer::log("WebGL restore failure forced by ?glrestore=fail", ELL_WARNING);
+		ok = false;
+	}
+	// Lost again while rebuilding: wait for the next restored event.
+	if (ok && emscripten_is_webgl_context_lost(webgl)) {
+		os::Printer::log("WebGL context lost again during restore", ELL_WARNING);
+		return;
+	}
+
+	char msg[96];
+	snprintf(msg, sizeof(msg), "WebGL context restore %s after %.0f ms",
+		ok ? "succeeded" : "failed", emscripten_get_now() - start);
+	os::Printer::log(msg, ok ? ELL_INFORMATION : ELL_ERROR);
+	if (!ok) {
+		g_restoreGivenUp = true;
+		notifyPageContextRestore(2);
+		return;
+	}
+	g_webglContextLost = false;
+	g_notifyRestoredOnCommit = true;
+}
+#endif
 
 //! pause execution temporarily
 void CIrrDeviceSDL::yield()

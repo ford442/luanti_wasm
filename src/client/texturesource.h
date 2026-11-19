@@ -137,6 +137,12 @@ public:
 	 * So you have to re-get all textures anyway.
 	 */
 	virtual void rebuildImagesAndTextures()=0;
+
+#ifdef __EMSCRIPTEN__
+	/// After a WebGL context restore: generate every texture's image again and
+	/// upload it into the same ITexture. Returns false if the driver refused.
+	virtual bool reuploadAfterContextLoss()=0;
+#endif
 };
 
 IWritableTextureSource *createTextureSource();

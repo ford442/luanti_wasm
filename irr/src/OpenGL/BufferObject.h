@@ -56,6 +56,16 @@ public:
 	 */
 	void destroy();
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	/// Drop the name without freeing it. After a WebGL context loss the old
+	/// name belongs to the dead context; the next upload creates a new one.
+	void forget()
+	{
+		m_name = 0;
+		m_size = 0;
+	}
+#endif
+
 private:
 
 	GLuint m_name = 0;

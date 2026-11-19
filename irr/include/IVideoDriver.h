@@ -22,6 +22,11 @@
 #include "SVertexIndex.h" // E_INDEX_TYPE
 #include "HWBuffer.h"
 
+#ifdef __EMSCRIPTEN__
+#include <functional>
+#include <vector>
+#endif
+
 namespace io
 {
 class IReadFile;
@@ -1085,6 +1090,29 @@ public:
 
 	//! Used by some SceneNodes to check if a material should be rendered in the transparent render pass
 	virtual bool needsTransparentRenderPass(const video::SMaterial &material) const = 0;
+
+#ifdef __EMSCRIPTEN__
+	//! Rebuild every GL object after a WebGL context was lost and restored.
+	/** Textures, render targets, hardware buffers and material renderers keep
+	their identity (pointers and material IDs stay valid); only the GL objects
+	behind them are created again. Content the driver has no copy of comes
+	back through the handler set with setContextRestoreHandler(), which runs
+	last. \return True if rendering can resume. */
+	virtual bool recreateAfterContextLoss() { return false; }
+
+	//! Set the application part of recreateAfterContextLoss().
+	/** It re-uploads texture content with reuploadTexture() and recompiles
+	shader materials with recompileShaderMaterial(), and returns false if
+	that failed. An empty function removes it. */
+	virtual void setContextRestoreHandler(std::function<bool()> handler) {}
+
+	//! Upload a recreated texture's content again, one image per layer.
+	virtual bool reuploadTexture(ITexture *texture, const std::vector<IImage *> &images) { return false; }
+
+	//! Recompile a shader material in place, keeping its ID.
+	virtual bool recompileShaderMaterial(s32 material, const c8 *vertexShaderProgram,
+			const c8 *pixelShaderProgram) { return false; }
+#endif
 };
 
 } // end namespace video

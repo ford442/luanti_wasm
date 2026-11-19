@@ -21,6 +21,9 @@ namespace video
 struct VertexType;
 
 class COpenGL3Renderer2D;
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+class COpenGL3MaterialRenderer;
+#endif
 
 class COpenGL3DriverBase : public CNullDriver, public IMaterialRendererServices, public COpenGL3ExtensionHandler
 {
@@ -245,6 +248,14 @@ public:
 
 	COpenGL3CacheHandler *getCacheHandler() const;
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	bool recreateAfterContextLoss() override;
+	void setContextRestoreHandler(std::function<bool()> handler) override;
+	bool reuploadTexture(ITexture *texture, const std::vector<IImage *> &images) override;
+	bool recompileShaderMaterial(s32 material, const c8 *vertexShaderProgram,
+			const c8 *pixelShaderProgram) override;
+#endif
+
 protected:
 	virtual bool genericDriverInit(const core::dimension2d<u32> &screenSize, bool stencilBuffer);
 
@@ -377,6 +388,12 @@ private:
 	u16 MaxJointTransforms = 0;
 	void initMaxJointTransforms();
 	OGLBufferObject JointTransformsUBO = OGLBufferObject(OGLBufferObject::TARGET_UBO);
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	std::function<bool()> ContextRestoreHandler;
+	bool recompileFromFiles(COpenGL3MaterialRenderer *renderer,
+			const io::path &vertexShaderName, const io::path &fragmentShaderName);
+#endif
 
 	void debugCb(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message);
 	static void APIENTRY debugCb(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void *userParam);

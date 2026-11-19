@@ -298,6 +298,8 @@ public:
 private:
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
 	static EM_BOOL MouseUpDownCallback(int eventType, const EmscriptenMouseEvent *event, void *userData);
+	// After webglcontextrestored: rebuild the driver's GL resources.
+	void restoreAfterContextLoss();
 #endif
 	// Check if a key is a known special character with no side effects on text boxes.
 	static bool keyIsKnownSpecial(EKEY_CODE irrlichtKey);
