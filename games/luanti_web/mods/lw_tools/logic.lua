@@ -375,3 +375,157 @@ function lw_tools.place_stamp(kind, origin, facedir)
 	end
 	return #nodes, ("Placed %s (%d nodes)."):format(kind:gsub("_", " "), #nodes)
 end
+
+--------------------------------------------------------------------------
+-- Laser wand
+--------------------------------------------------------------------------
+
+-- The wand's beams are entities that remove themselves: a shot lasts a few
+-- seconds, a beam strung between two marked points a little longer. Neither
+-- is saved (static_save = false) and each visitor has at most MAX_LASERS up at
+-- once, oldest first out, so a held mouse button cannot fill a browser tab
+-- with sprites.
+lw_tools.LASER_LIFETIME = 4
+lw_tools.LASER_PAIR_LIFETIME = 12
+lw_tools.MAX_LASERS = 8
+lw_tools.MAX_LASER_LENGTH = 48
+lw_tools.LASER_COLORS = {"#ff2050", "#ff40c8", "#40e0ff", "#c070ff", "#ffd040"}
+
+-- The centre of the face a pointed_thing hit: halfway from the node to the
+-- air in front of it.
+function lw_tools.face_point(under, above)
+	if not above then
+		return {x = under.x, y = under.y, z = under.z}
+	end
+	return {
+		x = (under.x + above.x) / 2,
+		y = (under.y + above.y) / 2,
+		z = (under.z + above.z) / 2,
+	}
+end
+
+function lw_tools.laser_color(n)
+	local colors = lw_tools.LASER_COLORS
+	return colors[(n - 1) % #colors + 1]
+end
+
+-- A right click marks a point; the second one strings a beam to it from the
+-- first. Returns the two ends then, or nil and a message while one is marked.
+function lw_tools.laser_mark(state, pos)
+	if not state.mark then
+		state.mark = {x = pos.x, y = pos.y, z = pos.z}
+		return nil, "First point marked. Right click a second node to string a laser to it."
+	end
+	local a = state.mark
+	state.mark = nil
+	local dx, dy, dz = pos.x - a.x, pos.y - a.y, pos.z - a.z
+	local length = math.sqrt(dx * dx + dy * dy + dz * dz)
+	if length < 0.5 then
+		return nil, "That is the same point. Mark cleared."
+	end
+	if length > lw_tools.MAX_LASER_LENGTH then
+		return nil, ("The points are %d nodes apart (max %d). Mark cleared.")
+			:format(math.floor(length + 0.5), lw_tools.MAX_LASER_LENGTH)
+	end
+	return a, {x = pos.x, y = pos.y, z = pos.z}
+end
+
+-- Add `object` to a visitor's list of live beams, forgetting the ones that
+-- have gone (`alive(object)` false) and returning the ones over the cap,
+-- oldest first, for the caller to remove.
+function lw_tools.keep_laser(list, object, alive)
+	local kept = {}
+	for _, old in ipairs(list) do
+		if alive(old) then
+			kept[#kept + 1] = old
+		end
+	end
+	kept[#kept + 1] = object
+	local evicted = {}
+	while #kept > lw_tools.MAX_LASERS do
+		evicted[#evicted + 1] = table.remove(kept, 1)
+	end
+	for i = #list, 1, -1 do
+		list[i] = nil
+	end
+	for i, kept_object in ipairs(kept) do
+		list[i] = kept_object
+	end
+	return evicted
+end
+
+--------------------------------------------------------------------------
+-- Ember tool
+--------------------------------------------------------------------------
+
+-- An ember is a node that puts itself out: it burns bright, sputters on a
+-- fixed pattern, and is gone after EMBER_TICKS ticks of its node timer. It
+-- does no damage (nothing in this game does) and drops nothing when dug.
+lw_tools.EMBER = "lw_tools:ember"
+lw_tools.EMBER_LOW = "lw_tools:ember_low"
+lw_tools.EMBER_TICK = 0.5
+-- One character per tick, "1" bright and "0" low; the ember goes out when it
+-- runs off the end. Seven seconds at 0.5 s a tick.
+lw_tools.EMBER_PATTERN = "11111111011010010100"
+lw_tools.EMBER_TICKS = #lw_tools.EMBER_PATTERN
+
+local function is_ember(name)
+	return name == lw_tools.EMBER or name == lw_tools.EMBER_LOW
+end
+lw_tools.is_ember = is_ember
+
+function lw_tools.place_ember(pos)
+	local node = core.get_node(pos)
+	if node.name == "ignore" then
+		return nil, "That spot is not loaded."
+	end
+	if is_ember(node.name) then
+		return nil, "There is an ember there already."
+	end
+	if node.name ~= "air" then
+		local def = core.registered_nodes[node.name]
+		if not (def and def.buildable_to) then
+			return nil, "That spot is occupied."
+		end
+	end
+	core.set_node(pos, {name = lw_tools.EMBER})
+	return true, "Ember lit. It goes out by itself in a few seconds."
+end
+
+function lw_tools.remove_ember(pos)
+	if not is_ember(core.get_node(pos).name) then
+		return nil, "No ember there."
+	end
+	core.remove_node(pos)
+	return true, "Ember put out."
+end
+
+-- Bright or low at tick `n` (1-based), or nil once it has gone out.
+function lw_tools.ember_state(n)
+	if n < 1 or n > lw_tools.EMBER_TICKS then
+		return nil
+	end
+	return lw_tools.EMBER_PATTERN:sub(n, n) == "1"
+end
+
+-- One tick of an ember's node timer. Returns whether the timer should run
+-- again, as on_timer does.
+function lw_tools.ember_tick(pos)
+	local node = core.get_node(pos)
+	if not is_ember(node.name) then
+		return false
+	end
+	local meta = core.get_meta(pos)
+	local n = meta:get_int("ticks") + 1
+	meta:set_int("ticks", n)
+	local bright = lw_tools.ember_state(n)
+	if bright == nil then
+		core.remove_node(pos)
+		return false
+	end
+	local want = bright and lw_tools.EMBER or lw_tools.EMBER_LOW
+	if node.name ~= want then
+		core.swap_node(pos, {name = want})
+	end
+	return true
+end

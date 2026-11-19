@@ -172,6 +172,8 @@ lw_core.starter_tools = {
 	"lw_tools:light_wand",
 	"lw_theater:remote",
 	"lw_tools:stamp",
+	"lw_tools:laser_wand",
+	"lw_tools:ember_tool",
 }
 
 lw_core.starter_kit = {}
