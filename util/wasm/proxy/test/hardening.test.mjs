@@ -12,7 +12,7 @@ import {Metrics} from "../metrics.mjs";
 import {
 	ServerRegistry, TargetPolicy, originAllowed, parseAllowedOrigins, parsePortRanges,
 } from "../policy.mjs";
-import {encodeFrame} from "../protocol.mjs";
+import {closeReason, encodeFrame} from "../protocol.mjs";
 import {createProxyServer} from "../server.mjs";
 
 const quiet = () => {};
@@ -85,18 +85,54 @@ test("a public listen address refuses to start without an origin policy", () => 
 		/ALLOWED_ORIGINS/);
 });
 
-test("the WebSocket upgrade is refused for a foreign or missing Origin", async t => {
+test("a foreign or missing Origin is refused with a reason the page can read", async t => {
 	const {server, url, logs} = await start({allowedOrigins: parseAllowedOrigins("https://play.example.org")});
 	t.after(() => server.close());
 	const good = await connect(url, {origin: "https://play.example.org"});
 	assert.equal(good.status, null);
 	assert.equal(good.websocket.readyState, WebSocket.OPEN);
-	const evil = await connect(url, {origin: "https://evil.example"});
-	assert.equal(evil.status, 403);
-	const none = await connect(url);
-	assert.equal(none.status, 403);
+	// A browser cannot read the status of a failed upgrade (it only sees close
+	// code 1006), so the refusal is a close frame sent after the upgrade.
+	for (const origin of [{origin: "https://evil.example"}, {}]) {
+		const refused = await connect(url, origin);
+		assert.equal(refused.status, null, "the upgrade itself succeeds");
+		const close = await closedWithin(refused);
+		assert.equal(close.code, 1008);
+		assert.match(close.reason, /^origin: /);
+	}
+	assert.equal(server.proxy.sessions.size, 1, "a refused socket never gets a session");
+	assert.equal(server.proxy.tracker.total, 1, "nor a connection slot");
 	good.websocket.close();
 	assert.equal(logs.filter(entry => entry.event === "connection_rejected" && entry.reason === "origin").length, 2);
+	assert.match(server.proxy.metrics.render(),
+		/^luanti_proxy_connections_rejected_total\{reason="origin"\} 2$/m);
+});
+
+test("a refused socket is not a session: it cannot send a handshake", async t => {
+	const {server, url} = await start({allowedOrigins: parseAllowedOrigins("https://play.example.org")});
+	t.after(() => server.close());
+	const refused = await connect(url, {origin: "https://evil.example"});
+	const messages = [];
+	refused.websocket.on("message", data => messages.push(data.toString()));
+	try {
+		refused.websocket.send("PROXY IPV4 UDP 1");
+	} catch (_) {
+		// Already closing is fine too.
+	}
+	await closedWithin(refused);
+	assert.deepEqual(messages, [], "no PROXY OK for a refused page");
+	assert.equal(server.proxy.sessions.size, 0);
+});
+
+test("close reasons are tagged, bounded, and never split a character", () => {
+	assert.equal(closeReason("origin", "Origin not allowed"), "origin: Origin not allowed");
+	assert.equal(closeReason("idle"), "idle");
+	const long = closeReason("udp_error", "x".repeat(500));
+	assert.equal(Buffer.byteLength(long), 123);
+	assert.ok(long.startsWith("udp_error: x"));
+	const wide = closeReason("protocol", "\u00e9".repeat(200));
+	assert.ok(Buffer.byteLength(wide) <= 123);
+	assert.ok(!wide.includes("\ufffd"));
 });
 
 test("per-address and global connection caps", async t => {
@@ -105,7 +141,9 @@ test("per-address and global connection caps", async t => {
 	const a = await connect(url);
 	const b = await connect(url);
 	const c = await connect(url);
-	assert.equal(c.status, 429, "third connection from one address is refused");
+	const closeC = await closedWithin(c);
+	assert.equal(closeC.code, 1013, "third connection from one address is refused");
+	assert.match(closeC.reason, /^per_ip_limit: /);
 	a.websocket.close();
 	await closedWithin(a);
 	const d = await connect(url);
@@ -118,7 +156,9 @@ test("per-address and global connection caps", async t => {
 	t.after(() => small.server.close());
 	const first = await connect(small.url);
 	const second = await connect(small.url);
-	assert.equal(second.status, 503, "the global cap holds across addresses");
+	const closeSecond = await closedWithin(second);
+	assert.equal(closeSecond.code, 1013, "the global cap holds across addresses");
+	assert.match(closeSecond.reason, /^global_limit: /);
 	first.websocket.close();
 });
 
@@ -127,7 +167,8 @@ test("X-Forwarded-For is only trusted when asked for", async t => {
 	t.after(() => server.close());
 	const a = await connect(url, {headers: {"X-Forwarded-For": "203.0.113.5"}});
 	const b = await connect(url, {headers: {"X-Forwarded-For": "203.0.113.6"}});
-	assert.equal(b.status, 429, "spoofed header does not buy a new address");
+	assert.match((await closedWithin(b)).reason, /^per_ip_limit: /,
+		"spoofed header does not buy a new address");
 	a.websocket.close();
 
 	const trusted = await start({maxConnectionsPerIp: 1, trustProxy: true});
@@ -136,7 +177,8 @@ test("X-Forwarded-For is only trusted when asked for", async t => {
 	const d = await connect(trusted.url, {headers: {"X-Forwarded-For": "198.51.100.2"}});
 	const e = await connect(trusted.url, {headers: {"X-Forwarded-For": "198.51.100.1"}});
 	assert.equal(d.status, null);
-	assert.equal(e.status, 429);
+	assert.equal(d.websocket.readyState, WebSocket.OPEN);
+	assert.match((await closedWithin(e)).reason, /^per_ip_limit: /);
 	c.websocket.close();
 	d.websocket.close();
 });
@@ -166,7 +208,7 @@ test("the rate limit is shared by every connection from one address", async t =>
 		b.websocket.send(encodeFrame("127.0.0.1", targetPort, Buffer.from("x")));
 	// Five tokens in total: six datagrams cannot all pass, whichever socket they use.
 	const closes = await Promise.all([closedWithin(a, 800), closedWithin(b, 800)]);
-	assert.ok(closes.some(close => close && close.code === 1008 && /rate limit/.test(close.reason)),
+	assert.ok(closes.some(close => close && close.code === 1008 && /^rate_limited: .*rate limit/.test(close.reason)),
 		"one of the two connections is cut off");
 	assert.ok(server.proxy.metrics.render().includes('luanti_proxy_rate_limited_total 1'));
 });
@@ -216,7 +258,7 @@ test("public targets are limited to the port allowlist", async t => {
 	denied.websocket.send("PROXY IPV4 UDP 8.8.8.8 53");
 	const close = await closedWithin(denied);
 	assert.equal(close.code, 1008);
-	assert.match(close.reason, /port is not allowed/);
+	assert.match(close.reason, /^target_denied: UDP port is not allowed$/);
 	assert.ok(logs.some(entry => entry.event === "session_closed" && entry.reason === "target_denied"));
 });
 
@@ -282,7 +324,7 @@ test("per-session state is bounded", async t => {
 	client.websocket.send("RESOLVE 172.29.0.2 localhost");
 	client.websocket.send("RESOLVE 172.29.0.3 localhost");
 	const close = await closedWithin(client);
-	assert.match(close.reason, /too many RESOLVE/);
+	assert.match(close.reason, /^protocol: too many RESOLVE/);
 });
 
 test("idle and half-open sessions are reaped", async t => {
@@ -291,7 +333,7 @@ test("idle and half-open sessions are reaped", async t => {
 	const silent = await connect(url); // never sends the handshake
 	const closeSilent = await closedWithin(silent);
 	assert.equal(closeSilent.code, 1008);
-	assert.match(closeSilent.reason, /handshake timeout/);
+	assert.match(closeSilent.reason, /^handshake_timeout: handshake timeout$/);
 
 	const idle = await connect(url);
 	const reply = nextText(idle.websocket);
@@ -299,7 +341,7 @@ test("idle and half-open sessions are reaped", async t => {
 	await reply;
 	const closeIdle = await closedWithin(idle);
 	assert.equal(closeIdle.code, 1001);
-	assert.match(closeIdle.reason, /idle timeout/);
+	assert.match(closeIdle.reason, /^idle: idle timeout$/);
 	assert.equal(server.proxy.tracker.total, 0, "reaped connections free their slot");
 });
 

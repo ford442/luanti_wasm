@@ -23,6 +23,7 @@
 #include <emscripten.h>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -37,6 +38,11 @@ std::atomic<u16> next_ephemeral_port{20000};
 std::mutex sockets_mutex;
 std::unordered_map<int, std::shared_ptr<EmscriptenUDPSocketState>> sockets_by_handle;
 std::unordered_map<u16, std::shared_ptr<EmscriptenUDPSocketState>> sockets_by_port;
+// Every port an in-process socket has held, closed or not. Singleplayer's
+// internal server holds one: a stray datagram to it after it closed is dropped,
+// not sent to the proxy. Any other localhost port is a server on the player's
+// own machine (127.0.0.1:30000 through a local proxy) and must reach the proxy.
+std::unordered_set<u16> in_process_ports;
 bool sockets_initialized = false;
 
 u16 allocate_ephemeral_port()
@@ -183,6 +189,7 @@ void UDPSocket::Bind(Address addr)
 		addr.setPort(port);
 		m_emscripten->bind_address = addr;
 		sockets_by_port[port] = m_emscripten;
+		in_process_ports.insert(port);
 		m_bound_port = port;
 	}
 	// In-process singleplayer only needs the C++ port map. The WSS proxy
@@ -208,12 +215,15 @@ void UDPSocket::Send(const Address &destination, const void *data, int size)
 	// Singleplayer / in-process loopback: deliver datagram directly to matching port queue
 	{
 		std::shared_ptr<EmscriptenUDPSocketState> target;
-		bool in_process = destination.isLocalhost() || destination.isAny();
+		bool in_process = destination.isAny();
 		{
 			std::lock_guard<std::mutex> lock(sockets_mutex);
 			auto found = sockets_by_port.find(destination.getPort());
 			if (found != sockets_by_port.end()) {
 				target = found->second;
+				in_process = true;
+			} else if (destination.isLocalhost() &&
+					in_process_ports.count(destination.getPort()) != 0) {
 				in_process = true;
 			}
 		}

@@ -79,6 +79,7 @@ Copyright (C) 2026 The Luanti Contributors
 					</div>
 					<button id="luanti-server-list-button" class="text-button" type="button">Browse public servers</button>
 					<div id="luanti-server-list" class="server-list" hidden></div>
+					<p id="luanti-proxy-notice" class="field-note" hidden>The proxy relays your game traffic unencrypted, so its operator can see your gameplay and chat.</p>
 				</div>
 
 				<div class="field-grid">
@@ -156,6 +157,10 @@ Copyright (C) 2026 The Luanti Contributors
 		<div id="luanti-persistence" class="persistence-toast" role="status" aria-live="polite">
 			<div id="luanti-persistence-status" data-state="loading">Loading saved data…</div>
 			<div id="luanti-persistence-error" role="alert" hidden></div>
+		</div>
+		<div id="luanti-proxy-alert" class="proxy-alert" role="alert" hidden>
+			<span id="luanti-proxy-alert-text"></span>
+			<button id="luanti-proxy-alert-reload" type="button">Back to launcher</button>
 		</div>
 		<div id="luanti-resume" class="resume-panel" hidden>
 			<button id="luanti-resume-button" type="button">Click to return to the game</button>

@@ -65,7 +65,7 @@ jobs:
   release:
     name: Release build and browser smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 70
     steps:
       - name: Check out Luanti
         uses: actions/checkout@v7
@@ -119,6 +119,45 @@ jobs:
           source "$EMSDK_DIR/emsdk_env.sh"
           cmake --preset Emscripten
 
+      # The proxy join test (below) needs a native luantiserver and the proxy's
+      # one dependency. The server is a Release, server-only, RUN_IN_PLACE build
+      # of this commit's sources, cached on everything that goes into the binary
+      # (builtin/ and the games are read from the checkout at run time). It is
+      # built here, before the long WebAssembly build, so a broken server build
+      # fails fast. A cache hit skips the apt install and the build.
+      - name: Set up Node.js for the proxy
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: util/wasm/proxy/package-lock.json
+
+      - name: Install the proxy's dependencies
+        run: npm ci --prefix util/wasm/proxy
+
+      - name: Cache the native server
+        id: native-server
+        uses: actions/cache@v5
+        with:
+          path: bin/luantiserver
+          key: luantiserver-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'src/**', 'lib/**', 'irr/include/**') }}
+
+      - name: Build the native server
+        if: steps.native-server.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build libsqlite3-dev libzstd-dev
+          cmake -S . -B build-server -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DRUN_IN_PLACE=TRUE \
+            -DBUILD_CLIENT=FALSE -DBUILD_SERVER=TRUE \
+            -DBUILD_UNITTESTS=FALSE -DBUILD_BENCHMARKS=FALSE \
+            -DENABLE_CURSES=FALSE -DENABLE_GETTEXT=FALSE -DENABLE_CURL=FALSE \
+            -DENABLE_LEVELDB=FALSE -DENABLE_POSTGRESQL=FALSE -DENABLE_REDIS=FALSE \
+            -DENABLE_PROMETHEUS=FALSE -DENABLE_LUAJIT=FALSE \
+            -DENABLE_SYSTEM_GMP=FALSE -DENABLE_SYSTEM_JSONCPP=FALSE
+          cmake --build build-server --parallel "$(nproc)"
+          test -x bin/luantiserver
+
       - name: Build WebAssembly client
         shell: bash
         run: |
@@ -170,6 +209,27 @@ jobs:
         with:
           name: luanti-wasm-gate-${{ github.sha }}
           path: wasm-gate-screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The browser leg of Phase 4's public-server acceptance, on 127.0.0.1:
+      # the built client joins the native server through util/wasm/proxy (the
+      # PROXY OK handshake, TOCLIENT_HELLO, the world, a chat line arriving in
+      # the server log), then a refused origin and a dead proxy each say so in
+      # the launcher. It is not a claim that the proxy is safe to publish
+      # (util/wasm/proxy/README.md).
+      - name: Join a native server through the proxy in Chrome
+        run: |
+          python3 util/wasm/test_proxy_join.py \
+            --browser "$(command -v google-chrome)" \
+            --screenshot-dir wasm-proxy-join-screenshots
+
+      - name: Upload proxy join screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: luanti-wasm-proxy-join-${{ github.sha }}
+          path: wasm-proxy-join-screenshots/
           if-no-files-found: ignore
           retention-days: 14
 

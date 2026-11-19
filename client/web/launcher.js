@@ -23,6 +23,11 @@
 	var loadingShellDismissed = false;
 	var startupFailure = null;
 	var logs = [];
+	// What network.js last said about the proxy link. `message` outlives the
+	// "connecting" state of a retry, so a refusal does not flicker away every
+	// time the transport redials, and clears only when the link is ready again
+	// or the proxy choice changes.
+	var proxyStatus = {state: "disabled", url: null, message: "", reason: null, closeCode: null};
 
 	/**
 	 * The launcher markup is fixed (client/web/shell.html), so each element is
@@ -51,6 +56,10 @@
 		proxyRegion: element("luanti-proxy-region"),
 		customProxyRow: element("luanti-custom-proxy-row"),
 		proxyUrl: element("luanti-proxy-url"),
+		proxyNotice: element("luanti-proxy-notice"),
+		proxyAlert: element("luanti-proxy-alert"),
+		proxyAlertText: element("luanti-proxy-alert-text"),
+		proxyAlertReload: element("luanti-proxy-alert-reload"),
 		play: element("luanti-play-button"),
 		playLabel: element("luanti-play-label"),
 		error: element("luanti-launch-error"),
@@ -209,7 +218,36 @@
 		}
 	}
 
+	// network.js calls this for every proxy-link state change. A refusal
+	// arrives as a specific sentence ("... does not allow pages from ...") taken
+	// from the close reason the proxy sent; see util/wasm/proxy/README.md.
+	function reportProxyStatus(detail) {
+		var state = String(detail && detail["state"] || "");
+		proxyStatus.state = state;
+		proxyStatus.url = detail && detail["url"] || null;
+		if (state === "ready" || state === "idle" || state === "disabled") {
+			proxyStatus.message = "";
+			proxyStatus.reason = null;
+			proxyStatus.closeCode = null;
+		} else if ((state === "error" || state === "closed") && detail["error"]) {
+			proxyStatus.message = String(detail["error"]);
+			proxyStatus.reason = detail["reason"] || null;
+			proxyStatus.closeCode = typeof detail["closeCode"] === "number" ? detail["closeCode"] : null;
+			appendLog("proxy", [proxyStatus.message]);
+		}
+		// Only a join through the proxy has a game shell to show it in; the
+		// launcher's own "Connection" section already shows network.js's text.
+		var visible = started && !!proxyStatus.message && currentSession && currentSession.mode === "remote";
+		ui.proxyAlert.hidden = !visible;
+		ui.proxyAlertText.textContent = visible ? proxyStatus.message : "";
+	}
+
+	ui.proxyAlertReload.addEventListener("click", function() {
+		location.reload();
+	});
+
 	Module["luantiLauncher"] = {
+		"reportProxyStatus": reportProxyStatus,
 		"reportEngineStatus": reportStatus,
 		"prepareCompositor": function(percent) {
 			// Never re-show the shell. Progress only.
@@ -281,7 +319,14 @@
 				"frameHookWanted": thumbnail.pending,
 				"world": currentSession && currentSession.world || null,
 				"coreReady": coreReady,
-				"packages": Module["luantiPackages"] ? Module["luantiPackages"]["getStates"]() : {}
+				"packages": Module["luantiPackages"] ? Module["luantiPackages"]["getStates"]() : {},
+				"proxy": {
+					"state": proxyStatus.state,
+					"url": proxyStatus.url,
+					"message": proxyStatus.message,
+					"reason": proxyStatus.reason,
+					"closeCode": proxyStatus.closeCode
+				}
 			};
 		}
 	};
@@ -474,9 +519,30 @@
 		ui.customProxyRow.hidden = ui.proxyRegion.value !== "custom";
 	}
 
+	// The proxy sees every Luanti datagram in the clear (the protocol has no
+	// encryption), so a proxy that is not on this machine is a third party.
+	function isLoopbackProxyUrl(value) {
+		var host = new URL(value).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+		return host === "localhost" || host.endsWith(".localhost") || host === "::1" ||
+			/^127(?:\.\d{1,3}){3}$/.test(host);
+	}
+
+	function updateProxyNotice() {
+		var show = false;
+		try {
+			var url = configuredProxyUrl();
+			show = !!url && !isLoopbackProxyUrl(url);
+		} catch (_) {
+			// A half-typed URL is not a proxy yet.
+		}
+		ui.proxyNotice.hidden = !show;
+	}
+
 	ui.proxyRegion.addEventListener("change", function() {
 		ui.customProxyRow.hidden = ui.proxyRegion.value !== "custom";
+		updateProxyNotice();
 	});
+	ui.proxyUrl.addEventListener("input", updateProxyNotice);
 
 	function validateProxy(remote) {
 		var url = configuredProxyUrl();
@@ -1550,6 +1616,7 @@
 		element("luanti-mobile-warning").hidden = false;
 
 	initializeProxies();
+	updateProxyNotice();
 	setMode(activeMode);
 
 	// Narrow, versioned service worker (service-worker.js): precaches this

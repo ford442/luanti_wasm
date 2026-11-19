@@ -19,7 +19,16 @@ interface LuantiNetworkState {
 	sentPackets: number;
 	receivedPackets: number;
 	droppedPackets: number;
+	/** Why the link failed or ended: a refusal or a plain "could not connect". */
 	error: string | null;
+	/**
+	 * The tag the proxy closed the link with (origin, per_ip_limit,
+	 * global_limit, target_denied, rate_limited, handshake_timeout, idle, ...),
+	 * or null when it said nothing (unreachable, or a clean close).
+	 */
+	reason: string | null;
+	/** WebSocket close code of the last close, e.g. 1006 for "never connected". */
+	closeCode: number | null;
 }
 
 /**
@@ -182,6 +191,8 @@ interface LuantiPackages {
 
 /** Launcher hooks the engine calls back into (client/web/launcher.js). */
 interface LuantiLauncher {
+	/** Called by network.js on every proxy-link state change. */
+	reportProxyStatus(detail: LuantiNetworkState): void;
 	/** `percent` is -1 or null when unknown; `phase` is null when unset. */
 	reportEngineStatus(message: string, percent: number | null, phase: string | null): void;
 	prepareCompositor(percent: number): void;
@@ -214,6 +225,12 @@ interface LuantiLauncher {
 		world: string | null;
 		coreReady: boolean;
 		packages: Record<string, { state: string; loaded: number; total: number }>;
+		/**
+		 * The proxy link as network.js last reported it. `message` is the
+		 * player-facing sentence for a refusal or failure and stays until the
+		 * link is ready again or the proxy choice changes.
+		 */
+		proxy: { state: string; url: string | null; message: string; reason: string | null; closeCode: number | null };
 	};
 }
 

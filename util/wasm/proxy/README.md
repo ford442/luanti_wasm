@@ -32,9 +32,9 @@ Configuration is through environment variables:
 | `LUANTI_PROXY_ALLOWED_PORTS` | `30000-30010` | UDP ports a public target may use. Without this a public proxy is a general UDP reflector |
 | `LUANTI_PROXY_SERVER_LIST_URL` | unset | A Luanti server list (e.g. `https://servers.luanti.org/list.json`). When set, public targets must be listed there (any port they registered) and the port range is not used. Hostnames are resolved on each refresh. Public targets are refused until the first successful load; a failed refresh keeps the last good list |
 | `LUANTI_PROXY_SERVER_LIST_REFRESH_SECONDS` | `600` | Server list refresh interval |
-| `LUANTI_PROXY_MAX_CONNECTIONS` | `256` | Concurrent WebSockets, all addresses (503 beyond it) |
-| `LUANTI_PROXY_MAX_CONNECTIONS_PER_IP` | `8` | Concurrent WebSockets per source address (429 beyond it) |
-| `LUANTI_PROXY_MAX_PACKETS_PER_SECOND` | `256` | Outbound datagram rate, **shared by all connections from one address** |
+| `LUANTI_PROXY_MAX_CONNECTIONS` | `256` | Concurrent WebSockets, all addresses (`global_limit` beyond it) |
+| `LUANTI_PROXY_MAX_CONNECTIONS_PER_IP` | `8` | Concurrent WebSockets per source address (`per_ip_limit` beyond it) |
+| `LUANTI_PROXY_MAX_PACKETS_PER_SECOND` | `2048` | Outbound datagram rate, **shared by all connections from one address**; exceeding it closes the session (`rate_limited`). A joining client acknowledges every packet it receives, so this must clear the download rate: a small devtest join peaks near 600 per second, and a media-heavy server needs more. Lower it only knowing that |
 | `LUANTI_PROXY_MAX_BYTES_PER_SECOND` | `1048576` | Outbound byte rate, shared the same way |
 | `LUANTI_PROXY_IDLE_TIMEOUT_SECONDS` | `120` | A session with no datagram in either direction for this long is closed. A connection that never completes the handshake is closed after `LUANTI_PROXY_HANDSHAKE_TIMEOUT_SECONDS` (10) |
 | `LUANTI_PROXY_MAX_TARGETS_PER_SESSION` | `64` | Remembered reply sources per session (oldest forgotten first) |
@@ -63,11 +63,48 @@ the public-target mode unless an exact endpoint is explicitly allowlisted.
   runs it behind Caddy, which gets the certificate, upgrades WebSockets and
   hides `/metrics`. Copy `deploy/.env.example` to `deploy/.env`, edit it, then
   `docker compose up -d --build` and enter `wss://<PROXY_DOMAIN>/` in the
-  client. (The compose file has not been run in CI; the proxy itself is covered
-  by `npm test`.)
+  client. CI only checks that the file is valid
+  (`docker compose --env-file deploy/.env.example -f deploy/docker-compose.yml
+  config`); it never starts the stack or asks Caddy for a certificate.
+* **Tests:** `npm test` covers the proxy process and what `client/web/network.js`
+  tells the launcher for each refusal. `python3 util/wasm/test_proxy_join.py`
+  (CI: the `wasm` workflow) joins a native `luantiserver` from the built client
+  through this proxy on 127.0.0.1. That shows the path works; it does not show
+  the proxy is safe to publish.
 * **Still needed on a public host:** operating-system egress controls, an
   abuse-response process, and a decision on whether to publish the proxy
   address at all. The proxy sees all unencrypted Luanti traffic.
+
+## Close reasons
+
+A page cannot read the HTTP status of a refused WebSocket upgrade: the browser
+reports only close code 1006 with no reason, the same as for a dead server. So
+the proxy never refuses with an HTTP 403/429/503. It completes the upgrade and
+immediately closes the socket with a code and a reason of the form
+`<tag>: <message>`; the refused socket gets no session, no UDP socket and
+ignores anything it sends. The tag is the one in the `reason` label of
+`luanti_proxy_connections_rejected_total` and `..._sessions_closed_total` and in
+the logs. `client/web/network.js` turns each into a sentence for the launcher
+(`Module.luantiLauncher.getState().proxy.message`, and the alert on the page).
+
+| Tag | Close code | Meaning |
+|---|---:|---|
+| `origin` | 1008 | The page's `Origin` is not in `LUANTI_PROXY_ALLOWED_ORIGINS` (or absent) |
+| `per_ip_limit` | 1013 | Too many open connections from this address |
+| `global_limit` | 1013 | `LUANTI_PROXY_MAX_CONNECTIONS` reached |
+| `target_denied` | 1008 | The datagram's server is not allowed (the message says which rule) |
+| `rate_limited` | 1008 | The address exceeded the packet or byte rate |
+| `handshake_timeout` | 1008 | No handshake within `LUANTI_PROXY_HANDSHAKE_TIMEOUT_SECONDS` |
+| `protocol` | 1008 | A malformed or unsupported message |
+| `idle` | 1001 | No datagram in either direction for `LUANTI_PROXY_IDLE_TIMEOUT_SECONDS` |
+| `shutdown` | 1001 | The proxy is stopping |
+| `udp_error` | 1011 | The proxy's UDP socket failed |
+
+A close with no reason (1006) therefore means the proxy was unreachable, not
+that it refused the page. Reasons are limited to 123 bytes. After any close
+other than an idle timeout or a clean close, the page waits 1 s, then 2 s, doubling
+to 30 s, before dialling again, so an engine that resends its handshake several
+times a second does not become a connection flood.
 
 ## Protocol
 
