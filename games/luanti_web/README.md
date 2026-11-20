@@ -25,11 +25,12 @@ QA sandbox and this game is not a replacement for it.
   |   |    [ library ]--[ courtyard ]--[ gallery ]   z = 4..32   |          |
   '---+----------------.    |    .-------------------------------'          |
                        |    |    |  .---------------------------------------'
- Halloween --------------[ plaza ]-------------- fruit garden
-   (west)            |       |     |                (east)
-                     |       |     '---------.
-                     |  snow mountain        |
-                     |    (south)  |         |
+ Halloween --------------[ plaza ]-------------- fruit garden -- Christmas village
+   (west)            |       |     |                (east)       (east, off the end
+                     |       |     '---------.                    of the garden's path)
+ WoF Christmas       |  snow mountain        |
+ (spur off the laser |    (south)  |         |
+  serpent's south)   |             |         |
  lighthouse tide ----'             |         '--- rainbow storm
   (southwest)                      |              (southeast)
                           waterfall cascade
@@ -45,6 +46,10 @@ QA sandbox and this game is not a replacement for it.
 
  waterfall cascade: a spur off the snow mountain, out of the south mouth of
  its tunnel
+
+ Christmas: the Christmas village is a spur off the fruit garden, off the
+ east end of its path; the Weeks on Fire Christmas is a spur off the laser
+ serpent, off the south side of its field
 ```
 
 The plaza is the hub. The showcase tour runs north from it; ten causeways
@@ -82,7 +87,12 @@ plaza's south-west corner), so none of them crosses the tour.
    misty twilight: five tiers of glowing falls under clouds hung with
    morning glories that shed petals, glowing mushrooms and trees, a volcano
    that erupts flowers, bikes to ride until they break down, and geodes that
-   give gems you can fuse and push about. Walk a causeway or use `/maps`. Full
+   give gems you can fuse and push about. Two Christmas islands close the
+   tour: a snowed-in village with a tree whose garland chases up it, presents,
+   a workshop cabin with a fire, a sleigh and reindeer, beyond the fruit
+   garden; and, beyond the laser serpent, a Weeks on Fire Christmas where the
+   tree is on fire and festive anyway, lasers spiral up it, and a cabaret
+   stage is set for a holiday revue. Walk a causeway or use `/maps`. Full
    footprints, spawns and intended time of day are in
    [`docs/maps.md`](docs/maps.md).
 
@@ -125,8 +135,8 @@ plaza's south-west corner), so none of them crosses the tour.
 * **Schematic Stamp** — one-click seat row, column, or picture frame. Sneak+use cycles the stamp.
 * **Laser Wand** — use fires a laser beam at the pointed node for 4 s; right click two nodes to string a beam between them for 12 s; sneak+use puts all your beams out. At most eight at a time per visitor, and none are saved.
 * **Ember Tool** — use lights an ember on the pointed face. It burns, sputters and goes out by itself after about 7 s. Use it on an ember, or sneak+use, to put it out. No damage and no spread.
-* Punch an **HOA memo** board (the laser serpent and the mirror hall each have one) to read the next notice.
-* Punch the **serpent console** at the end of the laser serpent's walk to change the beams' pattern: coil, sweep, fan.
+* Punch an **HOA memo** board (the laser serpent and the mirror hall each have one) to read the next notice. The two Christmas islands have red-and-green **holiday** boards with memos of their own.
+* Punch the **serpent console** at the end of the laser serpent's walk to change the beams' pattern: coil, sweep, fan. The Weeks on Fire Christmas stage has one too: coil (up the tree) and sweep.
 * On the **waterfall cascade**, punch or right click a **bike** at a bike rack to ride it: forward pedals, back brakes, jump hops, steer by looking, sneak to get off. Every bike breaks down after a while, and its rack takes 45 s to get another, so find the next rack. `/bike` shows how your ride is going, or where the nearest bike is.
 * Dig a **geode** on the waterfall cascade for a red, yellow or blue **gem**. Right click with a gem to fuse it with one in your pockets (red + yellow = orange, and so on, up to a prism), or drop gems with `Q` and punch or walk them into each other to fuse them on the ground. Right click a gem on the ground to pick it up. `/gems` lists the recipes.
 * Punch the red reel button on the east theater pedestal to cycle reels without opening the inventory.
