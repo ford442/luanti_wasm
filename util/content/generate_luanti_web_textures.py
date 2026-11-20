@@ -983,6 +983,277 @@ MAP_NODE_TEXTURES: dict[str, Callable[[], Image]] = {
 
 
 # --------------------------------------------------------------------------
+# Waterfall cascade (lw_maps) and its bikes and gems (lw_cascade)
+# --------------------------------------------------------------------------
+
+WATERFALL_FRAMES = 8
+
+
+def waterfall_frame(index: int) -> Image:
+	"""A sheet of glowing water, its streaks falling two pixels a frame, so
+	the eight frames loop as one long fall."""
+	image = new_image(S, S)
+	noise = Noise(211)
+	base = rgb("3ab8d0", 150)
+	for x in range(S):
+		offset = int(noise.at(x, 0) * S)
+		length = 3 + int(noise.at(x, 1) * 6)
+		for y in range(S):
+			run = (y - offset - index * 2) % S
+			if run < length:
+				image[y][x] = mix(rgb("b8f4ff", 215), rgb("e8ffff", 235), run / length)
+			else:
+				image[y][x] = shade(base, 0.9 + 0.2 * noise.at(x, y + index))
+	return image
+
+
+def tex_glow_shroom() -> Image:
+	image = new_image(S, S)
+	stem = rgb("e8e2f0")
+	for cx, top, width, cap in ((4, 7, 2, rgb("3ee8d0")), (10, 4, 3, rgb("b070ff")),
+			(13, 10, 1, rgb("3ee8d0"))):
+		fill_rect(image, cx, top + 1, cx, S - 1, stem)
+		fill_rect(image, cx - width, top, cx + width, top, cap)
+		fill_rect(image, cx - width + 1, top - 1, cx + width - 1, top - 1, shade(cap, 1.15))
+		put(image, cx, top - 1, rgb("ffffff"))
+	return image
+
+
+def tex_glow_fern() -> Image:
+	image = new_image(S, S)
+	frond = rgb("46f0b0")
+	for x0, lean in ((7, -1), (8, 1), (5, -2), (10, 2)):
+		for y in range(3, S):
+			x = x0 + int(lean * (S - y) / 6)
+			put(image, x, y, shade(frond, 0.8 + 0.3 * (S - y) / S))
+			if y % 2 == 0:
+				put(image, x + (1 if lean > 0 else -1), y - 1, frond)
+	return image
+
+
+def tex_morning_glory() -> Image:
+	"""A hanging strand with trumpet flowers. The stem runs off the top and
+	bottom edges in the same column, so a column of them reads as one vine."""
+	image = new_image(S, S)
+	stem = rgb("3f8a40")
+	for y in range(S):
+		x = 7 + (1 if (y // 4) % 2 else 0)
+		put(image, x, y, stem)
+		if y % 5 == 2:
+			fill_rect(image, x - 2, y, x - 1, y, rgb("58a53c"))
+	for cx, cy, petal in ((4, 4, rgb("8a6aff")), (11, 9, rgb("c070ff")), (5, 13, rgb("ff8ad0"))):
+		fill_disc(image, cx, cy, 2.2, petal)
+		fill_disc(image, cx, cy, 1.0, rgb("fff0a0"))
+		put(image, cx, cy - 3, stem)
+	return image
+
+
+def tex_petal() -> Image:
+	"""Greyscale, tinted per shower with [multiply."""
+	image = new_image(S, S)
+	for y in range(S):
+		for x in range(S):
+			dx, dy = (x - 7.5) / 3.2, (y - 7.5) / 5.0
+			if dx * dx + dy * dy <= 1:
+				level = clamp(255 - 40 * (dx * dx + dy * dy))
+				image[y][x] = (level, level, level, 235)
+	return image
+
+
+def tex_bloom() -> Image:
+	"""A five-petalled flower, the volcano's ejecta, tinted per colour."""
+	image = new_image(S, S)
+	for k in range(5):
+		angle = k * math.tau / 5 - math.pi / 2
+		fill_disc(image, 7.5 + 4 * math.cos(angle), 7.5 + 4 * math.sin(angle), 2.8,
+			rgb("ffffff", 240))
+	fill_disc(image, 7.5, 7.5, 2.0, rgb("d8d0b0"))
+	return image
+
+
+def tex_mist() -> Image:
+	"""A soft round puff: spray, spores and sparkles, tinted where needed."""
+	image = new_image(S, S)
+	for y in range(S):
+		for x in range(S):
+			d = math.hypot(x - 7.5, y - 7.5) / 7.5
+			if d < 1:
+				image[y][x] = (255, 255, 255, clamp(200 * (1 - d) ** 1.5))
+	return image
+
+
+CASCADE_MAP_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_glow_shroom.png": tex_glow_shroom,
+	"lw_glow_fern.png": tex_glow_fern,
+	"lw_morning_glory.png": tex_morning_glory,
+	"lw_petal.png": tex_petal,
+	"lw_bloom.png": tex_bloom,
+	"lw_mist.png": tex_mist,
+}
+
+
+def tex_gem() -> Image:
+	"""A faceted gem, greyscale so one tile serves all seven colours."""
+	image = new_image(S, S)
+	outline = [(4, 3), (11, 3), (14, 7), (7.5, 14), (1, 7)]
+	for y in range(S):
+		for x in range(S):
+			px, py = x + 0.5, y + 0.5
+			inside = True
+			for i in range(len(outline)):
+				ax, ay = outline[i]
+				bx, by = outline[(i + 1) % len(outline)]
+				if (bx - ax) * (py - ay) - (by - ay) * (px - ax) < 0:
+					inside = False
+					break
+			if inside:
+				facet = 235 if py < 7 and abs(px - 7.5) < 3 else 200 if py < 7 else 150
+				if px > 7.5 and py >= 7:
+					facet -= 30
+				image[y][x] = (facet, facet, facet, 255)
+	put(image, 6, 4, rgb("ffffff"))
+	put(image, 5, 5, rgb("ffffff"))
+	return image
+
+
+def tex_geode() -> Image:
+	"""Crystal points poking out of the rock: an overlay, tinted per colour."""
+	image = new_image(S, S)
+	for cx, cy, h in ((4, 11, 5), (9, 13, 7), (12, 7, 4), (6, 5, 3)):
+		for dy in range(h):
+			half = max(0, (h - dy) // 2)
+			for dx in range(-half, half + 1):
+				level = clamp(255 - dy * 12 - abs(dx) * 25)
+				put(image, cx + dx, cy - dy, (level, level, level, 255))
+	return image
+
+
+def tex_bicycle() -> Image:
+	"""Four flat swatches the bike mesh points its faces at: tyre (top left),
+	frame (top right, painted over by lw_bicycle_paint.png), chrome (bottom
+	left), saddle (bottom right)."""
+	image = new_image(S, S)
+	fill_rect(image, 0, 0, 7, 7, rgb("26262c"))
+	fill_rect(image, 8, 0, 15, 7, rgb("b0b0b0"))
+	fill_rect(image, 0, 8, 7, 15, rgb("d8dce4"))
+	fill_rect(image, 8, 8, 15, 15, rgb("4a3020"))
+	return image
+
+
+def tex_bicycle_paint() -> Image:
+	"""The frame swatch alone, white: multiplied by a colour and laid over
+	lw_bicycle.png, it paints the frame and nothing else."""
+	image = new_image(S, S)
+	fill_rect(image, 8, 0, 15, 7, rgb("ffffff"))
+	return image
+
+
+CASCADE_TEXTURES: dict[str, Callable[[], Image]] = {
+	"lw_gem.png": tex_gem,
+	"lw_geode.png": tex_geode,
+	"lw_bicycle.png": tex_bicycle,
+	"lw_bicycle_paint.png": tex_bicycle_paint,
+}
+
+
+def bicycle_obj() -> str:
+	"""A low-poly bicycle as Wavefront OBJ, in the engine's mesh units (ten to
+	a node), wheels on the ground at y = -5, facing +z. Every face points its
+	UVs at one swatch of lw_bicycle.png, so it is flat colours and no art."""
+	SWATCH = {"tyre": (0.25, 0.75), "frame": (0.75, 0.75), "chrome": (0.25, 0.25),
+		"saddle": (0.75, 0.25)}
+	verts: list[tuple[float, float, float]] = []
+	faces: list[tuple[list[int], str, tuple[float, float, float]]] = []
+
+	def quad(points, material):
+		base = len(verts)
+		verts.extend(points)
+		a, b, c = points[0], points[1], points[2]
+		u = [b[i] - a[i] for i in range(3)]
+		v = [c[i] - a[i] for i in range(3)]
+		n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+		length = math.sqrt(sum(k * k for k in n)) or 1.0
+		faces.append(([base + 1, base + 2, base + 3, base + 4], material,
+			tuple(k / length for k in n)))
+
+	def beam(p, q, w, material, across=(1.0, 0.0, 0.0)):
+		d = [q[i] - p[i] for i in range(3)]
+		length = math.sqrt(sum(k * k for k in d))
+		d = [k / length for k in d]
+		a = across
+		b = (d[1] * a[2] - d[2] * a[1], d[2] * a[0] - d[0] * a[2], d[0] * a[1] - d[1] * a[0])
+		bl = math.sqrt(sum(k * k for k in b)) or 1.0
+		b = tuple(k / bl for k in b)
+
+		def corner(end, sa, sb):
+			return tuple(end[i] + (sa * a[i] + sb * b[i]) * w for i in range(3))
+		ring = [(1, 1), (-1, 1), (-1, -1), (1, -1)]
+		for k in range(4):
+			s0, s1 = ring[k], ring[(k + 1) % 4]
+			quad([corner(p, *s0), corner(p, *s1), corner(q, *s1), corner(q, *s0)], material)
+		quad([corner(p, *s) for s in ring], material)
+		quad([corner(q, *s) for s in reversed(ring)], material)
+
+	def wheel(cz):
+		cy, radius, thick, half = -1.7, 3.3, 0.5, 0.3
+		segments = 12
+		for k in range(segments):
+			a0 = k * math.tau / segments
+			a1 = (k + 1) * math.tau / segments
+			def at(angle, r, x):
+				return (x, cy + r * math.sin(angle), cz + r * math.cos(angle))
+			ro, ri = radius, radius - thick
+			quad([at(a0, ro, -half), at(a0, ro, half), at(a1, ro, half), at(a1, ro, -half)], "tyre")
+			quad([at(a0, ri, half), at(a0, ri, -half), at(a1, ri, -half), at(a1, ri, half)], "tyre")
+			quad([at(a0, ri, half), at(a1, ri, half), at(a1, ro, half), at(a0, ro, half)], "tyre")
+			quad([at(a0, ro, -half), at(a1, ro, -half), at(a1, ri, -half), at(a0, ri, -half)], "tyre")
+		for angle in (0.0, math.pi / 3, 2 * math.pi / 3):
+			r = radius - thick
+			p = (0.0, cy + r * math.sin(angle), cz + r * math.cos(angle))
+			q = (0.0, cy - r * math.sin(angle), cz - r * math.cos(angle))
+			beam(p, q, 0.08, "chrome")
+		beam((-0.6, cy, cz), (0.6, cy, cz), 0.35, "chrome", across=(0.0, 1.0, 0.0))
+
+	wheel(-5.0)
+	wheel(5.0)
+	bb, seat, head_top, head_low = (0.0, -1.7, 0.0), (0.0, 3.0, -0.8), (0.0, 3.2, 3.9), (0.0, 2.4, 4.2)
+	beam(bb, (0.0, 3.6, -1.0), 0.3, "frame")        # seat tube
+	beam(seat, head_top, 0.3, "frame")              # top tube
+	beam(bb, head_low, 0.3, "frame")                # down tube
+	beam(bb, (0.0, -1.7, -5.0), 0.22, "frame")      # chain stays
+	beam(seat, (0.0, -1.7, -5.0), 0.22, "frame")    # seat stays
+	beam(head_top, (0.0, -1.7, 5.0), 0.25, "frame")  # fork
+	beam(head_top, (0.0, 4.6, 3.6), 0.2, "chrome")  # stem
+	beam((-2.2, 4.6, 3.6), (2.2, 4.6, 3.6), 0.2, "chrome", across=(0.0, 1.0, 0.0))
+	beam((-1.2, -1.7, 0.0), (1.2, -1.7, 0.0), 0.2, "chrome", across=(0.0, 1.0, 0.0))
+	beam((0.0, 3.8, -2.2), (0.0, 3.8, 0.2), 0.6, "saddle")
+
+	lines = ["# Luanti", "# SPDX-License-Identifier: LGPL-2.1-or-later",
+		"# Copyright (C) 2026 The Luanti Contributors",
+		"# Generated by util/content/generate_luanti_web_textures.py: do not edit.",
+		"o bicycle"]
+	for x, y, z in verts:
+		lines.append("v {:.2f} {:.2f} {:.2f}".format(x, y, z))
+	names = list(SWATCH)
+	for name in names:
+		u, v = SWATCH[name]
+		lines.append("vt {:.3f} {:.3f}".format(u, v))
+	normals: dict[str, int] = {}
+	face_normals = []
+	for _, _, (nx, ny, nz) in faces:
+		key = "{:.3f} {:.3f} {:.3f}".format(nx, ny, nz)
+		if key not in normals:
+			normals[key] = len(normals) + 1
+			lines.append("vn " + key)
+		face_normals.append(normals[key])
+	lines.append("s off")
+	for (corners, material, _), n in zip(faces, face_normals):
+		t = names.index(material) + 1
+		lines.append("f " + " ".join("{}/{}/{}".format(c, t, n) for c in corners))
+	return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------------
 # Tool inventory icons (16x16)
 # --------------------------------------------------------------------------
 
@@ -1884,6 +2155,18 @@ def generate(root: pathlib.Path) -> list[pathlib.Path]:
 		emit(maps / name, factory())
 	for name, factory in ARENA_TEXTURES.items():
 		emit(maps / name, factory())
+	for name, factory in CASCADE_MAP_TEXTURES.items():
+		emit(maps / name, factory())
+	emit(maps / "lw_waterfall.png",
+		filmstrip([waterfall_frame(i) for i in range(WATERFALL_FRAMES)]))
+
+	cascade = game / "mods" / "lw_cascade"
+	for name, factory in CASCADE_TEXTURES.items():
+		emit(cascade / "textures" / name, factory())
+	model = cascade / "models" / "lw_bicycle.obj"
+	model.parent.mkdir(parents=True, exist_ok=True)
+	model.write_text(bicycle_obj(), encoding="utf-8")
+	written.append(model)
 
 	tools = game / "mods" / "lw_tools" / "textures"
 	for name, factory in TOOL_TEXTURES.items():

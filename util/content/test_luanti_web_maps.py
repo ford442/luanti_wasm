@@ -137,6 +137,8 @@ def snow_landmarks(schem) -> dict:
 			maps.SHAFT_Z0 + 1 + maps.SHAFT_TOP - maps.SHORTCUT_Y),
 		"tunnel south mouth": (19, maps.SHORTCUT_Y, z0),
 		"tunnel north mouth": (19, maps.SHORTCUT_Y, z1),
+		# Where the waterfall cascade's spur leaves, past the south mouth.
+		"south edge, onto the cascade spur": (19, maps.SHORTCUT_Y, 0),
 	}
 
 
@@ -326,6 +328,29 @@ def mirror_landmarks() -> dict:
 	}
 
 
+def cascade_landmarks() -> dict:
+	t = maps.CASCADE_TIERS
+	ex = maps.CASCADE_PATH_EAST_X[0] + 1
+	wx = maps.CASCADE_PATH_WEST_X[0] + 1
+	lo = maps.CASCADE_LOOKOUT
+	marks = {
+		"landing at the causeway": maps.CASCADE_SPAWN,
+		"mushroom grove": (6, t[0]["top"] + 1, 45),
+		"foot of the falls": (26, t[0]["top"] + 1, 40),
+		"first terrace": (ex, t[1]["top"] + 1, t[1]["z0"] + 1),
+		"second terrace": (ex, t[2]["top"] + 1, t[2]["z0"]),
+		"on the lower bridge": (19, t[2]["top"] + 2, maps.CASCADE_BRIDGES[0][1]),
+		"west bank of the second terrace": (13, t[2]["top"] + 1, 26),
+		"third terrace, under the hanging flowers": (30, t[3]["top"] + 1, 20),
+		"spring terrace": (wx, t[4]["top"] + 1, 12),
+		"on the spring bridge": (19, t[4]["top"] + 2, maps.CASCADE_BRIDGES[1][1]),
+		"the lookout": ((lo["x0"] + lo["x1"]) // 2, t[4]["top"] + 1, lo["z0"] + 1),
+	}
+	for index, (x, y, z, _) in enumerate(maps.CASCADE_RACKS):
+		marks[f"beside bike rack {index + 1}"] = (x, y, z - 1)
+	return marks
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -343,6 +368,7 @@ LANDMARKS = {
 	"map_concert_arena": lambda schem: concert_landmarks(),
 	"map_laser_serpent": lambda schem: serpent_landmarks(),
 	"map_mirror_hall": lambda schem: mirror_landmarks(),
+	"map_waterfall_cascade": lambda schem: cascade_landmarks(),
 }
 
 # Both arenas' trusses, for the checks that hold for either:
@@ -933,6 +959,85 @@ def test_mirror_gallery_crystals_chase_round_it() -> None:
 		sorted(i % 8 for i in range(len(controllers))), "the gallery's chase has gaps")
 
 
+def test_cascade_falls_land_in_pools() -> None:
+	"""Every fall is a sheet from the stream above down to a pool, and the
+	streams it joins are water all the way to the lip."""
+	world = World(maps.schematics()["map_waterfall_cascade"])
+	x0, x1 = maps.CASCADE_RIVER_X
+	for lower, upper in zip(maps.CASCADE_TIERS, maps.CASCADE_TIERS[1:]):
+		z = lower["z0"]
+		for x in range(x0, x1 + 1):
+			for y in range(lower["top"] + 1, upper["top"] + 1):
+				assert_true(world.at(x, y, z) == maps.WATERFALL,
+					f"cascade: no falling water at {(x, y, z)}")
+			assert_true(world.at(x, lower["top"], z) == maps.WATER,
+				f"cascade: the fall at {(x, z)} does not land in a pool")
+			assert_true(world.at(x, upper["top"], upper["z1"]) == maps.WATER,
+				f"cascade: the stream above the fall at {(x, z)} is not water at the lip")
+	s = maps.CASCADE_SPRING
+	for x in range(s["x0"], s["x1"] + 1):
+		assert_true(world.at(x, s["y1"], s["z"]) == maps.WATERFALL,
+			"cascade: the spring has no sheet")
+		assert_true(world.at(x, maps.CASCADE_TIERS[-1]["top"], s["z"]) == maps.WATER,
+			"cascade: the spring does not land in the top pool")
+
+
+def test_cascade_ambience_is_where_it_belongs() -> None:
+	"""lw_maps' mist is at the foot of a fall, its petals under flowers, and
+	its eruption out of the crater, under open sky."""
+	harness = run_lua_harness()
+	if harness is None:
+		return
+	world = World(maps.schematics()["map_waterfall_cascade"])
+	mist = [box for kind, box in harness["ambient"]["waterfall_cascade"] if kind == "mist"]
+	assert_true(len(mist) == len(maps.CASCADE_TIERS), "cascade: one mist per fall and the spring")
+	for (ax, ay, az), (bx, by, bz) in mist:
+		cells = [(x, y, z) for x in range(ax, bx + 1) for y in range(ay - 1, by + 1)
+			for z in range(az, bz + 1)]
+		assert_true(any(world.at(*c) == maps.WATERFALL for c in cells),
+			f"cascade: the mist at {(ax, ay, az)} is not at a fall")
+		assert_true(any(world.at(x, ay - 1, z) == maps.WATER
+			for x in range(ax, bx + 1) for z in range(az, bz + 1)),
+			f"cascade: the mist at {(ax, ay, az)} is not over a pool")
+	for (ax, ay, az), (bx, by, bz) in harness["showers"]["waterfall_cascade"]:
+		flowers = [(x, y, z) for x in range(ax, bx + 1) for y in range(ay, by + 2)
+			for z in range(az, bz + 1) if world.at(x, y, z) == maps.MORNING_GLORY]
+		assert_true(len(flowers) >= 3,
+			f"cascade: the petal shower at {(ax, ay, az)} has no morning glories over it")
+	x, y, z = harness["eruption"]["waterfall_cascade"]
+	assert_true((x, y, z) == maps.CASCADE_CRATER,
+		"lw_maps' eruption is not the generator's CASCADE_CRATER")
+	assert_true(world.at(x, y - 1, z) == maps.LAVA,
+		f"cascade: the eruption at {(x, y, z)} is not over the crater's lava")
+	for above in range(y, world.sy):
+		assert_true(world.at(x, above, z) in ("air", maps.FLICKER),
+			f"cascade: {world.at(x, above, z)} over the crater")
+
+
+def test_cascade_racks_and_geodes_are_on_the_way() -> None:
+	"""Every bike rack and every geode can be reached from the path."""
+	world = World(maps.schematics()["map_waterfall_cascade"])
+	reach = world.reachable(maps.CASCADE_SPAWN)
+	racks = [(x, y, z) for x in range(world.sx) for y in range(world.sy)
+		for z in range(world.sz) if world.at(x, y, z) == maps.BIKE_RACK]
+	assert_true(len(racks) == len(maps.CASCADE_RACKS), "cascade: a rack is missing")
+	for x, y, z in racks:
+		assert_true(world.solid(x, y - 1, z), f"cascade: the rack at {(x, y, z)} floats")
+		assert_true(any((x + dx, y, z + dz) in reach
+			for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1))),
+			f"cascade: nobody can walk up to the rack at {(x, y, z)}")
+	geodes = [(x, y, z) for x in range(world.sx) for y in range(world.sy)
+		for z in range(world.sz) if world.at(x, y, z).startswith("lw_cascade:geode_")]
+	colors = {world.at(*g) for g in geodes}
+	assert_true(len(geodes) >= 9 and colors == set(maps.GEODES),
+		f"cascade: {len(geodes)} geodes in {sorted(colors)}; want nine or more of all three")
+	for x, y, z in geodes:
+		# Within reach: someone stands beside it with it at their feet or head.
+		near = any((x + dx, y - dy, z + dz) in reach
+			for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)) for dy in (0, 1, 2))
+		assert_true(near, f"cascade: the geode at {(x, y, z)} is out of reach of the path")
+
+
 def test_committed_files_match_the_generator() -> None:
 	"""A regenerated tree must be an empty diff, like every other asset here."""
 	built = maps.schematics()
@@ -1089,8 +1194,10 @@ def test_budget() -> None:
 	assert_true(total < 64 * 1024,
 		f"the map schematics are {total / 1024:.1f} KiB; budget is 64 KiB")
 	textures = sorted((LW_MAPS / "textures").glob("*.png"))
-	assert_true(len(textures) == 15,
-		f"lw_maps ships {len(textures)} textures, expected 15")
+	# Fifteen before the waterfall cascade, whose falls, glowing plants,
+	# morning glories and particles (petals, flowers, mist) added seven.
+	assert_true(len(textures) == 22,
+		f"lw_maps ships {len(textures)} textures, expected 22")
 	art = sum(path.stat().st_size for path in textures)
 	assert_true(art < 16 * 1024,
 		f"lw_maps textures are {art / 1024:.1f} KiB; budget is 16 KiB")
@@ -1216,7 +1323,8 @@ def run_lua_harness():
 		if result.returncode != 0:
 			raise SystemExit(result.stdout + result.stderr)
 		report = {"nodes": set(), "maps": [], "entities": [], "amps": {}, "tracks": {},
-			"rods": {}, "coil": {}, "mouth": {}, "walk": {}}
+			"rods": {}, "coil": {}, "mouth": {}, "walk": {}, "ambient": {}, "showers": {},
+			"eruption": {}}
 		for line in result.stdout.splitlines():
 			fields = line.split()
 			if not fields:
@@ -1239,6 +1347,16 @@ def run_lua_harness():
 				report["walk"][fields[1]] = tuple(int(v) for v in fields[2:6])
 			elif fields[0] == "TRACK":
 				report["tracks"][fields[1]] = tuple(int(v) for v in fields[2:7])
+			elif fields[0] == "AMBIENT":
+				values = [int(v) for v in fields[3:9]]
+				report["ambient"].setdefault(fields[1], []).append(
+					(fields[2], (tuple(values[:3]), tuple(values[3:]))))
+			elif fields[0] == "SHOWER":
+				values = [int(v) for v in fields[2:8]]
+				report["showers"].setdefault(fields[1], []).append(
+					(tuple(values[:3]), tuple(values[3:])))
+			elif fields[0] == "ERUPT":
+				report["eruption"][fields[1]] = tuple(int(v) for v in fields[2:5])
 			elif fields[0] == "ENTITY":
 				report["entities"].append((fields[1], fields[2],
 					tuple(int(v) for v in fields[3:6])))

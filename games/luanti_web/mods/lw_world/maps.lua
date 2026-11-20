@@ -24,9 +24,11 @@
 --  (west-southwest)  (southwest)         rainbow storm
 --                                        (southeast)
 --
--- and two spurs off islands rather than the plaza, whose faces are full: the
--- laser serpent west of the smoke caldera, out of its basalt tube, and the
--- mirror hall east of the crystal bazaar, out of the end of its arcade.
+-- and three spurs off islands rather than the plaza, whose faces are full: the
+-- laser serpent west of the smoke caldera, out of its basalt tube, the mirror
+-- hall east of the crystal bazaar, out of the end of its arcade, and the
+-- waterfall cascade south of the snowy mountain, out of its tunnel's south
+-- mouth.
 --
 -- Each map is one island with its own beach, in one sea, joined to the plaza
 -- by a paved causeway with a themed gate at the hub end. Fly is on for
@@ -314,6 +316,23 @@ function maps.causeways(api)
 			sign = "East: the mirror hall. A vault of mirror tiles at " ..
 				"twilight, a crystal skull under it, a gallery whose crystals " ..
 				"chase round the hall, and lasers circling the skull.",
+		},
+		{
+			-- A spur out of the south mouth of the snowy mountain's tunnel
+			-- (local 18..21, 0), straight south over the water onto the
+			-- cascade's landing at the foot of the falls. The gate stands on
+			-- the mountain's south beach, in front of the tunnel.
+			map = "waterfall_cascade",
+			from = "snow_mountain",
+			legs = {
+				{x0 = -2, z0 = -85, x1 = 0, z1 = -77},
+			},
+			gate = {x = -1, z = -76},
+			post = "lw_maps:glow_cap",
+			sign = "South: the waterfall cascade. A glowing river falls down " ..
+				"five terraces past giant mushrooms; petals rain from the " ..
+				"clouds and a volcano erupts flowers. Ride the bikes until they " ..
+				"break, and dig the geodes for gems you can fuse.",
 		},
 	}
 end

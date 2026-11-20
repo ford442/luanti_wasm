@@ -29,9 +29,12 @@ QA sandbox and this game is not a replacement for it.
    (west)            |       |     |                (east)
                      |       |     '---------.
                      |  snow mountain        |
-                     |    (south)            |
- lighthouse tide ----'                       '--- rainbow storm
-  (southwest)                                     (southeast)
+                     |    (south)  |         |
+ lighthouse tide ----'             |         '--- rainbow storm
+  (southwest)                      |              (southeast)
+                          waterfall cascade
+                       (far south, through the
+                        mountain's tunnel)
 
  cabaret club (west-southwest): west of the lighthouse, by its own causeway
  from the plaza's south-west corner
@@ -39,6 +42,9 @@ QA sandbox and this game is not a replacement for it.
  Weeks on Fire: the laser serpent is a spur off the smoke caldera, out of its
  basalt tube; the mirror hall is a spur off the crystal bazaar, out of the
  end of its arcade
+
+ waterfall cascade: a spur off the snow mountain, out of the south mouth of
+ its tunnel
 ```
 
 The plaza is the hub. The showcase tour runs north from it; ten causeways
@@ -71,8 +77,12 @@ plaza's south-west corner), so none of them crosses the tour.
    Rubella and Lillith perform. Two more islands are from Weeks on Fire: a
    laser serpent coiled on a night ash field, whose beams sweep the walk past
    it in a pattern you change at its console, and a mirror hall with a crystal
-   skull under a vault of mirror tiles and a gallery of chasing crystals. Walk
-   a causeway or use `/maps`. Full
+   skull under a vault of mirror tiles and a gallery of chasing crystals.
+   Beyond the snow mountain, through its tunnel, is a waterfall cascade at
+   misty twilight: five tiers of glowing falls under clouds hung with
+   morning glories that shed petals, glowing mushrooms and trees, a volcano
+   that erupts flowers, bikes to ride until they break down, and geodes that
+   give gems you can fuse and push about. Walk a causeway or use `/maps`. Full
    footprints, spawns and intended time of day are in
    [`docs/maps.md`](docs/maps.md).
 
@@ -86,6 +96,7 @@ plaza's south-west corner), so none of them crosses the tour.
 | `lw_amps` | stage amp cabs that play a song as a left/right pair of positional mono sources, `/amp`, the song events the director dances to, map stages and playlists, and the cabaret's song slot (see `docs/amps.md`) |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
 | `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere and storms (rain, lightning, thunder), the laser shows and their patterns, the HOA memo boards, the optional organ slot, `/maps` |
+| `lw_cascade` | the waterfall cascade's bike racks and bikes (which break down, and are never saved), its geodes, the gems they give and fusing them, gems on the ground you can push, `/bike`, `/gems` |
 | `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp, Laser Wand, Ember Tool |
 | `lw_world` | the authored world and its schematics, stamped onto a singlenode mapgen; `/lw_schem` authoring tools |
 
@@ -116,6 +127,8 @@ plaza's south-west corner), so none of them crosses the tour.
 * **Ember Tool** — use lights an ember on the pointed face. It burns, sputters and goes out by itself after about 7 s. Use it on an ember, or sneak+use, to put it out. No damage and no spread.
 * Punch an **HOA memo** board (the laser serpent and the mirror hall each have one) to read the next notice.
 * Punch the **serpent console** at the end of the laser serpent's walk to change the beams' pattern: coil, sweep, fan.
+* On the **waterfall cascade**, punch or right click a **bike** at a bike rack to ride it: forward pedals, back brakes, jump hops, steer by looking, sneak to get off. Every bike breaks down after a while, and its rack takes 45 s to get another, so find the next rack. `/bike` shows how your ride is going, or where the nearest bike is.
+* Dig a **geode** on the waterfall cascade for a red, yellow or blue **gem**. Right click with a gem to fuse it with one in your pockets (red + yellow = orange, and so on, up to a prism), or drop gems with `Q` and punch or walk them into each other to fuse them on the ground. Right click a gem on the ground to pick it up. `/gems` lists the recipes.
 * Punch the red reel button on the east theater pedestal to cycle reels without opening the inventory.
 * Right click a theater seat to sit in it facing the screen (or `/sit` anywhere). Jump to stand up.
 * Punch a chandelier to dim or raise the house lights.
@@ -123,7 +136,8 @@ plaza's south-west corner), so none of them crosses the tour.
   lights back up when it is off.
 
 Fly, fast and noclip are on for everyone. There is no damage, no hunger, no
-combat and no crafting.
+combat and no crafting: the cascade's gems fuse by right click or on the
+ground, not in a craft grid.
 
 Visitors have a body: `lw_dance` gives the player the classic character mesh,
 which is what `set_animation` and the dance poses act on (and what the theater
