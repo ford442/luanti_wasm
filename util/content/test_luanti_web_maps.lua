@@ -1739,6 +1739,100 @@ core._gametime = 0
 core._spawners = {}
 
 --------------------------------------------------------------------------
+-- The Christmas islands: snow round the visitor, embers off the burning
+-- tree, the Weeks on Fire tree's laser coil, and the holiday memo board
+--------------------------------------------------------------------------
+
+local xmas = lw_maps.by_id["christmas"]
+local wof_xmas = lw_maps.by_id["wof_christmas"]
+assert_true(xmas ~= nil and wof_xmas ~= nil, "both Christmas islands are registered")
+assert_true(xmas.amps == nil and wof_xmas.amps == nil, "neither plays a song")
+assert_true(lw_maps.AMBIENT_KINDS.snow.attached, "snow falls round the visitor, not the island")
+
+-- For the Python half: the burning tree's embers, its show's geometry.
+for _, box in ipairs(wof_xmas.ambient) do
+	assert_true(lw_maps.AMBIENT_KINDS[box.kind] ~= nil, "ambient kind " .. box.kind .. " exists")
+	if box.min then
+		print(("AMBIENT %s %s %d %d %d %d %d %d"):format(wof_xmas.id, box.kind,
+			box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z))
+	end
+end
+local xcoil = wof_xmas.lasers.coil
+print(("COIL %s %d %d %.4f %d %d %.4f %.6f"):format(wof_xmas.id, xcoil.x, xcoil.z,
+	xcoil.radius, xcoil.y0, xcoil.rise, xcoil.turns, xcoil.start))
+local xwalk = wof_xmas.lasers.walk
+print(("WALK %s %d %d %d %d"):format(wof_xmas.id, xwalk.x0, xwalk.x1, xwalk.z, xwalk.y))
+local xtrack = wof_xmas.lasers.track
+print(("TRACK %s %d %d %d %d %d"):format(wof_xmas.id, xtrack.x0, xtrack.z0, xtrack.x1,
+	xtrack.z1, xtrack.y))
+
+-- Snow: one spawner attached to the visitor on either island, embers as well
+-- on the burning one, and nothing left once they walk off.
+local function snow_for(name)
+	local count = 0
+	for _, def in pairs(core._spawners) do
+		if (def.time or 0) == 0 and def.playername == name and def.texture == "lw_mist.png"
+				and def.attached == player then
+			count = count + 1
+		end
+	end
+	return count
+end
+core._spawners = {}
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+assert_eq(snow_for("visitor"), 0, "no snow on the plaza")
+player:set_pos(xmas.spawn)
+step(1.0)
+assert_eq(player:_ratio(), xmas.day_night_ratio, "it is twilight in the village")
+assert_eq(snow_for("visitor"), 1, "it snows round a visitor to the village")
+step(1.0)
+assert_eq(persistent_for("visitor"), 1, "staying keeps one snowfall, not a pile")
+player:set_pos(wof_xmas.spawn)
+step(1.0)
+assert_eq(snow_for("visitor"), 1, "and on the Weeks on Fire island")
+assert_eq(persistent_for("visitor"), #wof_xmas.ambient, "with embers off the tree")
+for _, def in pairs(core._spawners) do
+	if not def.attached then
+		assert_true(lw_maps.at(def.minpos) == wof_xmas and lw_maps.at(def.maxpos) == wof_xmas,
+			"the embers are on the island")
+		assert_true(def.minvel.y > 0, "embers rise")
+	end
+end
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+assert_eq(persistent_for("visitor"), 0, "walking off stops the snow")
+
+-- The show: the coil first, the console switches to sweep and back.
+assert_eq(lw_maps.laser_pattern(wof_xmas), "coil", "the lasers start spiralling up the tree")
+player:set_pos(wof_xmas.spawn)
+step(0.5)
+assert_eq(live(lw_maps.show_objects(wof_xmas.id)), #wof_xmas.lasers.colors,
+	"the tree's lasers run while someone is there")
+local console_at = lw_maps.to_world(wof_xmas, {x = 18, y = 5, z = 3})
+assert_eq(lw_maps.punch_console(console_at, player), "sweep", "the stage console switches the beams")
+assert_eq(lw_maps.punch_console(console_at, player), "coil", "and back")
+player:set_pos({x = 0, y = 10, z = -14})
+step(0.5)
+assert_eq(live(lw_maps.show_objects(wof_xmas.id)), 0, "the lasers stop with the last visitor")
+
+-- The holiday board reads its own pile, every memo once.
+local holiday = core.registered_nodes["lw_maps:hoa_holiday_memo"]
+assert_true(holiday and holiday.on_punch, "the holiday board reads")
+local hboard = {x = 109, y = 10, z = -4}
+local seen, count = {}, 0
+for _ = 1, #lw_maps.HOA_HOLIDAY_MEMOS do
+	holiday.on_punch(hboard, nil, player)
+	local text = core.get_meta(hboard):get_string("infotext")
+	assert_true(text:find("HOLIDAY", 1, true) ~= nil, "a holiday board shows holiday memos")
+	if not seen[text] then
+		seen[text] = true
+		count = count + 1
+	end
+end
+assert_eq(count, #lw_maps.HOA_HOLIDAY_MEMOS, "every holiday memo once before a repeat")
+
+--------------------------------------------------------------------------
 -- Node list, for the Python half
 --------------------------------------------------------------------------
 

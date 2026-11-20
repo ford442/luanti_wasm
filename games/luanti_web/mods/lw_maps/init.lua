@@ -471,10 +471,31 @@ lw_maps.HOA_MEMOS = {
 local MEMO_HINT = "HOA Memo (punch to read)"
 local MEMO_BOX = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0.5, -0.4375}}
 
+-- The HOA's holiday notices, on the Christmas islands' boards (the red and
+-- green bordered lw_maps:hoa_holiday_memo). Same rules, its own pile.
+lw_maps.HOA_HOLIDAY_MEMOS = {
+	"HOA HOLIDAY MEMO 1: Trees may be decorated, lit, or on fire. Not more than two of these at once.",
+	"HOA HOLIDAY MEMO 2: Lasers are permitted as tinsel between 6 pm and the heat death of the " ..
+		"universe.",
+	"HOA HOLIDAY MEMO 3: Presents left under the burning tree are considered pre-wrapped " ..
+		"in ash. No refunds.",
+	"HOA HOLIDAY MEMO 4: The cabaret's Christmas revue requires Form 12-D (Dancing, Seasonal), " ..
+		"in triplicate, in glitter.",
+	"HOA HOLIDAY MEMO 5: Reindeer must be parked within the painted lines. The sleigh is not " ..
+		"a compact.",
+	"HOA HOLIDAY MEMO 6: Snow is a shared amenity. Do not take more than your allotted flakes.",
+	"HOA HOLIDAY MEMO 7: Carolling is limited to four (4) verses and zero (0) key changes.",
+	"HOA HOLIDAY MEMO 8: The crystal skull's Santa hat has been confiscated pending review.",
+	"HOA HOLIDAY MEMO 9: Mistletoe in the mirror hall counts once per reflection. Please be " ..
+		"reasonable.",
+	"HOA HOLIDAY MEMO 10: Riley, the chimney is not a stage either.",
+}
+
 -- The next memo on the board at `pos`, which it now shows; told to `player`
--- too, when there is one.
-function lw_maps.read_memo(pos, player)
-	local memos = lw_maps.HOA_MEMOS
+-- too, when there is one. `memos` is the board's pile, the year-round one by
+-- default.
+function lw_maps.read_memo(pos, player, memos)
+	memos = memos or lw_maps.HOA_MEMOS
 	local meta = core.get_meta(pos)
 	local index = meta:get_int("memo")
 	if index == 0 then
@@ -490,29 +511,38 @@ function lw_maps.read_memo(pos, player)
 	return text
 end
 
-register("hoa_memo", {
-	description = "HOA Memo\nPunch or right click to read the next notice",
-	drawtype = "nodebox",
-	tiles = {"lw_frame.png", "lw_frame.png", "lw_frame.png", "lw_frame.png",
-		"lw_frame.png", "lw_poster.png^[multiply:#f4ecd0"},
-	paramtype = "light",
-	paramtype2 = "facedir",
-	sunlight_propagates = true,
-	light_source = 3,
-	on_place = core.rotate_node,
-	node_box = MEMO_BOX,
-	selection_box = MEMO_BOX,
-	groups = {choppy = 2, oddly_breakable_by_hand = 2},
-	on_construct = function(pos)
-		core.get_meta(pos):set_string("infotext", MEMO_HINT)
-	end,
-	on_punch = function(pos, _, puncher)
-		lw_maps.read_memo(pos, puncher)
-	end,
-	on_rightclick = function(pos, _, clicker)
-		lw_maps.read_memo(pos, clicker)
-	end,
-})
+-- A notice board: `poster` is its face, `memos` the pile it reads from.
+local function register_memo_board(name, description, poster, memos)
+	register(name, {
+		description = description .. "\nPunch or right click to read the next notice",
+		drawtype = "nodebox",
+		tiles = {"lw_frame.png", "lw_frame.png", "lw_frame.png", "lw_frame.png",
+			"lw_frame.png", poster},
+		paramtype = "light",
+		paramtype2 = "facedir",
+		sunlight_propagates = true,
+		light_source = 3,
+		on_place = core.rotate_node,
+		node_box = MEMO_BOX,
+		selection_box = MEMO_BOX,
+		groups = {choppy = 2, oddly_breakable_by_hand = 2},
+		on_construct = function(pos)
+			core.get_meta(pos):set_string("infotext", MEMO_HINT)
+		end,
+		on_punch = function(pos, _, puncher)
+			lw_maps.read_memo(pos, puncher, lw_maps[memos])
+		end,
+		on_rightclick = function(pos, _, clicker)
+			lw_maps.read_memo(pos, clicker, lw_maps[memos])
+		end,
+	})
+end
+
+register_memo_board("hoa_memo", "HOA Memo", "lw_poster.png^[multiply:#f4ecd0", "HOA_MEMOS")
+-- The holiday board: the same notice with a red and green border.
+register_memo_board("hoa_holiday_memo", "HOA Holiday Memo",
+	"lw_poster.png^[multiply:#f4ecd0^[fill:32x2:0,0:#c81e32^[fill:32x2:0,30:#c81e32" ..
+		"^[fill:2x32:0,0:#1e8a3c^[fill:2x32:30,0:#1e8a3c", "HOA_HOLIDAY_MEMOS")
 
 -- The serpent console, on the dais at the far end of the walk: punch it (or
 -- right click it) and the laser show on its map changes pattern, for
@@ -675,6 +705,76 @@ register("cloud", {
 })
 
 --------------------------------------------------------------------------
+-- Christmas: the Christmas village and the Weeks on Fire Christmas
+--------------------------------------------------------------------------
+
+-- Palette tiles again, re-tinted, with ribbons and stripes painted on by
+-- `[fill`, so the two Christmas islands add no textures either.
+
+-- Wrapped presents: a box a little smaller than a node with a ribbon round
+-- it both ways.
+local PRESENT_BOX = {type = "fixed", fixed = {-0.4, -0.5, -0.4, 0.4, 0.25, 0.4}}
+local RIBBON = "^[fill:2x16:7,0:%s^[fill:16x2:0,7:%s"
+for _, present in ipairs({
+	{"red", "Red", "#c81e32", "#ffd84a"},
+	{"green", "Green", "#1e8a3c", "#f4f0e8"},
+	{"blue", "Blue", "#2a4ec8", "#e8eef8"},
+	{"gold", "Gold", "#e0b030", "#c81e32"},
+	{"violet", "Violet", "#8a2ad8", "#7ff0ff"},
+}) do
+	local name, label, paper, ribbon = present[1], present[2], present[3], present[4]
+	register("present_" .. name, {
+		description = label .. " Present",
+		drawtype = "nodebox",
+		tiles = {"lw_wool.png^[multiply:" .. paper .. RIBBON:format(ribbon, ribbon)},
+		paramtype = "light",
+		node_box = PRESENT_BOX,
+		selection_box = PRESENT_BOX,
+		groups = {snappy = 3, oddly_breakable_by_hand = 3},
+	})
+end
+
+-- Candy cane: white with red bands, for the arches and the path's posts.
+register("candy_cane", {
+	description = "Candy Cane Block",
+	tiles = {"lw_wool.png^[multiply:#f8f4f0" ..
+		"^[fill:16x3:0,0:#d01830^[fill:16x3:0,6:#d01830^[fill:16x3:0,12:#d01830"},
+	groups = {snappy = 2, oddly_breakable_by_hand = 3},
+})
+
+-- Tree baubles, lit and dark, in three colours: a lamp pair per colour, so a
+-- garland can chase round a tree and a scattering of them can twinkle under
+-- `flicker`.
+for _, bauble in ipairs({
+	{"red", "Red", "#ff3040", "#4a0c12"},
+	{"gold", "Gold", "#ffd040", "#4a3a10"},
+	{"blue", "Blue", "#50a0ff", "#122a4a"},
+}) do
+	local name, label, lit, dark = bauble[1], bauble[2], bauble[3], bauble[4]
+	register("bauble_" .. name, {
+		description = label .. " Bauble",
+		tiles = {"lw_lamp.png^[multiply:" .. lit},
+		paramtype = "light",
+		light_source = 11,
+		groups = {cracky = 3, oddly_breakable_by_hand = 3},
+	})
+	register("bauble_" .. name .. "_off", {
+		description = label .. " Bauble (dark)",
+		tiles = {"lw_lamp.png^[multiply:" .. dark},
+		groups = {cracky = 3, oddly_breakable_by_hand = 3},
+	})
+end
+
+-- The star on top of a tree: the brightest light there is.
+register("star", {
+	description = "Tree Star",
+	tiles = {"lw_gold.png^[multiply:#fff0a0"},
+	paramtype = "light",
+	light_source = 14,
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+--------------------------------------------------------------------------
 -- Lamp controllers
 --------------------------------------------------------------------------
 
@@ -703,6 +803,9 @@ lw_maps.register_lamp_pair("lw_maps:ember_block", "lw_maps:ember_block_off")
 lw_maps.register_lamp_pair("lw_maps:crystal", "lw_maps:crystal_dim")
 lw_maps.register_lamp_pair("lw_maps:glow_leaves", "lw_maps:glow_leaves_dim")
 lw_maps.register_lamp_pair("lw_maps:glow_moss", "lw_maps:glow_moss_dim")
+lw_maps.register_lamp_pair("lw_maps:bauble_red", "lw_maps:bauble_red_off")
+lw_maps.register_lamp_pair("lw_maps:bauble_gold", "lw_maps:bauble_gold_off")
+lw_maps.register_lamp_pair("lw_maps:bauble_blue", "lw_maps:bauble_blue_off")
 
 -- Light or dim whatever lamp is one node below `pos`. Only ever swaps a lamp
 -- for its own twin: if a visitor dug the lamp out, or built something else in
@@ -820,8 +923,9 @@ lw_maps.by_id = {}
 -- `playlist = <name>` in place of `song` plays the first song lw_amps has in
 -- that playlist, and nothing while it has none.
 --
--- `ambient = {{kind = "mist" | "spores", min = <local>, max = <local>}, ...}`
--- keeps a particle spawner going in each box for whoever is on the map,
+-- `ambient = {{kind = "mist" | "spores" | "embers", min = <local>, max = <local>},
+-- {kind = "snow"}, ...}` keeps a particle spawner going in each box for
+-- whoever is on the map (snow needs no box: it falls round the visitor),
 -- `showers = {period, length, colors, sources = {{min, max}, ...}}` rains
 -- petals from each source in turn, and `eruption = {at, period, offset,
 -- length, colors, rumble}` throws flowers out of `at` every `period` seconds.
@@ -1299,6 +1403,71 @@ lw_maps.register({
 	},
 })
 
+lw_maps.register({
+	id = "christmas",
+	title = "Christmas village",
+	blurb = "A snowed-in square at twilight: a tall tree whose baubles chase round " ..
+		"it in a garland, presents round its foot and a star on top, a workshop " ..
+		"cabin with a fire, a sleigh and its reindeer, a frozen pond and snowmen.",
+	-- East of the giant fruit garden, by a spur from the east end of its path.
+	size = {x = 40, y = 24, z = 40},
+	origin = {x = 103, y = BASE, z = -27},
+	spawn = {x = 103, y = BASE + 4, z = -7},
+	-- Blue twilight, a little fog: dark enough for the lights, light enough
+	-- that the snow is still white.
+	day_night_ratio = 0.24,
+	sky = lw_maps.sky({
+		sky = "#1e2c5e", horizon = "#8aa0d8",
+		night_sky = "#0c1434", night_horizon = "#3a4a80", indoors = "#141c40",
+		sun_tint = "#ffd0a0", moon_tint = "#a0b8ff",
+		fog = 120, fog_start = 0.5,
+	}),
+	-- Snow falling round whoever is there.
+	ambient = {{kind = "snow"}},
+})
+
+lw_maps.register({
+	id = "wof_christmas",
+	title = "Weeks on Fire Christmas",
+	blurb = "Weeks on Fire: Christmas on a night of snow and ash. A tree on fire and " ..
+		"festive anyway, lasers spiralling up it, a mirror colonnade, a cabaret " ..
+		"stage with a holiday revue set, a mirror ball and the HOA's holiday memos.",
+	-- South of the laser serpent, by a spur from the south side of its field.
+	size = {x = 36, y = 22, z = 40},
+	origin = {x = -141, y = BASE, z = -27},
+	spawn = {x = -123, y = BASE + 4, z = 12},
+	-- Magenta and red night in a light fog: the embers, the neon and the
+	-- beams are the brightest things there.
+	day_night_ratio = 0.12,
+	sky = lw_maps.sky({
+		sky = "#2a0830", horizon = "#b01c5c",
+		night_sky = "#140418", night_horizon = "#5a0c3a", indoors = "#1a0620",
+		sun_tint = "#ff4080", moon_tint = "#a040ff",
+		fog = 88, fog_start = 0.45,
+	}),
+	-- Snow round the visitor; embers rising off the burning tree
+	-- (WOF_XMAS_TREE in the generator).
+	ambient = {
+		{kind = "snow"},
+		{kind = "embers", min = {x = 14, y = 8, z = 20}, max = {x = 22, y = 16, z = 28}},
+	},
+	-- The serpent's show, on a tree: `coil` runs the emitters up a helix
+	-- round the tree (WOF_XMAS_COIL) with the beams on the dance floor, and
+	-- `sweep` races them round the pylon caps. The console on the stage
+	-- switches between them.
+	lasers = {
+		patterns = {"coil", "sweep"},
+		track = {x0 = 2, z0 = 2, x1 = 33, z1 = 37, y = 15},
+		target = {x = 18, y = 4, z = 24, radius = 8},
+		coil = {x = 18, z = 24, radius = 7, y0 = 5, rise = 11, turns = 3,
+			start = math.pi / 2},
+		walk = {x0 = 9, x1 = 26, z = 11, y = 4, wave = 1.5},
+		colors = {"#ff2050", "#40ff80", "#ff40c8", "#ffd040"},
+		lap_beats = 32,
+		bpm = 120,
+	},
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------
@@ -1538,6 +1707,33 @@ lw_maps.AMBIENT_KINDS = {
 		texture = "lw_mist.png^[multiply:#7affd8",
 		glow = 13,
 	},
+	-- Snow, falling slowly round the visitor. Like the storm's rain it is
+	-- attached to them, a box over their head rather than over the island, so
+	-- the worker only draws the flakes one person can see; its box is the
+	-- kind's own, relative to the visitor, and the registry entry names no
+	-- box at all.
+	snow = {
+		attached = true,
+		amount = 24,
+		minpos = {x = -8, y = 3, z = -8}, maxpos = {x = 8, y = 7, z = 8},
+		minvel = {x = -0.35, y = -1.4, z = -0.25}, maxvel = {x = 0.35, y = -0.9, z = 0.25},
+		minexptime = 4, maxexptime = 6,
+		minsize = 0.8, maxsize = 1.8,
+		collisiondetection = true,
+		collision_removal = true,
+		texture = "lw_mist.png",
+		glow = 6,
+	},
+	-- Embers rising off something that is on fire and does not burn.
+	embers = {
+		amount = 6,
+		minvel = {x = -0.2, y = 0.8, z = -0.2}, maxvel = {x = 0.2, y = 1.6, z = 0.2},
+		minacc = {x = -0.1, y = 0, z = -0.1}, maxacc = {x = 0.1, y = 0.2, z = 0.1},
+		minexptime = 1.5, maxexptime = 3,
+		minsize = 0.6, maxsize = 1.2,
+		texture = "lw_mist.png^[multiply:#ff6a20",
+		glow = 14,
+	},
 }
 
 local ambience = {}      -- player name -> {map = id, ids = {spawner id, ...}}
@@ -1552,10 +1748,13 @@ local function start_ambient(player, map)
 	for _, box in ipairs(map.ambient) do
 		local kind = lw_maps.AMBIENT_KINDS[box.kind]
 		if kind then
-			local minpos, maxpos = local_box(map, box)
 			local def = table.copy(kind)
 			def.time = 0
-			def.minpos, def.maxpos = minpos, maxpos
+			if kind.attached then
+				def.attached = player
+			else
+				def.minpos, def.maxpos = local_box(map, box)
+			end
 			def.playername = player:get_player_name()
 			ids[#ids + 1] = core.add_particlespawner(def)
 		end
