@@ -24,7 +24,7 @@ the compositor.
 
 Layout, in the atlas the hub plaza sits in the middle of::
 
-    [ smoke caldera ]                    [ crystal bazaar ]
+    [ laser serpent ]-[ smoke caldera ]  [ crystal bazaar ]-[ mirror hall ]
     [ halloween ]------[ hub ]------[ fruit garden ]
                          |
     [ lighthouse ]  [ snow mountain ]   [ rainbow storm ]
@@ -34,7 +34,9 @@ thunder chapel mirroring it north-west, beyond the library, and a larger
 concert arena north of the Around arena, reached from its east side. The
 diagonal four, the arenas and the chapel are reached by causeways that turn
 in the open water, and the cabaret club, west of the lighthouse, by one that
-turns twice;
+turns twice. The two Weeks on Fire islands are spurs: the laser serpent off
+the mouth of the caldera's tube, the mirror hall off the end of the bazaar's
+arcade;
 lw_world/maps.lua has the legs, and games/luanti_web/docs/maps.md the recipe
 for adding a map.
 
@@ -119,6 +121,7 @@ LEAVES = "lw_maps:leaves"
 VINE = "lw_maps:vine"
 JUICE_RED = "lw_maps:juice_red"
 JUICE_GREEN = "lw_maps:juice_green"
+NEON_TUBE = "lw_maps:neon_tube"
 
 
 def wool(color: str) -> str:
@@ -131,7 +134,7 @@ def wool(color: str) -> str:
 # otherwise wall off a route and nothing would notice.
 NON_WALKABLE = frozenset({
 	AIR, WATER, COBWEB, TORCH, FIRE, VINE, HIDDEN_LIGHT, FLICKER, CHASE,
-	JUICE_RED, JUICE_GREEN,
+	JUICE_RED, JUICE_GREEN, NEON_TUBE,
 })
 
 # Nodes a player's head and chest can occupy but that are not full cubes, so
@@ -2409,6 +2412,423 @@ def build_concert_arena() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 12. Laser serpent (Weeks on Fire)
+# --------------------------------------------------------------------------
+
+# A night ash field west of the smoke caldera, reached by a spur from the
+# mouth of its basalt tube. A serpent of glowing scales coils up round a
+# basalt obelisk, its head reared out over the field towards the causeway,
+# and lw_maps' laser show (the Around arena's, given patterns) sweeps its
+# beams across the walk that runs past it. Punch the console at the far end
+# of the walk and the beams change pattern.
+#
+# 35 x 16 x 35 is 19,600 cells.
+SERPENT_SIZE = (35, 16, 35)
+# The causeway lands on the east face, on the middle of the walk.
+SERPENT_SPAWN = (34, FLOOR, 17)
+
+# The walk: packed basalt, east to west through the middle of the field, with
+# a neon tube along each edge.
+SERPENT_WALK_Z = (16, 18)
+SERPENT_WALK_X0 = 6
+# The dais at the west end, one node up, with the console on it.
+SERPENT_DAIS = dict(x0=1, x1=5, z0=13, z1=21)
+SERPENT_CONSOLE = (2, FLOOR + 1, 17)
+SERPENT_CONSOLE_STAND = (3, FLOOR + 1, 17)
+
+# The coil: a helix of scales round an obelisk north of the walk, from the
+# tail on the ground at its south side to the neck at its east side. lw_maps'
+# `coil` laser pattern runs its emitters up the same helix (laser_serpent's
+# `lasers.coil` in lw_maps/init.lua), which test_luanti_web_maps.py checks.
+COIL_CENTRE = (17, 26)
+COIL_RADIUS = 5.0
+COIL_Y0 = FLOOR
+COIL_RISE = 9                       # from the tail to the neck
+COIL_TURNS = 2.25
+COIL_START = -math.pi / 2           # the tail: due south of the obelisk
+OBELISK_RADIUS = 2.5
+OBELISK_TOP = FLOOR + 10
+
+# The head: reared out east of the coil at the top of the neck, mouth open
+# towards the causeway, a laser emitter for each eye.
+SERPENT_HEAD = dict(x0=24, x1=28, y0=COIL_Y0 + COIL_RISE - 2,
+	y1=COIL_Y0 + COIL_RISE, z0=24, z1=28)
+SERPENT_MOUTH = (30, COIL_Y0 + COIL_RISE - 2, 26)
+
+# Pylons at the corners, a laser emitter on each: the `sweep` pattern's
+# emitters race round from cap to cap.
+SERPENT_PYLONS = ((2, 2), (32, 2), (2, 32), (32, 32))
+SERPENT_PYLON_TOP = FLOOR + 9
+
+# Two ember pits south of the walk, flickering, and the HOA's notice by the
+# causeway.
+EMBER_PITS = ((11, 8), (21, 7))
+SERPENT_MEMO = (31, FLOOR + 1, 14)
+
+SERPENT_SCALE = "lw_maps:serpent_scale"
+SERPENT_SCALE_OFF = "lw_maps:serpent_scale_off"
+LASER_BLOCK = "lw_maps:laser_block"
+NEON = "lw_maps:neon_tube"
+EMBER = "lw_maps:ember_block"
+EMBER_OFF = "lw_maps:ember_block_off"
+HOA_MEMO = "lw_maps:hoa_memo"
+SERPENT_SWITCH = "lw_maps:serpent_switch"
+
+
+def coil_point(s: float) -> tuple[float, float, float]:
+	"""The coil's centre line at `s` (0 at the tail, 1 at the neck).
+
+	lw_maps.laser_frame's `coil` pattern computes the same point; keep the
+	two in step (test_serpent_emitters_ride_the_coil)."""
+	angle = COIL_START + s * COIL_TURNS * 2 * math.pi
+	return (COIL_CENTRE[0] + COIL_RADIUS * math.cos(angle),
+		COIL_Y0 + s * COIL_RISE,
+		COIL_CENTRE[1] + COIL_RADIUS * math.sin(angle))
+
+
+def coil_cells(radius: float = COIL_RADIUS) -> list[tuple[int, int, int]]:
+	"""The helix rasterised at `radius`, tail first, each cell once."""
+	cells: list[tuple[int, int, int]] = []
+	seen = set()
+	steps = 1200
+	for i in range(steps + 1):
+		s = i / steps
+		angle = COIL_START + s * COIL_TURNS * 2 * math.pi
+		cell = (int(round(COIL_CENTRE[0] + radius * math.cos(angle))),
+			int(COIL_Y0 + s * COIL_RISE),
+			int(round(COIL_CENTRE[1] + radius * math.sin(angle))))
+		if cell not in seen:
+			seen.add(cell)
+			cells.append(cell)
+	return cells
+
+
+def build_serpent_field(build: Build) -> None:
+	"""The ash field: dunes, dead trees, pylons, the walk and its dais."""
+	sx, _, sz = build.sx, build.sy, build.sz
+	build.ground(wool("dark_grey"), sub=STONE)
+	# Low dunes of pale sand in the open corners.
+	for cx, cz in ((6, 28), (30, 3), (30, 31)):
+		build.sphere(cx, SURFACE, cz, 4.0, SAND, sy=2)
+	for x, z in ((4, 10), (31, 10), (13, 32), (33, 21)):
+		height = 3 + (x + z) % 3
+		build.box(x, FLOOR, z, x, FLOOR + height - 1, z, DEAD_WOOD)
+		build.set(x + 1, FLOOR + height - 2, z, DEAD_WOOD)
+		build.set(x, FLOOR + height - 1, z - 1, DEAD_WOOD)
+	for x, z in SERPENT_PYLONS:
+		build.box(x, SURFACE, z, x, SERPENT_PYLON_TOP - 1, z, PACKED_BASALT)
+		build.set(x, SERPENT_PYLON_TOP, z, LASER_BLOCK)
+
+	# The walk, edged with neon, from the causeway to the dais.
+	z0, z1 = SERPENT_WALK_Z
+	build.box(SERPENT_WALK_X0, SURFACE, z0, sx - 1, SURFACE, z1, PACKED_BASALT)
+	build.clear(SERPENT_WALK_X0, FLOOR, z0, sx - 1, FLOOR + 3, z1)
+	for x in range(SERPENT_WALK_X0 + 1, sx - 1):
+		build.set(x, FLOOR, z0 - 1, NEON)
+		build.set(x, FLOOR, z1 + 1, NEON)
+	for x in (12, 20, 28):
+		build.set(x, FLOOR + 3, (z0 + z1) // 2, HIDDEN_LIGHT)
+
+	# The dais: one node up, a half step from the walk, the console on it.
+	d = SERPENT_DAIS
+	build.box(d["x0"], FLOOR, d["z0"], d["x1"], FLOOR, d["z1"], PACKED_BASALT)
+	build.box(d["x1"] + 1, FLOOR, z0, d["x1"] + 1, FLOOR, z1, BRICK_SLAB)
+	# Its face looks east, down the walk.
+	build.set(*SERPENT_CONSOLE, SERPENT_SWITCH, WEST)
+	for z in (d["z0"], d["z1"]):
+		build.set(d["x0"], FLOOR + 1, z, LASER_BLOCK)
+	build.set(d["x0"] + 2, FLOOR + 3, (d["z0"] + d["z1"]) // 2, HIDDEN_LIGHT)
+
+	# The HOA's notice, on a pedestal by the causeway, facing the walk.
+	mx, my, mz = SERPENT_MEMO
+	build.set(mx, my - 1, mz, PEDESTAL)
+	build.set(mx, my, mz, HOA_MEMO, SOUTH)
+
+
+def build_ember_pits(build: Build) -> None:
+	"""Shallow pits of ember blocks, ringed with basalt, each ember under a
+	flicker controller: the caldera's lava-lake trick at a campfire's size."""
+	for cx, cz in EMBER_PITS:
+		for x in range(cx - 3, cx + 4):
+			for z in range(cz - 3, cz + 4):
+				d = math.hypot(x - cx, z - cz)
+				if d <= 2.2:
+					build.set(x, SURFACE, z, EMBER_OFF)
+					if (x + 2 * z) % 3 != 0:
+						build.set(x, SURFACE, z, EMBER)
+					build.set(x, FLOOR, z, FLICKER)
+				elif d <= 3.2 and (x + z) % 2 == 0:
+					build.set(x, FLOOR, z, BASALT)
+
+
+def build_serpent(build: Build) -> list[tuple[int, int, int]]:
+	"""The obelisk, the coiled body, the neck and the head. Returns the lit
+	scales in chase order, tail to neck."""
+	cx, cz = COIL_CENTRE
+	reach = int(OBELISK_RADIUS) + 1
+	for x in range(cx - reach, cx + reach + 1):
+		for z in range(cz - reach, cz + reach + 1):
+			if math.hypot(x - cx, z - cz) <= OBELISK_RADIUS:
+				build.box(x, SURFACE, z, x, OBELISK_TOP - 1, z, PACKED_BASALT)
+	build.set(cx, OBELISK_TOP, cz, LASER_BLOCK)
+
+	# The body: an outer course of scales that light, and an inner one of
+	# dark scales behind it, so it reads as a body and not a wire.
+	outer = coil_cells(COIL_RADIUS)
+	inner = coil_cells(COIL_RADIUS - 1)
+	for x, y, z in inner:
+		build.set(x, y, z, SERPENT_SCALE_OFF)
+	for x, y, z in outer:
+		build.set(x, y, z, SERPENT_SCALE_OFF)
+
+	# Neck and head, out east of the coil's last cell.
+	h = SERPENT_HEAD
+	build.box(cx + int(COIL_RADIUS), h["y0"] + 1, cz - 1, h["x0"] - 1, h["y1"], cz + 1,
+		SERPENT_SCALE_OFF)
+	build.box(h["x0"], h["y0"], h["z0"], h["x1"], h["y1"], h["z1"], SERPENT_SCALE_OFF)
+	mx, my, mz = SERPENT_MOUTH
+	# Upper snout over an open mouth, the lower jaw under it.
+	build.box(h["x1"] + 1, my + 1, mz - 1, mx + 1, h["y1"], mz + 1, SERPENT_SCALE_OFF)
+	build.box(h["x1"] + 1, my - 1, mz - 1, mx + 1, my - 1, mz + 1, SERPENT_SCALE_OFF)
+	build.clear(h["x1"] + 1, my, mz - 1, mx + 1, my, mz + 1)
+	for z in (mz - 1, mz + 1):
+		build.set(mx + 1, my, z, BONE)
+		build.set(mx + 4, my, z, NEON)
+	# A forked neon tongue, out over the lower jaw.
+	build.box(mx + 1, my, mz, mx + 3, my, mz, NEON)
+	for z in (h["z0"], h["z1"]):
+		build.set(h["x1"], h["y1"], z, LASER_BLOCK)
+
+	# A chase controller on every outer scale with open air above it, its
+	# place along the body in param2, so light runs up the coil tail to neck.
+	lit = []
+	for x, y, z in outer:
+		if build.get(x, y + 1, z) == AIR and build.get(x, y, z) == SERPENT_SCALE_OFF:
+			build.set(x, y + 1, z, CHASE, len(lit) % 8)
+			lit.append((x, y, z))
+	return lit
+
+
+def build_laser_serpent() -> Build:
+	sx, sy, sz = SERPENT_SIZE
+	build = Build(sx, sy, sz)
+	build_serpent_field(build)
+	build_ember_pits(build)
+	build_serpent(build)
+	return build
+
+
+# --------------------------------------------------------------------------
+# 13. Mirror hall (Weeks on Fire)
+# --------------------------------------------------------------------------
+
+# A vaulted hall of mirror tiles east of the crystal bazaar, after the mirror
+# mosaic halls (Shah Cheragh) in the film: the bazaar's glass-between-ribs
+# vault, closed in and silvered, at twilight. A crystal skull on a plinth in
+# the middle, a gallery round three sides one storey up with a parapet of
+# crystals that chase round it, and three of lw_maps' lasers circling the
+# skull. Reached by a spur out of the bazaar arcade's east end.
+#
+# 31 x 18 x 31 is 17,298 cells.
+MIRROR_SIZE = (31, 18, 31)
+# The causeway lands on the west face, on the forecourt's path.
+MIRROR_SPAWN = (0, FLOOR, 15)
+
+MIRROR_PATH_Z = (14, 16)
+HALL = dict(x0=8, x1=28, z0=6, z1=24)    # outer walls
+HALL_AXIS_Z = 15
+HALL_SPRING = FLOOR + 8
+HALL_RISE = 5
+HALL_HALF = 9.5
+HALL_PORTAL_Z = (13, 17)
+
+# The gallery, one storey up round the north, east and south walls, and the
+# flight up to it along the north wall from the hall floor.
+BALCONY_Y = FLOOR + 4                       # the deck; stand on it at +1
+BALCONY_DECKS = (dict(x0=14, x1=27, z0=21, z1=23), dict(x0=14, x1=27, z0=7, z1=9),
+	dict(x0=25, x1=27, z0=7, z1=23))
+BALCONY_STAIR = dict(x0=9, x1=13, z0=22, z1=23)
+
+SKULL = (17, 15)                            # x, z of the plinth's centre
+SKULL_PLINTH = 2                            # half-width
+
+MIRROR_POOLS = (dict(x0=1, x1=6, z0=9, z1=12), dict(x0=1, x1=6, z0=18, z1=21))
+MIRROR_MEMO = (7, FLOOR + 1, 12)
+
+MIRROR = "lw_maps:mirror"
+CRYSTAL = "lw_maps:crystal"
+CRYSTAL_DIM = "lw_maps:crystal_dim"
+
+
+def hall_vault_top(z: int) -> int:
+	"""Local y of the vault's shell over row `z`: a low ellipse across the
+	hall, springing from the walls' tops."""
+	d = (z - HALL_AXIS_Z) / HALL_HALF
+	if abs(d) >= 1:
+		return HALL_SPRING
+	return HALL_SPRING + int(HALL_RISE * math.sqrt(1 - d * d) + 0.5)
+
+
+def in_balcony(x: int, z: int) -> bool:
+	return any(b["x0"] <= x <= b["x1"] and b["z0"] <= z <= b["z1"] for b in BALCONY_DECKS)
+
+
+def build_mirror_forecourt(build: Build) -> None:
+	build.ground(POLISHED)
+	sx, _, sz = build.sx, build.sy, build.sz
+	for x in range(sx):
+		for z in (0, sz - 1):
+			build.set(x, SURFACE, z, SAND)
+	for z in range(sz):
+		for x in (0, sx - 1):
+			if not MIRROR_PATH_Z[0] <= z <= MIRROR_PATH_Z[1]:
+				build.set(x, SURFACE, z, SAND)
+	z0, z1 = MIRROR_PATH_Z
+	build.box(0, SURFACE, z0, HALL["x0"] - 1, SURFACE, z1, PAVING)
+	# Reflecting pools either side of the path, glass under still water.
+	for p in MIRROR_POOLS:
+		build.box(p["x0"], SURFACE - 1, p["z0"], p["x1"], SURFACE - 1, p["z1"], GLASS)
+		build.box(p["x0"], SURFACE, p["z0"], p["x1"], SURFACE, p["z1"], WATER)
+	for x in (1, 6):
+		for z in (z0 - 1, z1 + 1):
+			build.box(x, FLOOR, z, x, FLOOR + 1, z, COLUMN)
+			build.set(x, FLOOR + 2, z, LANTERN)
+	mx, my, mz = MIRROR_MEMO
+	build.set(mx, my - 1, mz, PEDESTAL)
+	build.set(mx, my, mz, HOA_MEMO, SOUTH)
+
+
+def build_hall_shell(build: Build) -> None:
+	"""Walls, portal and vault: mirror tiles between violet ribs."""
+	h = HALL
+	for y in range(FLOOR, HALL_SPRING):
+		for x in range(h["x0"], h["x1"] + 1):
+			for z in range(h["z0"], h["z1"] + 1):
+				if h["x0"] < x < h["x1"] and h["z0"] < z < h["z1"]:
+					continue
+				pilaster = (x % 4 == 0 if z in (h["z0"], h["z1"]) else z % 4 == 3)
+				band = y == HALL_SPRING - 1
+				build.set(x, y, z, GOLD if band else wool("violet") if pilaster else MIRROR)
+	# The floor: a checker of polished stone and mirror.
+	for x in range(h["x0"] + 1, h["x1"]):
+		for z in range(h["z0"] + 1, h["z1"]):
+			build.set(x, SURFACE, z, MIRROR if (x + z) % 2 else POLISHED)
+	# The vault, and its two gable ends, with crystal glints set into it.
+	for x in range(h["x0"], h["x1"] + 1):
+		rib = x % 4 == 0
+		for z in range(h["z0"], h["z1"] + 1):
+			top = hall_vault_top(z)
+			if x in (h["x0"], h["x1"]):
+				low = HALL_SPRING
+			else:
+				low = min(hall_vault_top(z - 1) if z > h["z0"] else HALL_SPRING,
+					hall_vault_top(z + 1) if z < h["z1"] else HALL_SPRING, top)
+			for y in range(low, top + 1):
+				glint = not rib and (x * 7 + z * 5 + y) % 13 == 0
+				build.set(x, y, z, wool("violet") if rib else CRYSTAL if glint else MIRROR)
+	# The portal: an iwan in the west wall, gold-framed, pointed at the top.
+	z0, z1 = HALL_PORTAL_Z
+	x = h["x0"]
+	build.clear(x, FLOOR, z0, x, FLOOR + 4, z1)
+	build.clear(x, FLOOR + 5, z0 + 1, x, FLOOR + 5, z1 - 1)
+	build.clear(x, FLOOR + 6, (z0 + z1) // 2, x, FLOOR + 6, (z0 + z1) // 2)
+	for z in (z0 - 1, z1 + 1):
+		build.box(x, FLOOR, z, x, FLOOR + 5, z, GOLD)
+	build.set(x, FLOOR + 6, z0, GOLD)
+	build.set(x, FLOOR + 6, z1, GOLD)
+	build.set(x, FLOOR + 7, (z0 + z1) // 2, GOLD)
+
+
+def build_balcony(build: Build) -> list[tuple[int, int]]:
+	"""The gallery round three sides, its stair, and its parapet. Returns the
+	parapet's crystals in chase order: along the south side going east, up the
+	east side, back along the north side going west."""
+	h = HALL
+	for b in BALCONY_DECKS:
+		build.box(b["x0"], BALCONY_Y, b["z0"], b["x1"], BALCONY_Y, b["z1"], POLISHED)
+	s = BALCONY_STAIR
+	for step, x in enumerate(range(s["x0"], s["x1"] + 1)):
+		y = FLOOR + step
+		if y > FLOOR:
+			build.box(x, FLOOR, s["z0"], x, y - 1, s["z1"], BRICK)
+		build.box(x, y, s["z0"], x, y, s["z1"], BRICK_STAIR, EAST)
+
+	interior = [(x, z) for x in range(h["x0"] + 1, h["x1"])
+		for z in range(h["z0"] + 1, h["z1"])]
+	stair = {(x, z) for x in range(s["x0"], s["x1"] + 1)
+		for z in range(s["z0"], s["z1"] + 1)}
+	open_floor = {c for c in interior if not in_balcony(*c) and c not in stair}
+	parapet = [c for c in interior if in_balcony(*c) and any(
+		(c[0] + dx, c[1] + dz) in open_floor
+		for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
+
+	# Chase order round the U.
+	def order(c):
+		x, z = c
+		if z <= 9 and x < 25:
+			return (0, x, z)
+		if x >= 25:
+			return (1, z, x)
+		return (2, -x, z)
+	parapet.sort(key=order)
+	lamps = []
+	for index, (x, z) in enumerate(parapet):
+		if index % 2 == 0:
+			build.set(x, BALCONY_Y + 1, z, CRYSTAL_DIM)
+			build.set(x, BALCONY_Y + 2, z, CHASE, len(lamps) % 8)
+			lamps.append((x, z))
+		else:
+			build.set(x, BALCONY_Y + 1, z, GLASS)
+	# Columns under the gallery's inner edge.
+	for x in (15, 19, 23):
+		for z in (9, 21):
+			build.box(x, FLOOR, z, x, BALCONY_Y - 1, z, COLUMN)
+	for z in (13, 17):
+		build.box(25, FLOOR, z, 25, BALCONY_Y - 1, z, COLUMN)
+	# Lights: hidden ones under the gallery and over the floor.
+	for x in (17, 23):
+		for z in (8, 22):
+			build.set(x, BALCONY_Y - 1, z, HIDDEN_LIGHT)
+	build.set(26, BALCONY_Y - 1, 15, HIDDEN_LIGHT)
+	build.set(SKULL[0], HALL_SPRING - 1, SKULL[1], HIDDEN_LIGHT)
+	return lamps
+
+
+def build_crystal_skull(build: Build) -> None:
+	"""A crystal skull facing the portal, on a gold-edged plinth, with laser
+	emitters for eyes that show through the glass."""
+	cx, cz = SKULL
+	r = SKULL_PLINTH
+	build.box(cx - r, FLOOR, cz - r, cx + r, FLOOR, cz + r, POLISHED)
+	for x in range(cx - r, cx + r + 1):
+		for z in range(cz - r, cz + r + 1):
+			if abs(x - cx) == r or abs(z - cz) == r:
+				build.set(x, FLOOR, z, GOLD)
+	build.sphere(cx, FLOOR + 4, cz, 2.5, CRYSTAL, sy=2.5)
+	# Jaw, teeth, sockets and a nose, on the west face.
+	front = cx - 2
+	build.box(front, FLOOR + 1, cz - 1, cx, FLOOR + 1, cz + 1, CRYSTAL)
+	for z in (cz - 1, cz + 1):
+		build.set(front, FLOOR + 2, z, BONE)
+	build.set(front, FLOOR + 2, cz, AIR)
+	build.set(front, FLOOR + 4, cz - 1, LASER_BLOCK)
+	build.set(front, FLOOR + 4, cz + 1, LASER_BLOCK)
+	build.set(front, FLOOR + 3, cz, AIR)
+	for dx, dz in ((-r - 1, -r - 1), (-r - 1, r + 1), (r + 1, -r - 1), (r + 1, r + 1)):
+		build.set(cx + dx, FLOOR, cz + dz, UPLIGHT)
+
+
+def build_mirror_hall() -> Build:
+	sx, sy, sz = MIRROR_SIZE
+	build = Build(sx, sy, sz)
+	build_mirror_forecourt(build)
+	build_hall_shell(build)
+	build_balcony(build)
+	build_crystal_skull(build)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -2449,6 +2869,8 @@ SPECS = [
 		build_halloween_storm),
 	MapSpec("map_cabaret", CABARET_SIZE, CABARET_SPAWN, build_cabaret),
 	MapSpec("map_concert_arena", CONCERT_SIZE, CONCERT_SPAWN, build_concert_arena),
+	MapSpec("map_laser_serpent", SERPENT_SIZE, SERPENT_SPAWN, build_laser_serpent),
+	MapSpec("map_mirror_hall", MIRROR_SIZE, MIRROR_SPAWN, build_mirror_hall),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}
@@ -2458,8 +2880,8 @@ SPAWNS = {spec.name: spec.spawn for spec in SPECS}
 # The pack's node budget, in schematic *volume* (box cells, air included).
 #
 # lw_world/schems.lua keeps each schematic run-length encoded, a row at a time,
-# in two Lua strings: about 0.4 bytes a cell for these maps, 110 KiB for all
-# eleven. The volume therefore no longer sets what the pack keeps in the heap;
+# in two Lua strings: about 0.4 bytes a cell for these maps, 127 KiB for all
+# thirteen. The volume therefore no longer sets what the pack keeps in the heap;
 # test_luanti_web_maps.py measures that directly and caps it. What volume still
 # costs is the high-water mark while a map loads (the engine's read_schematic
 # builds one small table per cell, about 250 bytes each, before the loader packs
@@ -2474,8 +2896,9 @@ SPAWNS = {spec.name: spec.spawn for spec in SPECS}
 # while the loader kept two Lua arrays with a slot per cell (1 MiB per
 # 32,768 cells, so the box was the budget). Run-length storage took the pack
 # from 10.0 MiB kept to 110 KiB, and the cell cap was re-based at 512,000:
-# roughly the eleven maps again, with their share of room for about eight
-# more maps the size of the concert arena.
+# roughly the eleven maps of the time again, with their share of room for
+# about eight more maps the size of the concert arena. The two Weeks on Fire
+# islands (laser serpent, mirror hall) took 36,898 of that: 308,166 now.
 NODE_BUDGET = 512_000
 MAX_MAP_VOLUME = 65_536
 

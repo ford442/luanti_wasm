@@ -38,6 +38,7 @@ end
 --------------------------------------------------------------------------
 
 local world = {}
+local metas = {}
 local function key(pos)
 	return pos.x .. "," .. pos.y .. "," .. pos.z
 end
@@ -62,6 +63,15 @@ core = {
 	end,
 	remove_node = function(pos)
 		world[key(pos)] = nil
+		metas[key(pos)] = nil
+	end,
+	get_meta = function(pos)
+		local store = metas[key(pos)] or {}
+		metas[key(pos)] = store
+		return {
+			get_int = function(_, k) return store[k] or 0 end,
+			set_int = function(_, k, v) store[k] = v end,
+		}
 	end,
 }
 
@@ -78,6 +88,9 @@ register("lw_nodes:hidden_light", {buildable_to = false})
 register("lw_nodes:column")
 register("lw_nodes:gold_trim")
 register("lw_nodes:lamp")
+register("lw_tools:ember", {buildable_to = true})
+register("lw_tools:ember_low", {buildable_to = true})
+register("lw_nodes:fire", {buildable_to = true})
 register("lw_nodes:frame")
 register("lw_theater:seat")
 for _, name in ipairs({
@@ -271,6 +284,85 @@ lw_tools.cycle_stamp(stamp, 1)
 assert_eq(lw_tools.current_stamp(stamp), "seat_row", "cycle wraps")
 lw_tools.cycle_stamp(stamp, -1)
 assert_eq(lw_tools.current_stamp(stamp), "frame", "cycle back")
+
+--------------------------------------------------------------------------
+-- Laser wand
+--------------------------------------------------------------------------
+
+local face = lw_tools.face_point(p(0, 0, 0), p(0, 1, 0))
+assert_true(face.x == 0 and face.y == 0.5 and face.z == 0, "face point is the face's centre")
+assert_eq(lw_tools.face_point(p(2, 3, 4)).y, 3, "no above: the node itself")
+assert_eq(lw_tools.laser_color(1), lw_tools.LASER_COLORS[1], "first colour")
+assert_eq(lw_tools.laser_color(#lw_tools.LASER_COLORS + 1), lw_tools.LASER_COLORS[1],
+	"colours wrap")
+
+local marks = {}
+local first, mark_msg = lw_tools.laser_mark(marks, p(0, 0, 0))
+assert_true(first == nil and mark_msg:find("marked", 1, true), "first right click marks")
+local a, b = lw_tools.laser_mark(marks, p(3, 4, 0))
+assert_true(a and b and a.x == 0 and b.y == 4, "second right click strings a laser")
+assert_true(marks.mark == nil, "and clears the mark")
+lw_tools.laser_mark(marks, p(0, 0, 0))
+local same, same_msg = lw_tools.laser_mark(marks, p(0, 0, 0))
+assert_true(same == nil and same_msg:find("same", 1, true), "same point twice is refused")
+lw_tools.laser_mark(marks, p(0, 0, 0))
+local far, far_msg = lw_tools.laser_mark(marks, p(lw_tools.MAX_LASER_LENGTH + 1, 0, 0))
+assert_true(far == nil and far_msg:find("max", 1, true), "too far apart is refused")
+assert_true(marks.mark == nil, "a refusal clears the mark")
+
+-- At most MAX_LASERS per visitor, oldest out first; dead ones are forgotten.
+local beams, dead = {}, {}
+local function is_alive(object) return not dead[object] end
+local evicted_total = {}
+for i = 1, lw_tools.MAX_LASERS + 3 do
+	for _, old in ipairs(lw_tools.keep_laser(beams, i, is_alive)) do
+		evicted_total[#evicted_total + 1] = old
+	end
+end
+assert_eq(#beams, lw_tools.MAX_LASERS, "the cap holds")
+assert_eq(#evicted_total, 3, "three evicted")
+assert_eq(evicted_total[1], 1, "the oldest first")
+dead[beams[1]] = true
+dead[beams[2]] = true
+local none = lw_tools.keep_laser(beams, 100, is_alive)
+assert_eq(#none, 0, "room once two have gone out")
+assert_eq(#beams, lw_tools.MAX_LASERS - 1, "dead beams are dropped")
+
+--------------------------------------------------------------------------
+-- Ember tool
+--------------------------------------------------------------------------
+
+world = {}
+local lit, lit_msg = lw_tools.place_ember(p(0, 5, 0))
+assert_true(lit, "an ember lights in air: " .. tostring(lit_msg))
+assert_eq(core.get_node(p(0, 5, 0)).name, "lw_tools:ember", "it is an ember")
+assert_true(lw_tools.place_ember(p(0, 5, 0)) == nil, "not two in one place")
+core.set_node(p(1, 5, 0), {name = "lw_nodes:stone_brick"})
+assert_true(lw_tools.place_ember(p(1, 5, 0)) == nil, "embers do not replace solids")
+core.set_node(p(2, 5, 0), {name = "ignore"})
+assert_true(lw_tools.place_ember(p(2, 5, 0)) == nil, "nor go into unloaded ground")
+
+-- It burns bright, sputters, and goes out by itself, every time.
+local saw_low, ticks = false, 0
+while core.get_node(p(0, 5, 0)).name ~= "air" and ticks < 100 do
+	local again = lw_tools.ember_tick(p(0, 5, 0))
+	ticks = ticks + 1
+	local burning = core.get_node(p(0, 5, 0)).name
+	if burning == "lw_tools:ember_low" then
+		saw_low = true
+	end
+	assert_eq(again, burning ~= "air", "the timer runs exactly while it burns")
+end
+assert_eq(ticks, lw_tools.EMBER_TICKS + 1, "it goes out after its pattern")
+assert_true(saw_low, "and sputters on the way")
+assert_true(lw_tools.ember_state(1) == true, "it starts bright")
+assert_eq(lw_tools.ember_tick(p(0, 5, 0)), false, "a timer on an empty spot stops")
+
+lw_tools.place_ember(p(0, 6, 0))
+local out = lw_tools.remove_ember(p(0, 6, 0))
+assert_true(out, "the tool puts an ember out")
+assert_eq(core.get_node(p(0, 6, 0)).name, "air", "and leaves air")
+assert_true(lw_tools.remove_ember(p(1, 5, 0)) == nil, "it does not dig anything else")
 
 --------------------------------------------------------------------------
 -- Facetir helper

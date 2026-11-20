@@ -291,6 +291,41 @@ def cabaret_landmarks() -> dict:
 	}
 
 
+def serpent_landmarks() -> dict:
+	z = (maps.SERPENT_WALK_Z[0] + maps.SERPENT_WALK_Z[1]) // 2
+	pit = maps.EMBER_PITS[0]
+	h = maps.SERPENT_HEAD
+	return {
+		"walk at the causeway": maps.SERPENT_SPAWN,
+		"west end of the walk": (maps.SERPENT_WALK_X0 + 1, maps.FLOOR, z),
+		"at the serpent console": maps.SERPENT_CONSOLE_STAND,
+		"by the serpent's tail": (maps.COIL_CENTRE[0], maps.FLOOR,
+			int(maps.COIL_CENTRE[1] - maps.COIL_RADIUS) - 1),
+		"under the serpent's head": ((h["x0"] + h["x1"]) // 2, maps.FLOOR,
+			(h["z0"] + h["z1"]) // 2),
+		"in the ember pit": (pit[0], maps.FLOOR, pit[1]),
+		"by the HOA memo": (maps.SERPENT_MEMO[0] - 1, maps.FLOOR, maps.SERPENT_MEMO[2]),
+	}
+
+
+def mirror_landmarks() -> dict:
+	h = maps.HALL
+	sx, sz = maps.SKULL
+	deck = maps.BALCONY_Y + 1
+	return {
+		"forecourt at the causeway": maps.MIRROR_SPAWN,
+		"by the reflecting pools": (3, maps.FLOOR, maps.MIRROR_PATH_Z[0] - 1),
+		"in the portal": (h["x0"], maps.FLOOR, maps.HALL_AXIS_Z),
+		"before the crystal skull": (sx - maps.SKULL_PLINTH - 2, maps.FLOOR, sz),
+		"behind the skull": (sx + maps.SKULL_PLINTH + 2, maps.FLOOR, sz),
+		"under the gallery": (20, maps.FLOOR, h["z1"] - 2),
+		"gallery, north side": (20, deck, h["z1"] - 1),
+		"gallery, east side": (h["x1"] - 2, deck, maps.HALL_AXIS_Z),
+		"gallery, south side": (20, deck, h["z0"] + 1),
+		"behind the hall": (h["x1"] + 1, maps.FLOOR, maps.HALL_AXIS_Z),
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -306,6 +341,8 @@ LANDMARKS = {
 	"map_halloween_storm": lambda schem: storm_chapel_landmarks(),
 	"map_cabaret": lambda schem: cabaret_landmarks(),
 	"map_concert_arena": lambda schem: concert_landmarks(),
+	"map_laser_serpent": lambda schem: serpent_landmarks(),
+	"map_mirror_hall": lambda schem: mirror_landmarks(),
 }
 
 # Both arenas' trusses, for the checks that hold for either:
@@ -801,6 +838,101 @@ def test_arena_lasers_ride_the_truss() -> None:
 				f"at {(x, y + 1, z)}")
 
 
+def chase_controllers(schem) -> dict:
+	sx, sy = schem.size[0], schem.size[1]
+	chase = schem.names.index(maps.CHASE)
+	return {(i % sx, (i // sx) % sy, i // (sx * sy)): schem.param2[i]
+		for i, content in enumerate(schem.content) if content == chase}
+
+
+def test_serpent_lights_run_up_the_coil() -> None:
+	"""Every chase controller on the field is over a scale of the coil, and
+	their places climb from the tail to the neck, so the light runs up it."""
+	schem = maps.schematics()["map_laser_serpent"]
+	world = World(schem)
+	controllers = chase_controllers(schem)
+	assert_true(len(controllers) >= 40,
+		f"only {len(controllers)} chase controllers on the serpent's coil")
+	coil = maps.coil_cells()
+	order = {cell: index for index, cell in enumerate(coil)}
+	lit = []
+	for (x, y, z), place in controllers.items():
+		below = world.at(x, y - 1, z)
+		assert_true(below == maps.SERPENT_SCALE_OFF,
+			f"the chase controller at {(x, y, z)} is over {below}, not a scale")
+		assert_true((x, y - 1, z) in order,
+			f"the chase controller at {(x, y, z)} is not on the coil")
+		lit.append((order[(x, y - 1, z)], place))
+	lit.sort()
+	for step, (_, place) in enumerate(lit):
+		assert_true(place == step % 8,
+			f"coil light {step} is place {place} in the chase, not {step % 8}")
+
+
+def test_serpent_emitters_ride_the_coil() -> None:
+	"""lw_maps' `coil` pattern is the generator's helix, its emitters climb
+	clear of the body, and the other two patterns have room as well."""
+	harness = run_lua_harness()
+	if harness is None:
+		return
+	got = harness["coil"]["laser_serpent"]
+	want = (maps.COIL_CENTRE[0], maps.COIL_CENTRE[1], maps.COIL_RADIUS, maps.COIL_Y0,
+		maps.COIL_RISE, maps.COIL_TURNS, maps.COIL_START)
+	assert_true(all(abs(a - b) < 1e-5 for a, b in zip(got, want)),
+		f"lw_maps' coil {got} is not the generator's {want}")
+	world = World(maps.schematics()["map_laser_serpent"])
+	for i in range(200):
+		x, y, z = maps.coil_point(i / 199)
+		cell = (int(round(x)), int(round(y + 1.3)), int(round(z)))
+		assert_true(not world.solid(*cell),
+			f"a coil emitter would climb through {world.at(*cell)} at {cell}")
+	mx, my, mz = harness["mouth"]["laser_serpent"]
+	assert_true((mx, my, mz) == maps.SERPENT_MOUTH,
+		f"the fan comes out of {(mx, my, mz)}, the mouth is at {maps.SERPENT_MOUTH}")
+	assert_true(not world.solid(mx, my, mz), "the serpent's mouth is shut")
+	x0, x1, z, y = harness["walk"]["laser_serpent"]
+	assert_true(maps.SERPENT_WALK_Z[0] <= z <= maps.SERPENT_WALK_Z[1] and y == maps.FLOOR
+		and x0 > maps.SERPENT_WALK_X0 and x1 < maps.SERPENT_SIZE[0],
+		f"the beams land at x {x0}..{x1}, z {z}, y {y}: not on the walk")
+	for x in range(x0, x1 + 1):
+		assert_true(world.solid(x, y - 1, z) and not world.solid(x, y, z),
+			f"the walk has no floor for the beams at {(x, y, z)}")
+
+
+def test_wof_lasers_have_room() -> None:
+	"""The serpent's `sweep` emitters race over the pylon caps, and the mirror
+	hall's under its vault: clear the whole way round."""
+	harness = run_lua_harness()
+	if harness is None:
+		return
+	x0, z0, x1, z1, y = harness["tracks"]["laser_serpent"]
+	assert_true(y == maps.SERPENT_PYLON_TOP, "the serpent's track is not at the pylon caps")
+	assert_true({(x0, z0), (x1, z0), (x0, z1), (x1, z1)} == set(maps.SERPENT_PYLONS),
+		"the serpent's track does not run cap to cap")
+	built = maps.schematics()
+	for name, map_id in (("map_laser_serpent", "laser_serpent"), ("map_mirror_hall", "mirror_hall")):
+		world = World(built[name])
+		x0, z0, x1, z1, y = harness["tracks"][map_id]
+		ring = [(x, z0) for x in range(x0, x1 + 1)] + [(x, z1) for x in range(x0, x1 + 1)]
+		ring += [(x0, z) for z in range(z0, z1 + 1)] + [(x1, z) for z in range(z0, z1 + 1)]
+		for x, z in ring:
+			assert_true(not world.solid(x, y + 1, z),
+				f"{map_id}: an emitter would ride through {world.at(x, y + 1, z)} at {(x, y + 1, z)}")
+
+
+def test_mirror_gallery_crystals_chase_round_it() -> None:
+	"""The parapet's crystals, each under a chase controller, in one lap."""
+	schem = maps.schematics()["map_mirror_hall"]
+	world = World(schem)
+	controllers = chase_controllers(schem)
+	assert_true(len(controllers) >= 12, f"only {len(controllers)} chasing crystals")
+	for (x, y, z), place in controllers.items():
+		assert_true(y == maps.BALCONY_Y + 2 and world.at(x, y - 1, z) == maps.CRYSTAL_DIM,
+			f"the chase controller at {(x, y, z)} is not over a parapet crystal")
+	assert_true(sorted(controllers.values()) ==
+		sorted(i % 8 for i in range(len(controllers))), "the gallery's chase has gaps")
+
+
 def test_committed_files_match_the_generator() -> None:
 	"""A regenerated tree must be an empty diff, like every other asset here."""
 	built = maps.schematics()
@@ -899,8 +1031,8 @@ def test_param2_survives() -> None:
 # high-water mark while the largest map loads. See wasm_porting.md.
 #
 # lw_world keeps each schematic run-length encoded in two strings, so a map
-# costs what its runs cost, not what its box does: the eleven maps keep about
-# 110 KiB between them (the busiest, the thunder chapel and halloween lane, 17
+# costs what its runs cost, not what its box does: the thirteen maps keep about
+# 127 KiB between them (the busiest, the thunder chapel and halloween lane, 17
 # KiB), where the one-slot-per-cell arrays this replaced kept 10.0 MiB. These
 # caps are set at a few times the measurement, so they still fail on a map
 # that is not the sort of thing the encoding is good at (noise, a checkerboard
@@ -1084,7 +1216,7 @@ def run_lua_harness():
 		if result.returncode != 0:
 			raise SystemExit(result.stdout + result.stderr)
 		report = {"nodes": set(), "maps": [], "entities": [], "amps": {}, "tracks": {},
-			"rods": {}}
+			"rods": {}, "coil": {}, "mouth": {}, "walk": {}}
 		for line in result.stdout.splitlines():
 			fields = line.split()
 			if not fields:
@@ -1099,6 +1231,12 @@ def run_lua_harness():
 			elif fields[0] == "ROD":
 				report["rods"].setdefault(fields[1], []).append(
 					tuple(int(v) for v in fields[2:5]))
+			elif fields[0] == "COIL":
+				report["coil"][fields[1]] = tuple(float(v) for v in fields[2:9])
+			elif fields[0] == "MOUTH":
+				report["mouth"][fields[1]] = tuple(int(v) for v in fields[2:5])
+			elif fields[0] == "WALK":
+				report["walk"][fields[1]] = tuple(int(v) for v in fields[2:6])
 			elif fields[0] == "TRACK":
 				report["tracks"][fields[1]] = tuple(int(v) for v in fields[2:7])
 			elif fields[0] == "ENTITY":

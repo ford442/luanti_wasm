@@ -346,6 +346,202 @@ lw_maps.register_banner("portrait_lillith", {
 })
 
 --------------------------------------------------------------------------
+-- Weeks on Fire: the laser serpent and the mirror hall
+--------------------------------------------------------------------------
+
+-- Everything here is a palette tile re-tinted, like the wool cubes: the
+-- pack's two Weeks on Fire islands add no textures.
+
+-- The serpent's scales, lit and dark, for the chase controllers that run
+-- light up its coil from tail to neck.
+register("serpent_scale", {
+	description = "Serpent Scale",
+	tiles = {"lw_wool.png^[multiply:#ff2a6a"},
+	paramtype = "light",
+	light_source = 10,
+	groups = {snappy = 2, oddly_breakable_by_hand = 3},
+})
+
+register("serpent_scale_off", {
+	description = "Serpent Scale (dark)",
+	tiles = {"lw_wool.png^[multiply:#3a0a1c"},
+	groups = {snappy = 2, oddly_breakable_by_hand = 3},
+})
+
+-- A static laser emitter: the serpent's eyes, the pylon caps, the crystal
+-- skull's eyes. The moving emitters are lw_maps:laser_emitter entities.
+register("laser_block", {
+	description = "Laser Emitter Block",
+	tiles = {"lw_lamp.png^[multiply:#ff2050"},
+	paramtype = "light",
+	light_source = 12,
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+-- A neon tube lying on the floor along x (facedir turns it). Thin and not
+-- walkable, so a walk edged with it can be stepped across.
+local NEON_BOX = {type = "fixed", fixed = {-0.5, -0.5, -0.0625, 0.5, -0.375, 0.0625}}
+register("neon_tube", {
+	description = "Neon Tube",
+	drawtype = "nodebox",
+	tiles = {"lw_lamp.png^[multiply:#ff40c8"},
+	paramtype = "light",
+	paramtype2 = "facedir",
+	sunlight_propagates = true,
+	walkable = false,
+	buildable_to = false,
+	light_source = 9,
+	on_place = core.rotate_node,
+	node_box = NEON_BOX,
+	selection_box = NEON_BOX,
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+-- Embers, lit and ashen, for the flicker controller: the caldera's lava
+-- trick at a campfire's size. Solid, cool, and harmless.
+register("ember_block", {
+	description = "Ember Block",
+	tiles = {"lw_wool.png^[multiply:#ff4a18"},
+	paramtype = "light",
+	light_source = 9,
+	groups = {cracky = 3},
+})
+
+register("ember_block_off", {
+	description = "Ember Block (ash)",
+	tiles = {"lw_wool.png^[multiply:#3a1610"},
+	groups = {cracky = 3},
+})
+
+-- A silvered tile: polished stone gone blue-white under the glass tile's
+-- highlights, with a faint glow so a twilight hall still reads as mirrors.
+register("mirror", {
+	description = "Mirror Tile",
+	tiles = {"lw_polished_stone.png^[multiply:#a8bce0^lw_glass.png"},
+	paramtype = "light",
+	light_source = 3,
+	groups = {cracky = 3},
+})
+
+-- Crystal, lit and dim: the mirror hall's glints, its skull and the parapet
+-- crystals that chase round its gallery.
+register("crystal", {
+	description = "Glowing Crystal",
+	drawtype = "glasslike",
+	tiles = {"lw_glass.png^[multiply:#7ff0ff"},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	sunlight_propagates = true,
+	light_source = 9,
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+register("crystal_dim", {
+	description = "Glowing Crystal (dim)",
+	drawtype = "glasslike",
+	tiles = {"lw_glass.png^[multiply:#2a5a70"},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	sunlight_propagates = true,
+	light_source = 2,
+	groups = {cracky = 3, oddly_breakable_by_hand = 3},
+})
+
+-- The HOA's notices. Punch one (or right click it) for the next memo: each
+-- board starts at a different one and then goes round them all in order, so
+-- two boards side by side do not repeat each other. Text only, on the
+-- palette's poster tile.
+lw_maps.HOA_MEMOS = {
+	"HOA MEMO 41: Laser serpents must be leashed in all common areas.",
+	"HOA MEMO 42: The mirror hall is not a portal. Please stop asking the front desk.",
+	"HOA MEMO 43: Open flame is permitted on balconies during scheduled cabaret hours only.",
+	"HOA MEMO 44: Neon signage may not exceed nine thousand lumens or one (1) aura.",
+	"HOA MEMO 45: The arcology lift does not stop at floor 13. There is no floor 13. " ..
+		"Please stop pressing it.",
+	"HOA MEMO 46: Do not feed the serpent after midnight. It is a laser. It does not eat.",
+	"HOA MEMO 47: Smoke from the caldera is a shared amenity, not a nuisance.",
+	"HOA MEMO 48: Unscheduled dance numbers in the lobby require Form 7-B, in triplicate.",
+	"HOA MEMO 49: The crystal skull is on loan. Do not ask it questions.",
+	"HOA MEMO 50: Embers from the Ember Tool go out by themselves. Do not stamp on them.",
+	"HOA MEMO 51: Riley, the roof is not a stage. Rubella and Lillith have the cabaret for that.",
+	"HOA MEMO 52: Mirrors are to be polished on alternate Tuesdays. Reflections are not " ..
+		"to be addressed directly.",
+}
+
+local MEMO_HINT = "HOA Memo (punch to read)"
+local MEMO_BOX = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0.5, -0.4375}}
+
+-- The next memo on the board at `pos`, which it now shows; told to `player`
+-- too, when there is one.
+function lw_maps.read_memo(pos, player)
+	local memos = lw_maps.HOA_MEMOS
+	local meta = core.get_meta(pos)
+	local index = meta:get_int("memo")
+	if index == 0 then
+		index = (pos.x * 3 + pos.z * 7) % #memos
+	end
+	index = index % #memos + 1
+	meta:set_int("memo", index)
+	local text = memos[index]
+	meta:set_string("infotext", "HOA Memo\n" .. text)
+	if player and player.is_player and player:is_player() then
+		core.chat_send_player(player:get_player_name(), text)
+	end
+	return text
+end
+
+register("hoa_memo", {
+	description = "HOA Memo\nPunch or right click to read the next notice",
+	drawtype = "nodebox",
+	tiles = {"lw_frame.png", "lw_frame.png", "lw_frame.png", "lw_frame.png",
+		"lw_frame.png", "lw_poster.png^[multiply:#f4ecd0"},
+	paramtype = "light",
+	paramtype2 = "facedir",
+	sunlight_propagates = true,
+	light_source = 3,
+	on_place = core.rotate_node,
+	node_box = MEMO_BOX,
+	selection_box = MEMO_BOX,
+	groups = {choppy = 2, oddly_breakable_by_hand = 2},
+	on_construct = function(pos)
+		core.get_meta(pos):set_string("infotext", MEMO_HINT)
+	end,
+	on_punch = function(pos, _, puncher)
+		lw_maps.read_memo(pos, puncher)
+	end,
+	on_rightclick = function(pos, _, clicker)
+		lw_maps.read_memo(pos, clicker)
+	end,
+})
+
+-- The serpent console, on the dais at the far end of the walk: punch it (or
+-- right click it) and the laser show on its map changes pattern, for
+-- everyone there. See "Shows" for the patterns.
+register("serpent_switch", {
+	description = "Serpent Console\nPunch or right click to change the laser pattern",
+	tiles = {
+		"lw_stone_brick.png^[multiply:#5a5054", "lw_stone_brick.png^[multiply:#5a5054",
+		"lw_stone_brick.png^[multiply:#5a5054", "lw_stone_brick.png^[multiply:#5a5054",
+		"lw_stone_brick.png^[multiply:#5a5054", "lw_lamp.png^[multiply:#ff2050",
+	},
+	paramtype = "light",
+	paramtype2 = "facedir",
+	light_source = 6,
+	on_place = core.rotate_node,
+	groups = {cracky = 2, oddly_breakable_by_hand = 2},
+	on_construct = function(pos)
+		core.get_meta(pos):set_string("infotext",
+			"Serpent console: punch to change the laser pattern")
+	end,
+	on_punch = function(pos, _, puncher)
+		lw_maps.punch_console(pos, puncher)
+	end,
+	on_rightclick = function(pos, _, clicker)
+		lw_maps.punch_console(pos, clicker)
+	end,
+})
+
+--------------------------------------------------------------------------
 -- Lamp controllers
 --------------------------------------------------------------------------
 
@@ -369,6 +565,9 @@ lw_maps.register_lamp_pair("lw_maps:jack_o_lantern", "lw_maps:pumpkin")
 lw_maps.register_lamp_pair("lw_maps:lantern", "lw_maps:lantern_off")
 lw_maps.register_lamp_pair("lw_maps:lava", "lw_maps:lava_crust")
 lw_maps.register_lamp_pair("lw_maps:stage_light", "lw_maps:stage_light_off")
+lw_maps.register_lamp_pair("lw_maps:serpent_scale", "lw_maps:serpent_scale_off")
+lw_maps.register_lamp_pair("lw_maps:ember_block", "lw_maps:ember_block_off")
+lw_maps.register_lamp_pair("lw_maps:crystal", "lw_maps:crystal_dim")
 
 -- Light or dim whatever lamp is one node below `pos`. Only ever swaps a lamp
 -- for its own twin: if a visitor dug the lamp out, or built something else in
@@ -834,6 +1033,73 @@ lw_maps.register({
 	},
 })
 
+lw_maps.register({
+	id = "laser_serpent",
+	title = "Laser serpent",
+	blurb = "Weeks on Fire: a serpent of glowing scales coiled round an obelisk " ..
+		"on a night ash field, lasers sweeping the neon walk past it, ember pits, " ..
+		"and a console that changes the beams' pattern.",
+	-- West of the smoke caldera, by a spur from the mouth of its basalt tube.
+	size = {x = 35, y = 16, z = 35},
+	origin = {x = -139, y = BASE, z = 23},
+	spawn = {x = -105, y = BASE + 4, z = 40},
+	-- Deep red and magenta night, light fog: the scales, the neon and the
+	-- beams are the brightest things on the field.
+	day_night_ratio = 0.1,
+	sky = lw_maps.sky({
+		sky = "#2a0620", horizon = "#7a1040",
+		night_sky = "#160310", night_horizon = "#4a0a2a", indoors = "#1a0614",
+		sun_tint = "#ff3080", moon_tint = "#a02060",
+		fog = 96, fog_start = 0.5,
+	}),
+	-- The Around arena's show with three patterns, changed by punching the
+	-- console: `coil` runs the emitters up the serpent's coil (the
+	-- generator's COIL_* constants) with the beams slithering along the walk,
+	-- `sweep` is the arena's race round the pylon caps, and `fan` throws every
+	-- beam out of the serpent's mouth and swings them along the walk together.
+	lasers = {
+		patterns = {"coil", "sweep", "fan"},
+		track = {x0 = 2, z0 = 2, x1 = 32, z1 = 32, y = 13},
+		target = {x = 17, y = 4, z = 17, radius = 7},
+		coil = {x = 17, z = 26, radius = 5, y0 = 4, rise = 9, turns = 2.25,
+			start = -math.pi / 2},
+		walk = {x0 = 7, x1 = 33, z = 17, y = 4, wave = 1.5},
+		mouth = {x = 30, y = 11, z = 26},
+		colors = {"#ff2050", "#ff40c8", "#ff8030", "#c070ff"},
+		lap_beats = 32,
+		bpm = 120,
+	},
+})
+
+lw_maps.register({
+	id = "mirror_hall",
+	title = "Mirror hall",
+	blurb = "Weeks on Fire: a vaulted hall of mirror tiles at twilight, a crystal " ..
+		"skull under the vault, a gallery whose crystals chase round it, and " ..
+		"lasers circling the skull.",
+	-- East of the crystal bazaar, by a spur from the east end of its arcade.
+	size = {x = 31, y = 18, z = 31},
+	origin = {x = 100, y = BASE, z = 27},
+	spawn = {x = 100, y = BASE + 4, z = 42},
+	-- Twilight in violet and cyan: dark enough for the crystals, light enough
+	-- that the reflecting pools still have a colour.
+	day_night_ratio = 0.2,
+	sky = lw_maps.sky({
+		sky = "#2a1a5a", horizon = "#2a90a8",
+		night_sky = "#140c34", night_horizon = "#145060", indoors = "#1a1240",
+		sun_tint = "#60e0ff", moon_tint = "#a070ff",
+		fog = 100, fog_start = 0.55,
+	}),
+	-- Three emitters circling under the vault, beams down round the skull.
+	lasers = {
+		track = {x0 = 10, z0 = 10, x1 = 24, z1 = 20, y = 11},
+		target = {x = 17, y = 4, z = 15, radius = 5},
+		colors = {"#40e0ff", "#c070ff", "#f0e0ff"},
+		lap_beats = 32,
+		bpm = 96,
+	},
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------
@@ -1144,23 +1410,79 @@ function lw_maps.track_point(track, s)
 	return track.x0, track.z1 - (s - w)
 end
 
+-- Patterns. A map whose `lasers` has `patterns = {...}` cycles through them
+-- when its console (lw_maps:serpent_switch) is punched; a map without starts
+-- and stays on `sweep`, the arenas' race round the truss.
+--
+--  * `sweep`: round `track`, beams onto a point circling `target`.
+--  * `coil`: up the helix `coil = {x, z, radius, y0, rise, turns, start}`,
+--    tail to neck, a lap each, beams onto points slithering along
+--    `walk = {x0, x1, z, y, wave}` the other way.
+--  * `fan`: every emitter in `mouth`, beams swinging along `walk` together.
+--
+-- The pattern is the server's, not a player's: everyone on the map sees the
+-- same beams, as with the clock. It is not saved; a restart starts again on
+-- the first pattern.
+local pattern_turns = {}    -- map id -> how many times its console was punched
+
+function lw_maps.laser_pattern(map)
+	local patterns = map.lasers and map.lasers.patterns
+	if not patterns or #patterns == 0 then
+		return "sweep"
+	end
+	return patterns[(pattern_turns[map.id] or 0) % #patterns + 1]
+end
+
+function lw_maps.next_laser_pattern(map)
+	pattern_turns[map.id] = (pattern_turns[map.id] or 0) + 1
+	return lw_maps.laser_pattern(map)
+end
+
+-- How far above the coil's centre line an emitter climbs: clear of the scale
+-- and the chase controller on it. The generator's coil_point is the same line.
+local COIL_RIDE = 1.3
+
+function lw_maps.coil_point(coil, s)
+	local angle = coil.start + s * coil.turns * 2 * math.pi
+	return coil.x + coil.radius * math.cos(angle), coil.y0 + s * coil.rise,
+		coil.z + coil.radius * math.sin(angle)
+end
+
+-- On a floor's top face, a hair above it so the spot does not z-fight.
+local function on_floor(map, x, y, z)
+	return lw_maps.to_world(map, {x = x, y = y - 0.48, z = z})
+end
+
 -- Emitter `index` at show time `t`: where it is and where its beam lands.
 function lw_maps.laser_frame(map, t, index)
 	local lasers = map.lasers
 	local lap = lasers.lap_beats * 60 / lasers.bpm
-	local phase = (index - 1) / #lasers.colors
+	local count = #lasers.colors
+	local phase = (index - 1) / count
+	local pattern = lw_maps.laser_pattern(map)
+	if pattern == "coil" then
+		local s = (t / lap + phase) % 1
+		local x, y, z = lw_maps.coil_point(lasers.coil, s)
+		local walk = lasers.walk
+		local u = (phase - 2 * t / lap) % 1
+		return lw_maps.to_world(map, {x = x, y = y + COIL_RIDE, z = z}),
+			on_floor(map, walk.x0 + (walk.x1 - walk.x0) * u, walk.y,
+				walk.z + walk.wave * math.sin(2 * math.pi * (3 * u + t / lap)))
+	elseif pattern == "fan" then
+		local mouth, walk = lasers.mouth, lasers.walk
+		local spread = index - (count + 1) / 2
+		local swing = math.sin(2 * math.pi * 2 * t / lap + phase * math.pi)
+		return lw_maps.to_world(map, {x = mouth.x, y = mouth.y, z = mouth.z + spread * 0.3}),
+			on_floor(map, (walk.x0 + walk.x1) / 2 + (walk.x1 - walk.x0) / 2 * swing,
+				walk.y, walk.z + spread * 0.6)
+	end
 	local x, z = lw_maps.track_point(lasers.track,
 		(t / lap + phase) * lw_maps.track_length(lasers.track))
 	local from = lw_maps.to_world(map, {x = x, y = lasers.track.y + EMITTER_RISE, z = z})
 	local target = lasers.target
 	local angle = (phase - 2 * t / lap) * 2 * math.pi
-	-- On the floor's top face, a hair above it so it does not z-fight.
-	local to = lw_maps.to_world(map, {
-		x = target.x + target.radius * math.cos(angle),
-		y = target.y - 0.48,
-		z = target.z + target.radius * math.sin(angle),
-	})
-	return from, to
+	return from, on_floor(map, target.x + target.radius * math.cos(angle), target.y,
+		target.z + target.radius * math.sin(angle))
 end
 
 local shows = {}        -- map id -> {{emitter, beam, color, length}, ...}
@@ -1192,19 +1514,31 @@ end
 
 -- A beam is a sprite whose height runs along its local +Y. That is pointed
 -- along the beam, and its face turned side-on to the beam's heading, so the
--- floor sees it broadside rather than edge on.
-local function pose_beam(slot, from, to)
+-- floor sees it broadside rather than edge on. Returns the sprite's centre,
+-- its rotation and its length, or nil for a beam too short to draw. Public:
+-- lw_tools' Laser Wand poses its beams with it.
+function lw_maps.beam_pose(from, to)
 	local dx, dy, dz = to.x - from.x, to.y - from.y, to.z - from.z
 	local length = math.sqrt(dx * dx + dy * dy + dz * dz)
+	if length < 1e-3 then
+		return nil
+	end
 	local flat = math.sqrt(dx * dx + dz * dz)
-	if length < 1e-3 or flat < 1e-3 then
+	local dir = vector.new(dx / length, dy / length, dz / length)
+	-- Straight up or down there is no heading to be side-on to; any
+	-- horizontal face will do.
+	local side = flat < 1e-3 and vector.new(1, 0, 0) or vector.new(dz / flat, 0, -dx / flat)
+	return vector.new((from.x + to.x) / 2, (from.y + to.y) / 2, (from.z + to.z) / 2),
+		vector.dir_to_rotation(side, dir), length
+end
+
+local function pose_beam(slot, from, to)
+	local centre, rotation, length = lw_maps.beam_pose(from, to)
+	if not centre then
 		return
 	end
-	local dir = vector.new(dx / length, dy / length, dz / length)
-	local side = vector.new(dz / flat, 0, -dx / flat)
-	slot.beam:move_to(vector.new((from.x + to.x) / 2, (from.y + to.y) / 2,
-		(from.z + to.z) / 2), true)
-	slot.beam:set_rotation(vector.dir_to_rotation(side, dir))
+	slot.beam:move_to(centre, true)
+	slot.beam:set_rotation(rotation)
 	-- Properties are a whole packet; only resend them when the length has
 	-- moved enough to see.
 	if not slot.length or math.abs(slot.length - length) > 0.2 then
@@ -1288,6 +1622,33 @@ local function update_shows(visitors)
 			occupied[map.id] = here or nil
 		end
 	end
+end
+
+-- The serpent console: the next pattern for the show on the map it stands on,
+-- told to everyone there. Returns the pattern, or nil off a map with patterns.
+local PATTERN_NAMES = {
+	coil = "the lasers climb the coil and slither along the walk",
+	sweep = "the lasers race round the pylons and sweep the field",
+	fan = "the serpent breathes every laser at once, along the walk",
+}
+
+function lw_maps.punch_console(pos, player)
+	local map = lw_maps.at(pos)
+	if not (map and map.lasers and map.lasers.patterns) then
+		if player and player.is_player and player:is_player() then
+			core.chat_send_player(player:get_player_name(),
+				"The console is dead: it only works on a map with a laser show.")
+		end
+		return nil
+	end
+	local pattern = lw_maps.next_laser_pattern(map)
+	local text = "The serpent turns: " .. (PATTERN_NAMES[pattern] or pattern) .. "."
+	for _, other in ipairs(core.get_connected_players()) do
+		if current[other:get_player_name()] == map.id or other == player then
+			core.chat_send_player(other:get_player_name(), text)
+		end
+	end
+	return pattern
 end
 
 --------------------------------------------------------------------------

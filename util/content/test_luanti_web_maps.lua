@@ -248,7 +248,10 @@ core = {
 	_particles = {},
 	after = function(_, fn) afters[#afters + 1] = fn end,
 	log = function() end,
-	chat_send_player = function() end,
+	chat_send_player = function(name, text)
+		core._chat[#core._chat + 1] = {name = name, text = text}
+	end,
+	_chat = {},
 	formspec_escape = function(s) return s end,
 	get_item_group = function(name, group)
 		local def = core.registered_nodes[name]
@@ -290,6 +293,7 @@ local function FakePlayer(name)
 	local resets = 0
 	return {
 		get_player_name = function() return name end,
+		is_player = function() return true end,
 		get_pos = function() return {x = pos.x, y = pos.y, z = pos.z} end,
 		set_pos = function(_, to) pos = {x = to.x, y = to.y, z = to.z} end,
 		-- Mirrors the engine: only a call with no argument resets the sky; a
@@ -761,6 +765,174 @@ assert_eq(live(lw_maps.show_objects(arena.id)), #arena.lasers.colors,
 player:set_pos(hub)
 step(0.5)
 lw_amps = saved_amps
+
+--------------------------------------------------------------------------
+-- Weeks on Fire: the laser serpent's patterns and console, the mirror hall,
+-- the HOA memo, and beam_pose for the Laser Wand
+--------------------------------------------------------------------------
+
+local serpent = lw_maps.by_id["laser_serpent"]
+local mirror = lw_maps.by_id["mirror_hall"]
+assert_true(serpent ~= nil and serpent.lasers and serpent.lasers.patterns,
+	"the laser serpent has a show with patterns")
+assert_true(mirror ~= nil and mirror.lasers and not mirror.lasers.patterns,
+	"the mirror hall has a show of one pattern")
+assert_true(serpent.amps == nil and mirror.amps == nil, "neither plays a song")
+for _, map in ipairs({serpent, mirror}) do
+	local t = map.lasers.track
+	print(("TRACK %s %d %d %d %d %d"):format(map.id, t.x0, t.z0, t.x1, t.z1, t.y))
+end
+local coil = serpent.lasers.coil
+print(("COIL %s %d %d %.4f %d %d %.4f %.6f"):format(serpent.id, coil.x, coil.z,
+	coil.radius, coil.y0, coil.rise, coil.turns, coil.start))
+local mouth = serpent.lasers.mouth
+print(("MOUTH %s %d %d %d"):format(serpent.id, mouth.x, mouth.y, mouth.z))
+local serpent_walk = serpent.lasers.walk
+print(("WALK %s %d %d %d %d"):format(serpent.id, serpent_walk.x0, serpent_walk.x1, serpent_walk.z, serpent_walk.y))
+
+assert_eq(lw_maps.laser_pattern(serpent), "coil", "the serpent starts on its coil")
+assert_eq(lw_maps.laser_pattern(mirror), "sweep", "a show without patterns sweeps")
+assert_eq(lw_maps.laser_pattern(arena), "sweep", "and so do the arenas")
+
+local function on_coil(pos)
+	local x, z = pos.x - serpent.origin.x, pos.z - serpent.origin.z
+	local radius = math.sqrt((x - coil.x) ^ 2 + (z - coil.z) ^ 2)
+	local y = pos.y - serpent.origin.y
+	return math.abs(radius - coil.radius) < 1e-6 and y >= coil.y0 + 1 - 1e-6
+		and y <= coil.y0 + coil.rise + 2
+end
+local function lands_on_walk(slot)
+	local from, mid = slot.emitter:get_pos(), slot.beam:get_pos()
+	local to = vector.subtract(vector.multiply(mid, 2), from)
+	local x, z = to.x - serpent.origin.x, to.z - serpent.origin.z
+	return x >= serpent_walk.x0 - 1e-6 and x <= serpent_walk.x1 + 1e-6
+		and math.abs(z - serpent_walk.z) <= serpent_walk.wave + 0.6 * #serpent.lasers.colors
+		and math.abs(to.y - (serpent.origin.y + serpent_walk.y - 0.48)) < 0.05
+end
+
+player:set_pos(serpent.spawn)
+step(0.5)
+assert_eq(player:_ratio(), serpent.day_night_ratio, "it is night on the serpent's field")
+local serpent_slots = lw_maps.show_objects(serpent.id)
+assert_eq(live(serpent_slots), #serpent.lasers.colors, "the serpent's lasers run")
+for index, slot in ipairs(serpent_slots) do
+	assert_true(on_coil(slot.emitter:get_pos()), ("emitter %d climbs the coil"):format(index))
+	assert_true(lands_on_walk(slot), ("beam %d lands on the walk"):format(index))
+end
+local climb = {}
+for index, slot in ipairs(serpent_slots) do
+	climb[index] = slot.emitter:get_pos()
+end
+step(0.1)
+step(0.1)
+for index, slot in ipairs(serpent_slots) do
+	assert_true(vector.distance(slot.emitter:get_pos(), climb[index]) > 0.1,
+		("emitter %d moves up the coil"):format(index))
+end
+
+-- The console changes the pattern for the map, and says so to whoever is
+-- there; round the list and back.
+local console = vector.offset(serpent.origin, 2, 5, 17)
+core._chat = {}
+assert_eq(lw_maps.punch_console(console, player), "sweep", "one punch: sweep")
+assert_true(#core._chat == 1 and core._chat[1].name == "visitor"
+	and core._chat[1].text:find("pylons", 1, true) ~= nil, "the visitor is told")
+step(0.1)
+local truss_y = serpent.origin.y + serpent.lasers.track.y + 0.8
+for index, slot in ipairs(serpent_slots) do
+	assert_true(math.abs(slot.emitter:get_pos().y - truss_y) < 1e-6,
+		("sweep: emitter %d rides the pylon caps"):format(index))
+end
+assert_eq(lw_maps.punch_console(console, player), "fan", "two punches: fan")
+step(0.1)
+local mouth_world = lw_maps.to_world(serpent, mouth)
+for index, slot in ipairs(serpent_slots) do
+	local at = slot.emitter:get_pos()
+	assert_true(math.abs(at.x - mouth_world.x) < 1e-6 and math.abs(at.y - mouth_world.y) < 1e-6
+		and math.abs(at.z - mouth_world.z) < 1, ("fan: emitter %d is in the mouth"):format(index))
+	assert_true(lands_on_walk(slot), ("fan: beam %d lands on the walk"):format(index))
+end
+assert_eq(lw_maps.punch_console(console, player), "coil", "and round to the coil")
+-- The node's own callbacks go through the same function.
+local switch = core.registered_nodes["lw_maps:serpent_switch"]
+core._chat = {}
+switch.on_punch(console, {name = "lw_maps:serpent_switch"}, player)
+assert_eq(lw_maps.laser_pattern(serpent), "sweep", "punching the node turns it")
+switch.on_rightclick(console, {name = "lw_maps:serpent_switch"}, player)
+assert_eq(lw_maps.laser_pattern(serpent), "fan", "so does right clicking it")
+lw_maps.punch_console(console, player)
+assert_eq(lw_maps.laser_pattern(serpent), "coil", "back to the start")
+-- A console carried off to a map without patterns does nothing.
+assert_eq(lw_maps.punch_console(mirror.spawn, nil), nil, "no patterns, no turn")
+assert_eq(lw_maps.laser_pattern(mirror), "sweep", "the mirror hall still sweeps")
+assert_eq(lw_maps.punch_console({x = 0, y = 10, z = -14}, nil), nil, "nor off any map")
+
+player:set_pos(mirror.spawn)
+step(0.5)
+assert_eq(lw_maps.show_objects(serpent.id), nil, "leaving the field takes its lasers")
+assert_eq(live(lw_maps.show_objects(mirror.id)), #mirror.lasers.colors,
+	"the mirror hall's lasers run")
+assert_eq(player:_ratio(), mirror.day_night_ratio, "it is twilight in the mirror hall")
+player:set_pos(hub)
+step(0.5)
+
+-- Lamp pairs: the coil's scales, the embers and the crystals all swap.
+for _, pair in ipairs({{"lw_maps:serpent_scale", "lw_maps:serpent_scale_off"},
+		{"lw_maps:ember_block", "lw_maps:ember_block_off"},
+		{"lw_maps:crystal", "lw_maps:crystal_dim"}}) do
+	local at = {x = 500, y = 20, z = 500}
+	core.set_node(at, {name = pair[2]})
+	lw_maps.set_lamp(vector.offset(at, 0, 1, 0), true)
+	assert_eq(core.get_node(at).name, pair[1], pair[2] .. " lights")
+	lw_maps.set_lamp(vector.offset(at, 0, 1, 0), false)
+	assert_eq(core.get_node(at).name, pair[2], pair[1] .. " dims")
+end
+
+-- The HOA memo: every notice once before any repeats, and it shows the one
+-- it last told.
+local memo_def = core.registered_nodes["lw_maps:hoa_memo"]
+assert_true(memo_def and memo_def.on_punch and memo_def.on_rightclick, "the memo board reads")
+local board = {x = 7, y = 9, z = 12}
+memo_def.on_construct(board)
+assert_true(core.get_meta(board):get_string("infotext"):find("punch", 1, true) ~= nil,
+	"a fresh board says how to read it")
+local read, distinct = {}, 0
+core._chat = {}
+for _ = 1, #lw_maps.HOA_MEMOS do
+	local text = lw_maps.read_memo(board, player)
+	if not read[text] then
+		read[text] = true
+		distinct = distinct + 1
+	end
+	assert_true(core.get_meta(board):get_string("infotext"):find(text, 1, true) ~= nil,
+		"the board shows the memo it read")
+end
+assert_eq(distinct, #lw_maps.HOA_MEMOS, "every memo once before a repeat")
+assert_eq(#core._chat, #lw_maps.HOA_MEMOS, "each one told to the reader")
+local first_again = lw_maps.read_memo(board, nil)
+assert_true(read[first_again], "and then round again")
+local other_board = {x = 31, y = 9, z = 14}
+assert_true(lw_maps.read_memo(other_board) ~= lw_maps.read_memo({x = 32, y = 9, z = 14}),
+	"neighbouring boards start on different memos")
+
+-- beam_pose: centred, as long as the gap, pointing along it; straight down
+-- too, which the arenas never ask for and the Laser Wand does.
+for _, ends in ipairs({
+		{{x = 0, y = 10, z = 0}, {x = 3, y = 2, z = 4}},
+		{{x = 1, y = 10, z = 1}, {x = 1, y = 2, z = 1}},
+		{{x = 1, y = 2, z = 1}, {x = 1, y = 10, z = 1}}}) do
+	local from, to = ends[1], ends[2]
+	local centre, rotation, length = lw_maps.beam_pose(from, to)
+	assert_true(centre ~= nil, "a beam has a pose")
+	assert_true(vector.distance(centre, vector.multiply(vector.add(from, to), 0.5)) < 1e-9,
+		"centred between its ends")
+	assert_true(math.abs(length - vector.distance(from, to)) < 1e-9, "as long as the gap")
+	local up = vector.rotate({x = 0, y = 1, z = 0}, rotation)
+	assert_true(vector.distance(up, vector.direction(from, to)) < 1e-6,
+		"pointing from one end to the other")
+end
+assert_eq(lw_maps.beam_pose({x = 1, y = 1, z = 1}, {x = 1, y = 1, z = 1}), nil,
+	"no pose for a beam of no length")
 
 --------------------------------------------------------------------------
 -- /maps

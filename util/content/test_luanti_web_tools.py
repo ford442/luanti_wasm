@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -60,6 +61,8 @@ def test_kit_and_hook_in_source() -> None:
 		"lw_tools:light_wand",
 		"lw_theater:remote",
 		"lw_tools:stamp",
+		"lw_tools:laser_wand",
+		"lw_tools:ember_tool",
 	):
 		assert_true(item in core, f"starter kit missing {item}")
 	assert_true("give_initial_stuff" in core, "give_initial_stuff alias missing")
@@ -77,6 +80,23 @@ def test_kit_and_hook_in_source() -> None:
 
 	logic = (ROOT / "games/luanti_web/mods/lw_tools/logic.lua").read_text(encoding="utf-8")
 	assert_true("MAX_CLONE_VOLUME = 32 * 32 * 32" in logic, "32³ cap missing")
+
+	# The Laser Wand's beams and the embers are temporary and never saved.
+	assert_true('register_entity("lw_tools:laser"' in tools, "laser entity missing")
+	laser = tools.split('register_entity("lw_tools:laser"', 1)[1].split("})", 1)[0]
+	assert_true("static_save = false" in laser, "wand lasers must not be saved")
+	assert_true("lw_maps.beam_pose" in tools, "the wand poses beams the arena's way")
+	assert_true("damage_per_second = 0" in tools and 'drop = ""' in tools,
+		"embers do no damage and drop nothing")
+	# An item and a node may not share a name: the one registered second
+	# replaces the other (the Ember Tool once replaced the ember node, and with
+	# it the node's on_construct, so embers never went out).
+	items = {"lw_tools:" + n for n in re.findall(r'register_kit_item\("([a-z_]+)"', tools)}
+	nodes = set(re.findall(r'lw_tools\.EMBER(?:_LOW)? = "(lw_tools:[a-z_]+)"', logic))
+	assert_true(len(nodes) == 2, "ember node names not found in logic.lua")
+	assert_true(not (items & nodes), f"lw_tools items and nodes share names: {items & nodes}")
+	conf = (ROOT / "games/luanti_web/mods/lw_tools/mod.conf").read_text(encoding="utf-8")
+	assert_true("lw_maps" in conf, "lw_tools must depend on lw_maps for beam_pose")
 
 
 def test_textures_exist() -> None:

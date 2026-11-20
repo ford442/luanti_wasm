@@ -19,8 +19,9 @@ QA sandbox and this game is not a replacement for it.
                                                                  concert arena
  thunder chapel                                                  Around arena
  (north-northwest)                                              (north-northeast)
-  | smoke caldera      [ theater ]                 z = 34..62    |    crystal bazaar
-  |  (northwest)            |                                    |     (northeast)
+  | laser serpent -- smoke caldera  [ theater ]    z = 34..62    |    crystal bazaar -- mirror hall
+  |  (west, via the   (northwest)       |                        |     (northeast)    (east, via the
+  |   caldera's tube)  |                |                        |          |         arcade's end)
   |   |    [ library ]--[ courtyard ]--[ gallery ]   z = 4..32   |          |
   '---+----------------.    |    .-------------------------------'          |
                        |    |    |  .---------------------------------------'
@@ -34,6 +35,10 @@ QA sandbox and this game is not a replacement for it.
 
  cabaret club (west-southwest): west of the lighthouse, by its own causeway
  from the plaza's south-west corner
+
+ Weeks on Fire: the laser serpent is a spur off the smoke caldera, out of its
+ basalt tube; the mirror hall is a spur off the crystal bazaar, out of the
+ end of its arcade
 ```
 
 The plaza is the hub. The showcase tour runs north from it; ten causeways
@@ -63,8 +68,11 @@ plaza's south-west corner), so none of them crosses the tour.
    arena, where "Around" starts as you walk in and the band plays; a ruined
    chapel under a Halloween thunderstorm, where lightning strikes the spire
    and thunder rolls after it; and a cabaret club with a velvet stage where
-   Rubella and Lillith perform. Walk a causeway or use
-   `/maps`. Full
+   Rubella and Lillith perform. Two more islands are from Weeks on Fire: a
+   laser serpent coiled on a night ash field, whose beams sweep the walk past
+   it in a pattern you change at its console, and a mirror hall with a crystal
+   skull under a vault of mirror tiles and a gallery of chasing crystals. Walk
+   a causeway or use `/maps`. Full
    footprints, spawns and intended time of day are in
    [`docs/maps.md`](docs/maps.md).
 
@@ -77,8 +85,8 @@ plaza's south-west corner), so none of them crosses the tour.
 | `lw_dance` | the player character mesh, dance mode, the six-move dance pad, the stage hint, the routine director that dances NPCs to the same catalog, and the Lace Waterfall band and crowd rigs |
 | `lw_amps` | stage amp cabs that play a song as a left/right pair of positional mono sources, `/amp`, the song events the director dances to, map stages and playlists, and the cabaret's song slot (see `docs/amps.md`) |
 | `lw_theater` | screen nodes, seats, marquee, the remote, both theater tiers |
-| `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere and storms (rain, lightning, thunder), the optional organ slot, `/maps` |
-| `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp |
+| `lw_maps` | the themed map pack: its props, the map registry, the per-player atmosphere and storms (rain, lightning, thunder), the laser shows and their patterns, the HOA memo boards, the optional organ slot, `/maps` |
+| `lw_tools` | visitor authoring tools: Param2, paint, clone, light wand, schematic stamp, Laser Wand, Ember Tool |
 | `lw_world` | the authored world and its schematics, stamped onto a singlenode mapgen; `/lw_schem` authoring tools |
 
 ## Controls worth knowing
@@ -104,6 +112,10 @@ plaza's south-west corner), so none of them crosses the tour.
 * **Light Wand** — use places a hidden light; sneak+use or right click removes one.
 * **Screen Remote** — the only item that talks to the theater. Left click next reel, sneak+left pause, right click play (browser video overlay, or the animated wall).
 * **Schematic Stamp** — one-click seat row, column, or picture frame. Sneak+use cycles the stamp.
+* **Laser Wand** — use fires a laser beam at the pointed node for 4 s; right click two nodes to string a beam between them for 12 s; sneak+use puts all your beams out. At most eight at a time per visitor, and none are saved.
+* **Ember Tool** — use lights an ember on the pointed face. It burns, sputters and goes out by itself after about 7 s. Use it on an ember, or sneak+use, to put it out. No damage and no spread.
+* Punch an **HOA memo** board (the laser serpent and the mirror hall each have one) to read the next notice.
+* Punch the **serpent console** at the end of the laser serpent's walk to change the beams' pattern: coil, sweep, fan.
 * Punch the red reel button on the east theater pedestal to cycle reels without opening the inventory.
 * Right click a theater seat to sit in it facing the screen (or `/sit` anywhere). Jump to stand up.
 * Punch a chandelier to dim or raise the house lights.
