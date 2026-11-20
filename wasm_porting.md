@@ -627,17 +627,18 @@ Bundle:
   `lw_world` keeps each loaded schematic run-length encoded, a row at a time,
   in two Lua strings (three bytes per run, three per row), so a map costs its
   runs rather than its box. Measured with `lw_world`'s own loader under Lua 5.1,
-  the thirteen maps keep **127 KiB** between them (17 KiB for the busiest, the
-  Halloween lane; 16 KiB for the 44,800-cell snow
+  the fourteen maps keep **146 KiB** between them (19 KiB for the busiest, the
+  58,240-cell waterfall cascade; 17 KiB for the Halloween lane; 16 KiB for the 44,800-cell snow
   mountain), where the previous one-slot-per-cell arrays (node and `param2`,
   air included, 16 bytes a slot, rounded to a power of two) kept 10.0 MiB.
   Loading one still peaks at about 250 bytes a cell (10.9 MiB for the
-  mountain) until the engine's `read_schematic` table is collected; that is
+  mountain, 13.8 MiB for the cascade) until the engine's `read_schematic` table is collected; that is
   now what limits a single map. `util/content/test_luanti_web_maps.py`
   repeats the measurement, round-trips every cell through the encoding, and
   fails past 512 KiB kept (64 KiB for one map), a 16 MiB load peak, 65,536
-  cells in one map, or 512,000 cells in the pack (a creep guard; the thirteen
-  maps are 308,166, the two Weeks on Fire islands 36,898 of them). The history of the old caps is in
+  cells in one map, or 512,000 cells in the pack (a creep guard; the fourteen
+  maps are 366,406, the two Weeks on Fire islands 36,898 of them and the
+  waterfall cascade 58,240). The history of the old caps is in
   `games/luanti_web/docs/maps.md` ("Budget").
 * Short sound effects as mono Vorbis under a few KiB each: the lighthouse horn
   and the thunder chapel's three thunder rolls

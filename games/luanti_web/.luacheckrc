@@ -29,6 +29,7 @@ globals = {
 	"core",
 	-- One global table per mod, the usual Luanti convention.
 	"lw_amps",
+	"lw_cascade",
 	"lw_core",
 	"lw_dance",
 	"lw_maps",

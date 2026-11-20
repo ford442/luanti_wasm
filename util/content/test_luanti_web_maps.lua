@@ -282,6 +282,9 @@ dofile(MODS .. "/lw_nodes/init.lua")
 dofile(MODS .. "/lw_theater/init.lua")
 dofile(MODS .. "/lw_amps/init.lua")
 dofile(MODS .. "/lw_maps/init.lua")
+-- The cascade's racks and geodes are in its schematic, so their nodes have to
+-- be registered for the node check; their own logic is test_luanti_web_cascade.lua's.
+dofile(MODS .. "/lw_cascade/init.lua")
 
 --------------------------------------------------------------------------
 -- Helpers
@@ -456,10 +459,15 @@ local function run_afters()
 	end
 end
 
+-- Spawners still running: the ones that last until they are deleted. A burst
+-- with a `time` (a petal shower, an eruption) ends by itself in the engine, so
+-- the stub never deletes it and it is not counted.
 local function spawners()
 	local count = 0
-	for _ in pairs(core._spawners) do
-		count = count + 1
+	for _, def in pairs(core._spawners) do
+		if (def.time or 0) == 0 then
+			count = count + 1
+		end
 	end
 	return count
 end
@@ -1582,6 +1590,153 @@ assert_true(now_left and now_left.x == cabaret_left.x and now_left.z == cabaret_
 player:set_pos({x = 0, y = 10, z = -14})
 step(1.0)
 assert_eq(lw_amps.now_playing(), nil, "leaving the cabaret stops its song")
+
+--------------------------------------------------------------------------
+-- The waterfall cascade: mist and spores while you are there, petal showers
+-- and flower eruptions on the storm's clock
+--------------------------------------------------------------------------
+
+local cascade = lw_maps.by_id["waterfall_cascade"]
+assert_true(cascade ~= nil and cascade.ambient and cascade.showers and cascade.eruption,
+	"the waterfall cascade has ambience, showers and an eruption")
+
+-- For the Python half, which checks each against the schematic.
+for _, box in ipairs(cascade.ambient) do
+	print(("AMBIENT %s %s %d %d %d %d %d %d"):format(cascade.id, box.kind,
+		box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z))
+	assert_true(lw_maps.AMBIENT_KINDS[box.kind] ~= nil, "ambient kind " .. box.kind .. " exists")
+end
+for _, source in ipairs(cascade.showers.sources) do
+	print(("SHOWER %s %d %d %d %d %d %d"):format(cascade.id,
+		source.min.x, source.min.y, source.min.z, source.max.x, source.max.y, source.max.z))
+end
+local eruption_at = cascade.eruption.at
+print(("ERUPT %s %d %d %d"):format(cascade.id, eruption_at.x, eruption_at.y, eruption_at.z))
+
+local function persistent_for(name)
+	local count = 0
+	for _, def in pairs(core._spawners) do
+		if (def.time or 0) == 0 and def.playername == name then
+			count = count + 1
+		end
+	end
+	return count
+end
+
+-- Nobody there: nothing. Arriving starts one spawner per ambient box, staying
+-- keeps them, leaving deletes them all.
+core._spawners = {}
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+assert_eq(persistent_for("visitor"), 0, "no mist while nobody is on the cascade")
+player:set_pos(cascade.spawn)
+step(1.0)
+assert_eq(persistent_for("visitor"), #cascade.ambient, "arriving starts the mist and spores")
+step(1.0)
+step(1.0)
+assert_eq(persistent_for("visitor"), #cascade.ambient, "staying keeps them, not a pile")
+assert_eq(#lw_maps.ambient_spawners("visitor"), #cascade.ambient, "they are the visitor's")
+for _, def in pairs(core._spawners) do
+	if (def.time or 0) == 0 then
+		assert_true(lw_maps.at(def.minpos) == cascade and lw_maps.at(def.maxpos) == cascade,
+			"the mist is on the cascade")
+	end
+end
+player:set_pos(snow.spawn)
+step(1.0)
+assert_eq(persistent_for("visitor"), 0, "walking off to the mountain stops them")
+
+-- The showers: over one cycle each source sheds exactly once, never two in
+-- the same second.
+local showers = cascade.showers
+local counts = {}
+for t = 0, showers.period - 1 do
+	local due = lw_maps.showers_due(showers, t)
+	assert_true(#due <= 1, ("two showers at once at %d"):format(t))
+	for _, index in ipairs(due) do
+		counts[index] = (counts[index] or 0) + 1
+	end
+end
+for index = 1, #showers.sources do
+	assert_eq(counts[index], 1, ("shower source %d sheds once a cycle"):format(index))
+end
+assert_true(showers.length < showers.period / #showers.sources + 1,
+	"one shower is about over before the next begins")
+
+-- The eruption: once a period, at its offset.
+local eruptions = 0
+for t = 0, cascade.eruption.period * 3 - 1 do
+	if lw_maps.eruption_due(cascade.eruption, t) then
+		eruptions = eruptions + 1
+		assert_eq(t % cascade.eruption.period, cascade.eruption.offset, "on its offset")
+	end
+end
+assert_eq(eruptions, 3, "the volcano erupts once a period")
+
+-- On the island when it is due: one spawner per colour from the crater, for
+-- that visitor only, and a rumble. Off it: nothing.
+local function bursts_for(name, texture)
+	local count = 0
+	for _, def in pairs(core._spawners) do
+		if (def.time or 0) > 0 and def.playername == name
+				and def.texture:sub(1, #texture) == texture then
+			count = count + 1
+		end
+	end
+	return count
+end
+local sounds = {}
+local real_sound_play = core.sound_play
+core.sound_play = function(name, params)
+	sounds[#sounds + 1] = {name = name, params = params}
+	return 1
+end
+core._spawners = {}
+core._gametime = cascade.eruption.offset
+step(0.1)
+assert_eq(bursts_for("visitor", "lw_bloom.png"), 0, "no eruption seen from the mountain")
+player:set_pos(cascade.spawn)
+step(1.0)
+core._spawners = {}
+sounds = {}
+core._gametime = cascade.eruption.period + cascade.eruption.offset
+step(0.1)
+assert_eq(bursts_for("visitor", "lw_bloom.png"), #cascade.eruption.colors,
+	"an eruption throws one spray of flowers per colour")
+local crater = lw_maps.to_world(cascade, cascade.eruption.at)
+for _, def in pairs(core._spawners) do
+	if def.texture:sub(1, 12) == "lw_bloom.png" then
+		assert_true(def.minpos.x <= crater.x and def.maxpos.x >= crater.x
+			and def.minpos.z <= crater.z and def.maxpos.z >= crater.z,
+			"out of the crater")
+		assert_true(def.minvel.y > 0 and def.collision_removal, "up, and gone when it lands")
+	end
+end
+assert_eq(#sounds, 1, "with one rumble")
+assert_eq(sounds[1] and sounds[1].name, cascade.eruption.rumble, "the thunder, pitched down")
+step(0.1)
+assert_eq(bursts_for("visitor", "lw_bloom.png"), #cascade.eruption.colors,
+	"the same second does not erupt twice")
+core.sound_play = real_sound_play
+
+-- A shower due now rains petals from that source.
+core._spawners = {}
+local shower_t = 3 * showers.period + math.floor(2 * showers.period / #showers.sources)
+core._gametime = shower_t
+step(0.1)
+assert_eq(bursts_for("visitor", "lw_petal.png"), 1, "one shower at a time")
+local source = showers.sources[3]
+for _, def in pairs(core._spawners) do
+	if def.texture:sub(1, 12) == "lw_petal.png" then
+		assert_eq(def.minpos.x, lw_maps.to_world(cascade, source.min).x, "from the third source")
+		assert_true(def.minvel.y < 0, "petals fall")
+	end
+end
+
+player:set_pos({x = 0, y = 10, z = -14})
+step(1.0)
+core._gametime = 0
+core._spawners = {}
 
 --------------------------------------------------------------------------
 -- Node list, for the Python half

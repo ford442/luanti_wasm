@@ -542,6 +542,139 @@ register("serpent_switch", {
 })
 
 --------------------------------------------------------------------------
+-- Waterfall cascade
+--------------------------------------------------------------------------
+
+-- A falling sheet of water that is not a liquid: an animated, glowing,
+-- see-through node you can climb, so the cascade's five falls cost the WASM
+-- worker no liquid simulation. The streams and pools it pours into are plain
+-- lw_nodes:water, which never spreads. Not pointable, so a visitor reaching
+-- for a geode behind the spray still gets the geode.
+register("waterfall", {
+	description = "Glowing Waterfall",
+	drawtype = "glasslike",
+	tiles = {{
+		name = "lw_waterfall.png",
+		backface_culling = false,
+		animation = {type = "vertical_frames", aspect_w = 16, aspect_h = 16, length = 0.8},
+	}},
+	use_texture_alpha = "blend",
+	paramtype = "light",
+	sunlight_propagates = true,
+	light_source = 6,
+	walkable = false,
+	pointable = false,
+	diggable = false,
+	buildable_to = false,
+	climbable = true,
+	post_effect_color = {a = 90, r = 70, g = 200, b = 210},
+	groups = {not_in_creative_inventory = 1},
+})
+
+-- Bioluminescent flora. Plantlike sprites are two quads each, the cheapest
+-- thing there is to draw; the caps, stems, leaves and moss are palette tiles
+-- re-tinted, like the wool cubes.
+local function register_glow_plant(name, description, texture, light, box)
+	register(name, {
+		description = description,
+		drawtype = "plantlike",
+		tiles = {texture},
+		inventory_image = texture,
+		wield_image = texture,
+		use_texture_alpha = "clip",
+		paramtype = "light",
+		sunlight_propagates = true,
+		walkable = false,
+		buildable_to = false,
+		light_source = light,
+		selection_box = {type = "fixed", fixed = box},
+		groups = {snappy = 3, oddly_breakable_by_hand = 3},
+	})
+end
+
+register_glow_plant("glow_shroom", "Glowing Toadstools", "lw_glow_shroom.png", 6,
+	{-0.3, -0.5, -0.3, 0.3, 0.1, 0.3})
+register_glow_plant("glow_fern", "Glowing Fern", "lw_glow_fern.png", 4,
+	{-0.4, -0.5, -0.4, 0.4, 0.3, 0.4})
+-- Morning glories hang from the clouds and the spring terrace's edge; the
+-- petals that rain from under them are lw_maps' `showers`.
+register_glow_plant("morning_glory", "Hanging Morning Glory", "lw_morning_glory.png", 5,
+	{-0.35, -0.5, -0.35, 0.35, 0.5, 0.35})
+
+register("glow_cap", {
+	description = "Glowing Mushroom Cap",
+	tiles = {"lw_wool.png^[multiply:#3ee8d0"},
+	paramtype = "light",
+	light_source = 11,
+	groups = {snappy = 2, oddly_breakable_by_hand = 3},
+})
+
+register("glow_cap_violet", {
+	description = "Glowing Mushroom Cap (violet)",
+	tiles = {"lw_wool.png^[multiply:#b070ff"},
+	paramtype = "light",
+	light_source = 10,
+	groups = {snappy = 2, oddly_breakable_by_hand = 3},
+})
+
+register("glow_stem", {
+	description = "Mushroom Stem",
+	tiles = {"lw_wool.png^[multiply:#e8e2f0"},
+	paramtype = "light",
+	light_source = 3,
+	groups = {snappy = 2, oddly_breakable_by_hand = 3},
+})
+
+-- Glowing leaves, lit and dim, for the flicker controllers that make a few
+-- of each canopy twinkle.
+register("glow_leaves", {
+	description = "Glowing Leaves",
+	drawtype = "allfaces_optional",
+	tiles = {"lw_leaves.png^[multiply:#46f0b0"},
+	use_texture_alpha = "clip",
+	paramtype = "light",
+	light_source = 9,
+	groups = {snappy = 3, oddly_breakable_by_hand = 3},
+})
+
+register("glow_leaves_dim", {
+	description = "Glowing Leaves (dim)",
+	drawtype = "allfaces_optional",
+	tiles = {"lw_leaves.png^[multiply:#1c5a48"},
+	use_texture_alpha = "clip",
+	paramtype = "light",
+	light_source = 3,
+	groups = {snappy = 3, oddly_breakable_by_hand = 3},
+})
+
+-- The path's edging: moss that glows, lit and dim, under chase controllers
+-- numbered from the causeway up, so pulses of light run up the path.
+register("glow_moss", {
+	description = "Glowing Moss",
+	tiles = {"lw_grass_top.png^[multiply:#7affd8"},
+	paramtype = "light",
+	light_source = 8,
+	groups = {crumbly = 3},
+})
+
+register("glow_moss_dim", {
+	description = "Glowing Moss (dim)",
+	tiles = {"lw_grass_top.png^[multiply:#2a6a58"},
+	paramtype = "light",
+	light_source = 2,
+	groups = {crumbly = 3},
+})
+
+-- A soft cloud you can stand on, faintly lit from inside.
+register("cloud", {
+	description = "Cloud",
+	tiles = {"lw_wool.png^[multiply:#f4f0ff"},
+	paramtype = "light",
+	light_source = 4,
+	groups = {snappy = 3, oddly_breakable_by_hand = 3},
+})
+
+--------------------------------------------------------------------------
 -- Lamp controllers
 --------------------------------------------------------------------------
 
@@ -568,6 +701,8 @@ lw_maps.register_lamp_pair("lw_maps:stage_light", "lw_maps:stage_light_off")
 lw_maps.register_lamp_pair("lw_maps:serpent_scale", "lw_maps:serpent_scale_off")
 lw_maps.register_lamp_pair("lw_maps:ember_block", "lw_maps:ember_block_off")
 lw_maps.register_lamp_pair("lw_maps:crystal", "lw_maps:crystal_dim")
+lw_maps.register_lamp_pair("lw_maps:glow_leaves", "lw_maps:glow_leaves_dim")
+lw_maps.register_lamp_pair("lw_maps:glow_moss", "lw_maps:glow_moss_dim")
 
 -- Light or dim whatever lamp is one node below `pos`. Only ever swaps a lamp
 -- for its own twin: if a visitor dug the lamp out, or built something else in
@@ -684,6 +819,14 @@ lw_maps.by_id = {}
 -- races lights and lasers round a track while anyone is there. See "Shows".
 -- `playlist = <name>` in place of `song` plays the first song lw_amps has in
 -- that playlist, and nothing while it has none.
+--
+-- `ambient = {{kind = "mist" | "spores", min = <local>, max = <local>}, ...}`
+-- keeps a particle spawner going in each box for whoever is on the map,
+-- `showers = {period, length, colors, sources = {{min, max}, ...}}` rains
+-- petals from each source in turn, and `eruption = {at, period, offset,
+-- length, colors, rumble}` throws flowers out of `at` every `period` seconds.
+-- All three are per player, on the storm's clock, and never saved. See
+-- "Ambience".
 function lw_maps.register(def)
 	assert(def.id and def.origin and def.size and def.spawn,
 		"lw_maps.register needs id, origin, size and spawn")
@@ -1100,6 +1243,62 @@ lw_maps.register({
 	},
 })
 
+lw_maps.register({
+	id = "waterfall_cascade",
+	title = "Waterfall cascade",
+	blurb = "A glowing river falling down five terraces under clouds hung with " ..
+		"morning glories, bioluminescent mushrooms and trees, a volcano that " ..
+		"erupts flowers, bikes to ride until they break and geodes full of gems.",
+	-- South of the snowy mountain, by a spur from the south mouth of its tunnel.
+	size = {x = 40, y = 28, z = 52},
+	origin = {x = -20, y = BASE, z = -136},
+	spawn = {x = -1, y = BASE + 4, z = -85},
+	-- Soft violet twilight in a close, pale mist: light enough to see the
+	-- falls from the causeway, dark enough that everything that glows does.
+	day_night_ratio = 0.3,
+	sky = lw_maps.sky({
+		sky = "#4a4680", horizon = "#a088c0",
+		night_sky = "#241f4a", night_horizon = "#5a4a80", indoors = "#2a2448",
+		sun_tint = "#ffb0d8", moon_tint = "#90a8ff",
+		fog = 72, fog_start = 0.25,
+	}),
+	-- Mist at the foot of each fall and the spring (CASCADE_TIERS and
+	-- CASCADE_SPRING in the generator), spores over the mushroom grove.
+	ambient = {
+		{kind = "mist", min = {x = 17, y = 4, z = 38}, max = {x = 22, y = 5, z = 40}},
+		{kind = "mist", min = {x = 17, y = 8, z = 31}, max = {x = 22, y = 9, z = 32}},
+		{kind = "mist", min = {x = 17, y = 12, z = 24}, max = {x = 22, y = 13, z = 25}},
+		{kind = "mist", min = {x = 17, y = 16, z = 17}, max = {x = 22, y = 17, z = 18}},
+		{kind = "mist", min = {x = 18, y = 20, z = 11}, max = {x = 21, y = 21, z = 12}},
+		{kind = "spores", min = {x = 1, y = 5, z = 44}, max = {x = 14, y = 10, z = 51}},
+	},
+	-- Petals from under each cloud's morning glories, and from the drape over
+	-- the spring terrace's edge (CASCADE_CLOUDS, CASCADE_DRAPE), one after
+	-- another round an 18-second cycle.
+	showers = {
+		period = 18,
+		length = 5,
+		colors = {"#c070ff", "#7a9aff", "#ff8ad0", "#f0e0ff"},
+		sources = {
+			{min = {x = 14, y = 11, z = 40}, max = {x = 24, y = 13, z = 46}},
+			{min = {x = 13, y = 17, z = 28}, max = {x = 25, y = 19, z = 34}},
+			{min = {x = 27, y = 20, z = 18}, max = {x = 35, y = 22, z = 22}},
+			{min = {x = 25, y = 16, z = 17}, max = {x = 37, y = 18, z = 17}},
+		},
+	},
+	-- Every half minute the volcano throws flowers out of its crater
+	-- (CASCADE_CRATER), north over the falls, with a low rumble.
+	eruption = {
+		at = {x = 20, y = 26, z = 2},
+		period = 30,
+		offset = 7,
+		length = 3,
+		colors = {"#ff5ab0", "#ffd040", "#b070ff", "#60f0d0"},
+		-- The thunder chapel's thunder, pitched down. Remove for a silent one.
+		rumble = "lw_thunder",
+	},
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------
@@ -1305,6 +1504,183 @@ local function storm_step()
 		if map and map.storm and last_flash[name] ~= now then
 			last_flash[name] = now
 			flash(player, map, k)
+		end
+	end
+end
+
+--------------------------------------------------------------------------
+-- Ambience
+--------------------------------------------------------------------------
+
+-- Particles a map wants while someone is on it, per player like the rain, so
+-- the worker only ever draws what one visitor can see and nothing is saved.
+--
+-- `ambient` boxes keep a spawner running for as long as the visitor stays.
+-- `showers` and `eruption` are bursts on the storm's clock, whole seconds of
+-- core.get_gametime(), so every visitor sees the same shower from the same
+-- cloud and the same eruption at the same moment, and a reload needs no state.
+lw_maps.AMBIENT_KINDS = {
+	-- Spray thrown up off a pool at the foot of a fall.
+	mist = {
+		amount = 5,
+		minvel = {x = -0.3, y = 0.2, z = 0.1}, maxvel = {x = 0.3, y = 0.8, z = 0.9},
+		minexptime = 1.5, maxexptime = 2.5,
+		minsize = 5, maxsize = 9,
+		texture = "lw_mist.png",
+		glow = 7,
+	},
+	-- Glowing spores drifting up out of a grove.
+	spores = {
+		amount = 4,
+		minvel = {x = -0.15, y = 0.15, z = -0.15}, maxvel = {x = 0.15, y = 0.45, z = 0.15},
+		minexptime = 4, maxexptime = 7,
+		minsize = 1, maxsize = 1.8,
+		texture = "lw_mist.png^[multiply:#7affd8",
+		glow = 13,
+	},
+}
+
+local ambience = {}      -- player name -> {map = id, ids = {spawner id, ...}}
+local last_burst = {}    -- player name -> gametime second last handled
+
+local function local_box(map, box)
+	return lw_maps.to_world(map, box.min), lw_maps.to_world(map, box.max)
+end
+
+local function start_ambient(player, map)
+	local ids = {}
+	for _, box in ipairs(map.ambient) do
+		local kind = lw_maps.AMBIENT_KINDS[box.kind]
+		if kind then
+			local minpos, maxpos = local_box(map, box)
+			local def = table.copy(kind)
+			def.time = 0
+			def.minpos, def.maxpos = minpos, maxpos
+			def.playername = player:get_player_name()
+			ids[#ids + 1] = core.add_particlespawner(def)
+		end
+	end
+	return ids
+end
+
+local function stop_ambient(name)
+	local have = ambience[name]
+	if not have then
+		return
+	end
+	for _, id in ipairs(have.ids) do
+		core.delete_particlespawner(id)
+	end
+	ambience[name] = nil
+end
+
+local function update_ambient(player, map)
+	local name = player:get_player_name()
+	local want = map and map.ambient and map.id or nil
+	local have = ambience[name]
+	if have and have.map == want then
+		return
+	end
+	stop_ambient(name)
+	if want then
+		ambience[name] = {map = want, ids = start_ambient(player, map)}
+	end
+end
+
+function lw_maps.ambient_spawners(name)
+	return ambience[name] and ambience[name].ids or nil
+end
+
+-- Which shower sources shed their petals at whole second `t`: source i (from
+-- 1) starts at (i - 1) / #sources of the way round the cycle.
+function lw_maps.showers_due(showers, t)
+	local due = {}
+	local count = #showers.sources
+	for index = 1, count do
+		if t % showers.period == math.floor((index - 1) * showers.period / count) then
+			due[#due + 1] = index
+		end
+	end
+	return due
+end
+
+function lw_maps.eruption_due(eruption, t)
+	return t % eruption.period == (eruption.offset or 0) % eruption.period
+end
+
+local function shower(name, map, index, t)
+	local showers = map.showers
+	local source = showers.sources[index]
+	local minpos, maxpos = local_box(map, source)
+	local color = showers.colors[(index + math.floor(t / showers.period)) %
+		#showers.colors + 1]
+	core.add_particlespawner({
+		amount = 36,
+		time = showers.length,
+		minpos = minpos, maxpos = maxpos,
+		minvel = {x = -0.4, y = -1.2, z = -0.4}, maxvel = {x = 0.4, y = -0.6, z = 0.4},
+		minacc = {x = -0.3, y = -0.2, z = -0.3}, maxacc = {x = 0.3, y = 0, z = 0.3},
+		minexptime = 5, maxexptime = 7,
+		minsize = 1.5, maxsize = 2.5,
+		collisiondetection = true,
+		collision_removal = true,
+		texture = "lw_petal.png^[multiply:" .. color,
+		glow = 5,
+		playername = name,
+	})
+end
+
+-- One eruption, seen by one player: a spray of flowers per colour out of the
+-- crater, thrown up and north over the falls, falling back slowly enough to
+-- drift down over the whole island, gone when they land.
+local function erupt(player, map)
+	local eruption = map.eruption
+	local name = player:get_player_name()
+	local at = lw_maps.to_world(map, eruption.at)
+	for _, color in ipairs(eruption.colors) do
+		core.add_particlespawner({
+			amount = 30,
+			time = eruption.length,
+			minpos = vector.offset(at, -0.6, 0, -0.6),
+			maxpos = vector.offset(at, 0.6, 0.5, 0.6),
+			minvel = {x = -3, y = 9, z = -1}, maxvel = {x = 3, y = 14, z = 6},
+			minacc = {x = 0, y = -4, z = 0}, maxacc = {x = 0, y = -3.5, z = 0},
+			minexptime = 8, maxexptime = 11,
+			minsize = 3, maxsize = 5,
+			collisiondetection = true,
+			collision_removal = true,
+			texture = "lw_bloom.png^[multiply:" .. color,
+			glow = 10,
+			playername = name,
+		})
+	end
+	if eruption.rumble and type(core.sound_play) == "function" then
+		pcall(core.sound_play, eruption.rumble, {
+			pos = at, to_player = name, gain = 0.5, pitch = 0.55,
+			max_hear_distance = 96,
+		}, true)
+	end
+end
+
+local function burst_step()
+	local now = core.get_gametime and core.get_gametime()
+	if not now then
+		return
+	end
+	now = math.floor(now)
+	for _, player in ipairs(core.get_connected_players()) do
+		local name = player:get_player_name()
+		local map = lw_maps.by_id[current[name] or ""]
+		if map and (map.showers or map.eruption) and last_burst[name] ~= now then
+			last_burst[name] = now
+			if map.showers then
+				for _, index in ipairs(lw_maps.showers_due(map.showers, now)) do
+					shower(name, map, index, now)
+				end
+			end
+			if map.eruption and lw_maps.eruption_due(map.eruption, now) then
+				erupt(player, map)
+			end
 		end
 	end
 end
@@ -1771,6 +2147,7 @@ local elapsed = 0
 
 core.register_globalstep(function(dtime)
 	storm_step()
+	burst_step()
 	show_step(dtime)
 	elapsed = elapsed + dtime
 	if elapsed < ATMOSPHERE_INTERVAL then
@@ -1784,6 +2161,7 @@ core.register_globalstep(function(dtime)
 		local map = lw_maps.at(player:get_pos())
 		apply(player, map)
 		update_rain(player, map)
+		update_ambient(player, map)
 		update_organ(player, map)
 		if map then
 			visitors[map.id] = (visitors[map.id] or 0) + 1
@@ -1811,6 +2189,8 @@ core.register_on_leaveplayer(function(player)
 		rain[name] = nil
 	end
 	last_flash[name] = nil
+	stop_ambient(name)
+	last_burst[name] = nil
 	stop_organ(name)
 	organ_sent[name] = nil
 end)

@@ -122,6 +122,11 @@ VINE = "lw_maps:vine"
 JUICE_RED = "lw_maps:juice_red"
 JUICE_GREEN = "lw_maps:juice_green"
 NEON_TUBE = "lw_maps:neon_tube"
+WATERFALL = "lw_maps:waterfall"
+MORNING_GLORY = "lw_maps:morning_glory"
+GLOW_SHROOM = "lw_maps:glow_shroom"
+GLOW_FERN = "lw_maps:glow_fern"
+BIKE_RACK = "lw_cascade:bike_rack"
 
 
 def wool(color: str) -> str:
@@ -134,7 +139,8 @@ def wool(color: str) -> str:
 # otherwise wall off a route and nothing would notice.
 NON_WALKABLE = frozenset({
 	AIR, WATER, COBWEB, TORCH, FIRE, VINE, HIDDEN_LIGHT, FLICKER, CHASE,
-	JUICE_RED, JUICE_GREEN, NEON_TUBE,
+	JUICE_RED, JUICE_GREEN, NEON_TUBE, WATERFALL, MORNING_GLORY, GLOW_SHROOM,
+	GLOW_FERN, BIKE_RACK,
 })
 
 # Nodes a player's head and chest can occupy but that are not full cubes, so
@@ -2829,6 +2835,445 @@ def build_mirror_hall() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 14. Waterfall cascade
+# --------------------------------------------------------------------------
+
+# A river that falls down five terraces in glowing sheets, south of the snowy
+# mountain: walk through the mountain's tunnel and out of its south mouth, and
+# the spur runs on over the water to the foot of the falls. Bioluminescent
+# mushrooms, trees and ferns line the way up; clouds hung with morning glories
+# shed their petals over it; and at the top, behind the spring the river rises
+# from, a volcano erupts flowers. Bike racks and gem geodes belong to
+# lw_cascade (bicycles you ride until they break, gems you dig and fuse).
+#
+# The falls are not flowing liquid. The streams and pools are lw_nodes:water,
+# which never spreads, and each sheet is lw_maps:waterfall, an animated,
+# glowing, climbable node, so nothing here runs the liquid simulation on the
+# WASM worker.
+#
+# 40 x 28 x 52 is 58,240 cells.
+CASCADE_SIZE = (40, 28, 52)
+# The causeway lands on the north face, on the middle of the landing.
+CASCADE_SPAWN = (19, FLOOR, 51)
+
+# The terraces, north (low, where the causeway lands) to south (high): each
+# runs z0..z1 and `top` is the local y of its top solid layer; you stand one
+# above it. Each cliff between them is four nodes, and so is each fall.
+CASCADE_TIERS = (
+	dict(z0=38, z1=51, top=SURFACE),
+	dict(z0=31, z1=37, top=SURFACE + 4),
+	dict(z0=24, z1=30, top=SURFACE + 8),
+	dict(z0=17, z1=23, top=SURFACE + 12),
+	dict(z0=0, z1=16, top=SURFACE + 16),
+)
+CASCADE_RIVER_X = (17, 22)
+# Each fall lands in a pool two deep, this many rows into the terrace below
+# and two wider than the river either side. The bottom one is the basin.
+CASCADE_POOL_ROWS = 2
+CASCADE_BASIN_ROWS = 4
+CASCADE_POOL_SPREAD = 2
+# The basin drains west to the island's edge.
+CASCADE_OUTFLOW_Z = (41, 43)
+
+# The path: up the east side to the second terrace, over the river by a
+# bridge, up the west side to the spring terrace, and back east over a second
+# bridge to the lookout.
+CASCADE_LANDING = dict(x0=15, x1=23, z0=46, z1=51)
+CASCADE_PATH_EAST_X = (28, 30)
+CASCADE_PATH_WEST_X = (9, 11)
+# (tier, z0, z1): a plank deck one above the stream, a stair at each end.
+CASCADE_BRIDGES = ((2, 26, 27), (4, 13, 14))
+CASCADE_LOOKOUT = dict(x0=26, x1=36, z0=12, z1=15)
+
+# The volcano: a basalt cone on the spring terrace's south edge. Its crater
+# is where the eruption comes from (`eruption.at` in lw_maps' registry row,
+# checked against CASCADE_CRATER by test_luanti_web_maps.py).
+VOLCANO = (20, 2)
+VOLCANO_TOP = CASCADE_SIZE[1] - 1
+VOLCANO_RADIUS_TOP = 2.5
+VOLCANO_SLOPE = 1.0                 # nodes of radius per node of height
+CASCADE_CRATER = (20, VOLCANO_TOP - 1, 2)
+# The spring the river rises from: a glowing sheet down a basalt buttress at
+# the cone's foot, into the top pool.
+CASCADE_SPRING = dict(x0=18, x1=21, z=11, y1=VOLCANO_TOP - 4)
+
+# Clouds over the falls, morning glories hanging under them: (x, z, y, rx, rz).
+# Petals rain from under each one (lw_maps' `showers`), and from the drape of
+# morning glories over the spring terrace's edge above the east lawn.
+CASCADE_CLOUDS = (
+	(19, 43, SURFACE + 12, 5.5, 3.0),
+	(19, 31, SURFACE + 18, 6.0, 3.0),
+	(31, 20, SURFACE + 21, 4.5, 2.5),
+)
+CASCADE_DRAPE = dict(x0=25, x1=37, z=17)
+
+# Giant glowing mushrooms in the grove west of the landing: (x, z, stem
+# height, cap radius, cap node).
+GLOW_CAP = "lw_maps:glow_cap"
+GLOW_CAP_VIOLET = "lw_maps:glow_cap_violet"
+GLOW_STEM = "lw_maps:glow_stem"
+GLOW_LEAVES = "lw_maps:glow_leaves"
+GLOW_LEAVES_DIM = "lw_maps:glow_leaves_dim"
+GLOW_MOSS = "lw_maps:glow_moss"
+CLOUD = "lw_maps:cloud"
+CASCADE_MUSHROOMS = (
+	(4, 48, 5, 2.5, GLOW_CAP),
+	(9, 50, 3, 1.6, GLOW_CAP_VIOLET),
+	(11, 46, 6, 2.8, GLOW_CAP_VIOLET),
+	(2, 39, 3, 1.5, GLOW_CAP),
+)
+# Glowing trees: (x, z, trunk height). They stand on whichever terrace holds z.
+CASCADE_TREES = (
+	(5, 34, 4), (12, 33, 3), (3, 28, 4), (14, 29, 3), (3, 20, 4),
+	(37, 21, 3), (4, 9, 5), (35, 5, 4), (7, 3, 4), (31, 9, 3),
+)
+
+# Where lw_cascade's racks stand, each beside the path: (x, y, z, facedir).
+CASCADE_RACKS = (
+	(25, FLOOR, 49, EAST),
+	(32, SURFACE + 9, 25, NORTH),
+	(13, SURFACE + 13, 19, NORTH),
+	(36, SURFACE + 17, 13, EAST),
+)
+GEODES = ("lw_cascade:geode_red", "lw_cascade:geode_yellow", "lw_cascade:geode_blue")
+
+
+def cascade_tier(z: int) -> dict:
+	for tier in CASCADE_TIERS:
+		if tier["z0"] <= z <= tier["z1"]:
+			return tier
+	raise ValueError(z)
+
+
+def cascade_top(z: int) -> int:
+	return cascade_tier(z)["top"]
+
+
+def volcano_height(x: int, z: int) -> int:
+	"""Local y of the cone's top over (x, z), or -1 off the cone."""
+	r = math.hypot(x - VOLCANO[0], z - VOLCANO[1])
+	h = VOLCANO_TOP - int((r - VOLCANO_RADIUS_TOP) / VOLCANO_SLOPE + 0.5)
+	if r < VOLCANO_RADIUS_TOP:
+		h = VOLCANO_TOP
+	return h if h > CASCADE_TIERS[-1]["top"] else -1
+
+
+def cascade_pools() -> list[dict]:
+	"""The pool at the foot of each fall, lowest first."""
+	pools = []
+	x0, x1 = CASCADE_RIVER_X
+	for index, tier in enumerate(CASCADE_TIERS[:-1]):
+		rows = CASCADE_BASIN_ROWS if index == 0 else CASCADE_POOL_ROWS
+		pools.append(dict(x0=x0 - CASCADE_POOL_SPREAD, x1=x1 + CASCADE_POOL_SPREAD,
+			z0=tier["z0"], z1=tier["z0"] + rows - 1, top=tier["top"]))
+	return pools
+
+
+def build_cascade_terraces(build: Build) -> None:
+	"""The stepped ground: rock, a dirt layer, grass on top."""
+	for x in range(build.sx):
+		for z in range(build.sz):
+			top = cascade_top(z)
+			build.box(x, 0, z, x, top - 2, z, STONE)
+			build.set(x, top - 1, z, DIRT)
+			build.set(x, top, z, GRASS)
+
+
+def build_cascade_river(build: Build) -> None:
+	"""Streams flush with their banks, a pool under every fall, the falls
+	themselves, the spring at the top and the basin's outflow."""
+	x0, x1 = CASCADE_RIVER_X
+	for tier in CASCADE_TIERS[1:]:
+		z_start = CASCADE_SPRING["z"] if tier is CASCADE_TIERS[-1] else tier["z0"]
+		build.box(x0, tier["top"], z_start, x1, tier["top"], tier["z1"], WATER)
+	for pool in cascade_pools():
+		build.box(pool["x0"], pool["top"] - 1, pool["z0"], pool["x1"], pool["top"],
+			pool["z1"], WATER)
+	for lower, upper in zip(CASCADE_TIERS, CASCADE_TIERS[1:]):
+		# The sheet hangs in front of the cliff, from the stream's level above
+		# down to the pool's surface.
+		build.box(x0, lower["top"] + 1, lower["z0"], x1, upper["top"], lower["z0"],
+			WATERFALL)
+	# The basin's outflow, west to the edge.
+	oz0, oz1 = CASCADE_OUTFLOW_Z
+	build.box(0, SURFACE, oz0, x0 - CASCADE_POOL_SPREAD - 1, SURFACE, oz1, WATER)
+
+	# The spring: a basalt buttress against the cone, the sheet down its face.
+	s = CASCADE_SPRING
+	top = CASCADE_TIERS[-1]["top"]
+	build.box(s["x0"] - 1, top + 1, s["z"] - 2, s["x1"] + 1, s["y1"] + 1, s["z"] - 1,
+		BASALT)
+	build.box(s["x0"], top + 1, s["z"], s["x1"], s["y1"], s["z"], WATERFALL)
+	build.box(s["x0"], s["y1"] + 1, s["z"] - 1, s["x1"], s["y1"] + 1, s["z"] - 1,
+		"lw_maps:crystal")
+	build.box(x0, top - 1, s["z"], x1, top, s["z"] + 1, WATER)
+
+
+def build_cascade_volcano(build: Build) -> None:
+	"""The cone, its crater of glowing lava under flicker controllers, and
+	three streaks of lava down its flanks."""
+	base = CASCADE_TIERS[-1]["top"] + 1
+	vx, vz = VOLCANO
+	for x in range(build.sx):
+		for z in range(build.sz):
+			h = volcano_height(x, z)
+			if h >= base:
+				build.box(x, base, z, x, h, z, BASALT)
+	cx, cy, cz = CASCADE_CRATER
+	for x in range(vx - 3, vx + 4):
+		for z in range(vz - 3, vz + 4):
+			r = math.hypot(x - vx, z - vz)
+			if r < VOLCANO_RADIUS_TOP:
+				build.clear(x, cy, z, x, VOLCANO_TOP, z)
+				build.set(x, cy - 1, z, LAVA if r < 1.6 else BASALT)
+				if r < 1.6:
+					build.set(x, cy, z, FLICKER)
+	# Streaks down the north-east and north-west flanks, either side of the
+	# spring.
+	for angle in (math.pi / 4, 3 * math.pi / 4):
+		for step in range(30):
+			r = VOLCANO_RADIUS_TOP + 0.5 + step * 0.3
+			x = int(round(vx + r * math.cos(angle)))
+			z = int(round(vz + r * math.sin(angle)))
+			h = volcano_height(x, z) if build.inside(x, 0, z) else -1
+			if h >= base:
+				build.set(x, h, z, LAVA)
+
+
+def build_cascade_path(build: Build) -> list[tuple[int, int]]:
+	"""The landing, the paved path, its stairs and bridges. Returns the path's
+	flat cells in walking order, causeway first, for the lamps along it."""
+	order: list[tuple[int, int]] = []
+
+	def pave(x0, z0, x1, z1):
+		for z in range(min(z0, z1), max(z0, z1) + 1):
+			for x in range(min(x0, x1), max(x0, x1) + 1):
+				top = cascade_top(z)
+				build.set(x, top, z, PAVING)
+				build.clear(x, top + 1, z, x, top + 3, z)
+				order.append((x, z))
+
+	stair = "lw_nodes:stair_stone_brick"
+	land = CASCADE_LANDING
+	ex0, ex1 = CASCADE_PATH_EAST_X
+	wx0, wx1 = CASCADE_PATH_WEST_X
+	t = CASCADE_TIERS
+	pave(land["x0"], land["z1"], land["x1"], land["z0"])
+	pave(land["x1"] + 1, 46, ex1, 48)
+	pave(ex0, 45, ex1, t[0]["z0"])
+	# Up into each terrace from the one below: four steps cut into its cliff.
+	stair_run(build, ex0, ex1, t[1]["z1"], -1, t[0]["top"] + 1, 4, stair)
+	pave(ex0, t[1]["z1"] - 4, ex1, t[1]["z0"])
+	stair_run(build, ex0, ex1, t[2]["z1"], -1, t[1]["top"] + 1, 4, stair)
+	b_tier, bz0, bz1 = CASCADE_BRIDGES[0]
+	pave(ex0, t[2]["z1"] - 4, ex1, t[2]["z0"])
+	pave(ex0 - 1, bz0, CASCADE_RIVER_X[1] + CASCADE_POOL_SPREAD, bz1)
+	pave(CASCADE_RIVER_X[0] - 2, bz0, wx0, bz1)
+	pave(wx0, bz0 - 1, wx1, t[2]["z0"])
+	stair_run(build, wx0, wx1, t[3]["z1"], -1, t[2]["top"] + 1, 4, stair)
+	pave(wx0, t[3]["z1"] - 4, wx1, t[3]["z0"])
+	stair_run(build, wx0, wx1, t[4]["z1"], -1, t[3]["top"] + 1, 4, stair)
+	c_tier, cz0, cz1 = CASCADE_BRIDGES[1]
+	pave(wx1 + 1, cz0, CASCADE_RIVER_X[0] - 2, cz1)
+	pave(CASCADE_RIVER_X[1] + 2, cz0, CASCADE_LOOKOUT["x0"], cz1)
+	lo = CASCADE_LOOKOUT
+	pave(lo["x0"], lo["z0"], lo["x1"], lo["z1"])
+
+	# The bridges: a plank deck one above the stream, a stair up at each end.
+	x0, x1 = CASCADE_RIVER_X
+	for tier_index, z0, z1 in CASCADE_BRIDGES:
+		top = CASCADE_TIERS[tier_index]["top"]
+		build.box(x0 - 1, top + 1, z0, x0 - 1, top + 1, z1, PLANK_STAIR, EAST)
+		build.box(x1 + 1, top + 1, z0, x1 + 1, top + 1, z1, PLANK_STAIR, WEST)
+		build.box(x0, top + 1, z0, x1, top + 1, z1, PLANKS)
+		build.clear(x0 - 1, top + 2, z0, x1 + 1, top + 4, z1)
+		for x in range(x0, x1 + 1, 2):
+			for z in (z0 - 1, z1 + 1):
+				if build.get(x, top, z) == WATER:
+					build.set(x, top + 1, z, "lw_nodes:fence")
+		for z in range(z0, z1 + 1):
+			order.append((x0 - 1, z))
+
+	# The lookout's rail, along the spring terrace's edge over the east lawn.
+	for x in range(lo["x0"] - 1, lo["x1"] + 2):
+		build.set(x, CASCADE_TIERS[-1]["top"] + 1, CASCADE_TIERS[-1]["z1"], "lw_nodes:fence")
+	return order
+
+
+def build_cascade_lamps(build: Build, order: list[tuple[int, int]]) -> list[tuple[int, int, int]]:
+	"""Glow moss along both edges of the path, each under a chase controller
+	numbered by how far up the path it is, so light runs from the causeway to
+	the lookout. Returns the moss cells in chase order."""
+	rank: dict[tuple[int, int], int] = {}
+	for index, cell in enumerate(order):
+		rank.setdefault(cell, index)
+	path = set(rank)
+	lamps: list[tuple[int, int, int, int]] = []
+	seen = set()
+	for (px, pz), index in sorted(rank.items(), key=lambda item: item[1]):
+		for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+			x, z = px + dx, pz + dz
+			if (x, z) in path or (x, z) in seen or not build.inside(x, 0, z):
+				continue
+			top = cascade_top(z)
+			if top != cascade_top(pz) or (x + z) % 2:
+				continue
+			if build.get(x, top, z) != GRASS or build.get(x, top + 1, z) != AIR:
+				continue
+			seen.add((x, z))
+			lamps.append((index, x, top, z))
+	lamps.sort()
+	out = []
+	for number, (_, x, y, z) in enumerate(lamps):
+		build.set(x, y, z, GLOW_MOSS)
+		# A step of the chase for every three lamps, so a pulse is a short
+		# run of moss rather than a single node.
+		build.set(x, y + 1, z, CHASE, (number // 3) % 8)
+		out.append((x, y, z))
+	return out
+
+
+def glow_tree(build: Build, x: int, z: int, height: int) -> None:
+	base = cascade_top(z) + 1
+	build.box(x, base, z, x, base + height - 1, z, "lw_nodes:beam")
+	cy = base + height
+	for cx in range(x - 3, x + 4):
+		for cyy in range(cy - 2, cy + 3):
+			for cz in range(z - 3, z + 4):
+				d = math.sqrt((cx - x) ** 2 + ((cyy - cy) * 1.3) ** 2 + (cz - z) ** 2)
+				if d <= 2.4 and build.get(cx, cyy, cz) == AIR:
+					build.set(cx, cyy, cz, GLOW_LEAVES)
+	build.set(x, cy, z, "lw_nodes:beam")
+	# A few top leaves twinkle: dim, with a flicker controller above.
+	for dx, dz in ((0, 0), (1, -1), (-1, 1)):
+		for y in range(cy + 3, cy - 3, -1):
+			if build.get(x + dx, y, z + dz) == GLOW_LEAVES:
+				if build.get(x + dx, y + 1, z + dz) == AIR:
+					build.set(x + dx, y, z + dz, GLOW_LEAVES_DIM)
+					build.set(x + dx, y + 1, z + dz, FLICKER)
+				break
+
+
+def glow_mushroom(build: Build, x: int, z: int, height: int, radius: float, cap: str) -> None:
+	base = cascade_top(z) + 1
+	build.box(x, base, z, x, base + height - 1, z, GLOW_STEM)
+	top = base + height
+	reach = int(radius) + 1
+	for cx in range(x - reach, x + reach + 1):
+		for cz in range(z - reach, z + reach + 1):
+			d = math.hypot(cx - x, cz - z)
+			if d <= radius:
+				build.set(cx, top, cz, cap)
+			if d <= radius - 1.2:
+				build.set(cx, top + 1, cz, cap)
+			# Gills: the cap's rim hangs down a node, so it reads as a cap.
+			if radius - 1 < d <= radius:
+				if build.get(cx, top - 1, cz) == AIR:
+					build.set(cx, top - 1, cz, cap)
+
+
+def build_cascade_flora(build: Build) -> None:
+	for x, z, height, radius, cap in CASCADE_MUSHROOMS:
+		glow_mushroom(build, x, z, height, radius, cap)
+	for x, z, height in CASCADE_TREES:
+		glow_tree(build, x, z, height)
+	# Small glowing fungi and ferns scattered over the grass, where nothing
+	# else stands.
+	for x in range(build.sx):
+		for z in range(build.sz):
+			top = cascade_top(z)
+			if build.get(x, top, z) != GRASS or build.get(x, top + 1, z) != AIR:
+				continue
+			roll = (x * 31 + z * 17 + (x * z) % 7) % 13
+			if roll == 0:
+				build.set(x, top + 1, z, GLOW_SHROOM)
+			elif roll in (5, 9):
+				build.set(x, top + 1, z, GLOW_FERN)
+	# Vines down the cliff faces, clear of the falls and the stairs.
+	for lower, upper in zip(CASCADE_TIERS, CASCADE_TIERS[1:]):
+		z = lower["z0"]
+		for x in range(build.sx):
+			if CASCADE_RIVER_X[0] - 3 <= x <= CASCADE_RIVER_X[1] + 3:
+				continue
+			if any(a - 1 <= x <= b + 1 for a, b in (CASCADE_PATH_EAST_X, CASCADE_PATH_WEST_X)):
+				continue
+			for y in range(lower["top"] + 1, upper["top"] + 1):
+				if (x * 5 + y) % 7 == 0 and build.get(x, y, z) == AIR:
+					build.set(x, y, z, VINE, NORTH)
+
+
+def build_cascade_clouds(build: Build) -> None:
+	"""Soft glowing clouds with morning glories hanging under them, and the
+	drape of them over the spring terrace's edge."""
+	for cx, cz, cy, rx, rz in CASCADE_CLOUDS:
+		for x in range(int(cx - rx) - 1, int(cx + rx) + 2):
+			for z in range(int(cz - rz) - 1, int(cz + rz) + 2):
+				d = ((x - cx) / rx) ** 2 + ((z - cz) / rz) ** 2
+				if d > 1:
+					continue
+				build.set(x, cy, z, CLOUD)
+				if d < 0.45:
+					build.set(x, cy + 1, z, CLOUD)
+				if (x + 2 * z) % 3 == 0:
+					length = 2 + (x * 7 + z * 3) % 3
+					for y in range(cy - length, cy):
+						build.set(x, y, z, MORNING_GLORY)
+	d = CASCADE_DRAPE
+	lip = CASCADE_TIERS[-1]["top"]
+	for x in range(d["x0"], d["x1"] + 1):
+		if x % 2:
+			continue
+		length = 1 + (x * 5) % 3
+		for y in range(lip - length + 1, lip + 1):
+			if build.get(x, y, d["z"]) == AIR:
+				build.set(x, y, d["z"], MORNING_GLORY)
+
+
+def build_cascade_geodes(build: Build) -> list[tuple[int, int, int]]:
+	"""lw_cascade's gem geodes, set into the walls of the stairs and the
+	first terrace's face, where a visitor on the path can reach them. Returns
+	them in placing order (red, yellow, blue, red, ...)."""
+	geodes: list[tuple[int, int, int]] = []
+
+	def geode(x, y, z):
+		if build.get(x, y, z) in (STONE, DIRT, GRASS):
+			build.set(x, y, z, GEODES[len(geodes) % len(GEODES)])
+			geodes.append((x, y, z))
+			# Nothing in front of it to point at instead.
+			for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+				if build.get(x + dx, y, z + dz) == VINE:
+					build.clear(x + dx, y, z + dz, x + dx, y, z + dz)
+
+	t = CASCADE_TIERS
+	for (x0, x1), upper in ((CASCADE_PATH_EAST_X, t[1]), (CASCADE_PATH_EAST_X, t[2]),
+			(CASCADE_PATH_WEST_X, t[3]), (CASCADE_PATH_WEST_X, t[4])):
+		z1 = upper["z1"]
+		lower_top = upper["top"] - 4
+		# Head height on the second step, west wall; the third, east wall.
+		geode(x0 - 1, lower_top + 3, z1 - 1)
+		geode(x1 + 1, lower_top + 4, z1 - 2)
+	for x in (3, 7, 12):
+		geode(x, SURFACE + 2, t[1]["z1"])
+	return geodes
+
+
+def build_waterfall_cascade() -> Build:
+	sx, sy, sz = CASCADE_SIZE
+	build = Build(sx, sy, sz)
+	build_cascade_terraces(build)
+	build_cascade_volcano(build)
+	build_cascade_river(build)
+	order = build_cascade_path(build)
+	for x, y, z, facing in CASCADE_RACKS:
+		build.set(x, y, z, BIKE_RACK, facing)
+	build_cascade_lamps(build, order)
+	build_cascade_flora(build)
+	build_cascade_clouds(build)
+	build_cascade_geodes(build)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -2871,6 +3316,8 @@ SPECS = [
 	MapSpec("map_concert_arena", CONCERT_SIZE, CONCERT_SPAWN, build_concert_arena),
 	MapSpec("map_laser_serpent", SERPENT_SIZE, SERPENT_SPAWN, build_laser_serpent),
 	MapSpec("map_mirror_hall", MIRROR_SIZE, MIRROR_SPAWN, build_mirror_hall),
+	MapSpec("map_waterfall_cascade", CASCADE_SIZE, CASCADE_SPAWN,
+		build_waterfall_cascade),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}
@@ -2898,7 +3345,8 @@ SPAWNS = {spec.name: spec.spawn for spec in SPECS}
 # from 10.0 MiB kept to 110 KiB, and the cell cap was re-based at 512,000:
 # roughly the eleven maps of the time again, with their share of room for
 # about eight more maps the size of the concert arena. The two Weeks on Fire
-# islands (laser serpent, mirror hall) took 36,898 of that: 308,166 now.
+# islands (laser serpent, mirror hall) took 36,898 of that: 308,166. The
+# waterfall cascade adds 58,240 (the pack's biggest box): 366,406 now.
 NODE_BUDGET = 512_000
 MAX_MAP_VOLUME = 65_536
 
