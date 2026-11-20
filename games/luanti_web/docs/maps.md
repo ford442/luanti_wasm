@@ -6,7 +6,7 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Thirteen authored maps ship with the showcase pack, as islands around the hub
+Fourteen authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
@@ -23,9 +23,11 @@ in about three minutes.
              west            |    |     |               east
                              |    |     '----------.
                              |  [ snow mountain ]  |
-                             |       south         |
-       [ lighthouse ]--------'                     '--[ rainbow storm ]
-         southwest                                       southeast
+                             |       south   |     |
+       [ lighthouse ]--------'               |     '--[ rainbow storm ]
+         southwest                           |           southeast
+                                   [ waterfall cascade ]  (spur from the
+                                         far south         tunnel's south mouth)
 
   [ cabaret club ]  west of the lighthouse: its causeway leaves the plaza's
    west-southwest   south-west corner, south of the Halloween lane's
@@ -33,7 +35,9 @@ in about three minutes.
 
 The laser serpent and the mirror hall are the pack's two Weeks on Fire
 islands. Neither has a causeway from the plaza, whose faces are full: like the
-concert arena, each is a spur off the island next to it.
+concert arena, each is a spur off the island next to it. The waterfall
+cascade is a spur too, off the snow mountain: walk through the mountain's
+tunnel and keep going south.
 
 Every causeway is walkable. Fly, fast and noclip are on for everyone, but the
 tour never needs them.
@@ -55,6 +59,7 @@ tour never needs them.
 | Concert arena | `concert_arena` | `map_concert_arena.mts` | 49 × 13 × 49 | `(35, 5, 120)` | `(59, 9, 120)` | night (`0.08`, magenta sky, light fog at 140) |
 | Laser serpent | `laser_serpent` | `map_laser_serpent.mts` | 35 × 16 × 35 | `(-139, 5, 23)` | `(-105, 9, 40)` | night (`0.1`, deep red and magenta sky, light fog at 96) |
 | Mirror hall | `mirror_hall` | `map_mirror_hall.mts` | 31 × 18 × 31 | `(100, 5, 27)` | `(100, 9, 42)` | twilight (`0.2`, violet sky over a cyan horizon, fog at 100) |
+| Waterfall cascade | `waterfall_cascade` | `map_waterfall_cascade.mts` | 40 × 28 × 52 | `(-20, 5, -136)` | `(-1, 9, -85)` | soft twilight (`0.3`, misty lilac sky over a teal horizon, light fog at 72) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -582,6 +587,108 @@ runs straight on, over the water, onto the hall's forecourt. The box is
 The two islands add eleven nodes and no textures. Each one is a palette tile
 re-tinted (see Nodes the pack adds). Neither island plays a song.
 
+### Waterfall cascade
+
+Five tiers of glowing waterfalls climbing south to a volcano, at misty
+twilight, south of the snow mountain. Go through the mountain's tunnel and out
+of its south mouth, and the spur carries on across the water to the
+cascade's landing. The box is 40 × 28 × 52 (58,240 cells), and the longest
+side, 52, runs from the landing up to the volcano.
+
+* **The falls.** A river comes down the middle of the island in five
+  terraces, each four nodes above the last. Each terrace has a stream flush
+  with its top, a pool two nodes deep at its foot, and a curtain of falling
+  water down the cliff to the terrace below. The highest fall comes out of a
+  spring in a basalt buttress. The curtain is `lw_maps:waterfall`, an animated
+  glasslike sheet that glows a little and is climbable. It is not liquid, so
+  nothing flows or floods (see Not in this pack); swimming the falls is
+  climbing them. The bottom basin spills out west into the sea.
+* **The path** climbs the east bank in stone-brick stairs, one flight per
+  cliff, and crosses back over the river on two plank bridges: one over the
+  second terrace's pool, and one in front of the spring. It comes down the
+  west bank the same way. Fences line the bridges, and at the top a
+  railed lookout sits on the south-east terrace facing the volcano.
+* **Glowing flora.** Teal and violet mushroom caps (`glow_cap`,
+  `glow_cap_violet`) on pale stems in a grove by the landing, glowing trees
+  (`glow_leaves`), small mushrooms and ferns (`glow_shroom`, `glow_fern`) all
+  over, and vines down the cliff faces. Glow moss lines the path every few
+  nodes under `chase` controllers, so a pulse of light runs up the path ahead
+  of a visitor. The tree crowns' glow is a lamp pair as well
+  (`glow_leaves` / `glow_leaves_dim`), and they breathe under `flicker`.
+* **Hanging flowers.** Three low clouds (`lw_maps:cloud`, which glows
+  faintly) hang over the falls. Morning glories (`lw_maps:morning_glory`)
+  trail down from each cloud and from the lip of the top terrace's eastern
+  cliff, and every few seconds one of them sheds a shower of petals. The four
+  sources take turns, one at a time, round an 18-second cycle.
+* **The volcano** stands at the far end, a basalt cone eight nodes over the
+  top terrace with lava streaks down its flanks and a lava crater under a
+  `flicker`. Every thirty seconds it erupts: a spray of flowers in four
+  colours shoots out of the crater, arcs and falls, with a low rumble (the
+  chapel's thunder, pitched down). The eruption is particles, so nothing
+  lands, piles up or gets saved.
+* **Mist and spores.** Each fall has mist rising off its pool, and spores
+  drift over the mushroom grove. Both are particle spawners that `lw_maps`
+  starts for a visitor when they arrive and stops when they leave
+  (`ambient` in the registry).
+* **Bicycles** wait at four bike racks: one by the landing and one on each of
+  three terraces up the path. See Bicycles and gems.
+* **Geodes** are set into the walls along the stairs and into the cliff face
+  under the first terrace, in red, yellow and blue. Digging one gives a gem.
+  See Bicycles and gems.
+
+The petal showers and the eruption run on the storm's clock: whole seconds of
+`core.get_gametime()`. Every visitor on the island sees the same eruption at
+the same moment, and nobody else gets particles for it. The particles go out
+per player, like the rainbow storm's rain.
+
+#### Bicycles and gems
+
+These are the one place in the atlas with a system of its own (see Not in
+this pack). They live in their own mod, `lw_cascade`, so the island stays
+plain map content. Its rules are in `lw_cascade/logic.lua`, with no engine
+calls, and `util/content/test_luanti_web_cascade.lua` checks them headless.
+
+**Bicycles.** A rack (`lw_cascade:bike_rack`) puts out one bike from a node
+timer, so only while its block is loaded. A bike is an entity with
+`static_save = false`, so none are ever saved; a fresh world, or the same
+world reloaded, gets new ones from the racks.
+
+* Punch or right-click a bike to get on. Forward pedals, back brakes and then
+  backs up slowly, jump hops, and you steer by looking. Sneak gets off. Top speed is 7 nodes a second, brisk but not
+  fast-move, and the bike climbs single steps.
+* Every bike breaks down in the end: after 60 to 140 nodes of riding (fixed
+  per bike) or 150 seconds in the saddle, whichever comes first. It throws
+  its rider, says what broke ("The chain snaps and the pedals spin free."),
+  turns grey and tips over, and is cleared away twelve seconds later.
+* Its rack puts out the next bike 45 seconds after the breakdown, and says so
+  on its infotext. So the quick way on is to find another rack.
+* A bike that someone rode off and left is taken back after two minutes, and
+  its rack replaces it at once.
+* `/bike` says how the current ride is going (distance, and a rough sense of
+  how much is left), or where the nearest rack with a bike is.
+
+**Gems.** Seven craftitems, `lw_cascade:gem_<colour>`: red, yellow and blue
+from geodes, and orange, green, violet and prism made by fusing. There is no
+crafting in this game, so fusing is done in Lua:
+
+* **In the hand:** right-click with a gem (or use it in the air) and it fuses
+  with one partner from your pockets. Red + yellow = orange, yellow + blue =
+  green, blue + red = violet, and a secondary with the primary it lacks makes
+  a prism (orange + blue, green + red, violet + yellow). A gem with no partner
+  in your pockets says what it would fuse with.
+* **On the ground:** drop a gem (Q, one at a time) and it is a small physical
+  gem entity. Punching it knocks it rolling, walking into it shoves it along,
+  and it slows to a stop on the ground. Two gems that roll into each other and
+  can fuse do, into one gem where they met. Right-click a gem on the ground to
+  pick it up. Gems on the ground are saved, like dropped items, and fade
+  after fifteen minutes.
+* **Geodes** go dull when dug (`lw_cascade:geode_spent`, which drops nothing)
+  and grow back their own colour a minute later.
+* `/gems` lists the recipes.
+
+Gems are not in the palette inventory: you dig for them. Nothing in
+`lw_cascade` does damage, and nothing uses hunger or health.
+
 ## Getting there
 
 * Walk. A causeway leaves the plaza for every map, each with a gate whose
@@ -591,7 +698,7 @@ re-tinted (see Nodes the pack adds). Neither island plays a song.
 * `/maps` lists the maps; `/maps <id>` travels to one (`/maps halloween_storm`
   for the thunder chapel, `/maps cabaret` for the cabaret club,
   `/maps laser_serpent` and `/maps mirror_hall` for the Weeks on Fire
-  islands). It emerges the area
+  islands, `/maps waterfall_cascade` for the falls). It emerges the area
   around the spawn first and moves the visitor only once that is done, because
   the islands are far enough out that a visitor moved straight away can arrive
   before the chunk does and fall through the place it will be.
@@ -617,8 +724,8 @@ Geometry is why: the maps are cones, ellipsoids and a helical ramp, and doing
 that arithmetic once at build time keeps it off the browser's application
 worker, where chunk generation competes with the compositor. `.mts` is the
 committed form because it keeps `param2` (a theater seat still faces the stage,
-a chase controller knows its place in the loop) and compresses all thirteen maps
-to about 23 KiB.
+a chase controller knows its place in the loop) and compresses all fourteen maps
+to about 26 KiB.
 
 Once they are stamped into a world, `/lw_schem place map_halloween` puts the
 committed file back over an existing world, the same as any other piece.
@@ -701,6 +808,11 @@ one would fight the three rules these maps are built to:
 * a walk of about three minutes
 * no new system on an island
 
+The waterfall cascade keeps to the spirit of these rules. Its falls are a
+glasslike sheet, not flowing water. Its bicycles and gems are a new system,
+but a small one that was asked for (issue #113). It sits in its own mod,
+`lw_cascade`, and saves no bikes; nothing in `lw_maps` depends on it.
+
 `games/spire_tunnel` and `games/flower_island` stay separate for the same
 reason. None of the four is an island in this atlas.
 
@@ -714,7 +826,7 @@ generated map, or an `lw_maps` node from those games.
 
 ## Nodes the pack adds
 
-`lw_maps` registers sixty-three nodes. They are deliberately **not** in the
+`lw_maps` registers seventy-five nodes. They are deliberately **not** in the
 `lw_palette` group — that group builds the material library's pedestals and the
 room is full — so they appear in the palette inventory (`i`) but not in the
 library. Everything else the maps are built from is a `lw_nodes` tile.
@@ -748,6 +860,15 @@ library. Everything else the maps are built from is a `lw_nodes` tile.
 | `crystal`, `crystal_dim` | the mirror hall's skull, vault glints and chasing parapet |
 | `hoa_memo` | a notice board that reads out the next HOA memo when punched |
 | `serpent_switch` | the console that changes the laser serpent's pattern |
+| `waterfall` | the cascade's falling water: animated, glowing, climbable, not liquid |
+| `glow_shroom`, `glow_fern`, `morning_glory` | the cascade's small glowing plants and its hanging flowers |
+| `glow_cap`, `glow_cap_violet`, `glow_stem` | the cascade's giant mushrooms |
+| `glow_leaves`, `glow_leaves_dim` | the cascade's glowing tree crowns, breathing under `flicker` |
+| `glow_moss`, `glow_moss_dim` | the cascade's path lights, chased up the path |
+| `cloud` | the low clouds the morning glories hang from |
+
+`lw_cascade` adds five more, for the cascade only: `bike_rack`,
+`geode_red`, `geode_yellow`, `geode_blue` and `geode_spent`.
 
 The banner cells are cut from one image each by `lw_maps.register_banner`
 with `[sheet`, in reading order from the top left, and are not in the
@@ -758,7 +879,14 @@ with `[multiply`, the same trick the sixteen wool cubes use. An eleventh,
 `lw_rain.png`, is the rainbow storm's rain and lightning, and no node uses it.
 Four more are the arena's banners: `lw_around_sign.png`, `lw_lace_banner.png`
 and the two portraits. The eleven Weeks on Fire nodes add none: all of them
-are palette tiles re-tinted.
+are palette tiles re-tinted. The waterfall cascade adds seven, each 16 pixels
+across: `lw_waterfall.png` (eight animation frames), `lw_glow_shroom.png`,
+`lw_glow_fern.png` and `lw_morning_glory.png` for its plants, and three
+particles, `lw_petal.png`, `lw_bloom.png` and `lw_mist.png`. Its giant
+mushrooms, glowing trees, moss and clouds are palette tiles re-tinted.
+`lw_cascade` ships four textures of its own (a gem, a geode's crystal, and
+the bicycle's paint and parts) and a low-poly bicycle mesh,
+`lw_bicycle.obj` (24 KiB, 204 faces).
 They are regenerated by `util/content/generate_luanti_web_textures.py` along with
 everything else.
 
@@ -769,8 +897,8 @@ from a node timer, which only runs while the block is loaded — a map nobody is
 on costs nothing. They switch a lamp for its twin from a registered pair
 (`lw_maps.register_lamp_pair(lit, unlit)`); the jack-o'-lantern and the
 pumpkin are the first pair, the bazaar's lantern, the caldera's lava, the
-arena's truss light, the serpent's scales, the embers and the mirror hall's
-crystals the others, and a map that wants its own kind of lamp registers two nodes and
+arena's truss light, the serpent's scales, the embers, the mirror hall's
+crystals and the cascade's tree crowns and moss the others, and a map that wants its own kind of lamp registers two nodes and
 reuses both controllers. Neither will grow a lamp where a visitor dug one
 out.
 
@@ -801,6 +929,9 @@ loader under Lua 5.1:
 | Around arena (7,500 cells) | 0.25 MiB | 5 KiB |
 | laser serpent (19,600 cells) | — | 7 KiB |
 | mirror hall (17,298 cells) | — | 10 KiB |
+| fourteen maps kept (with the waterfall cascade) | — | **146 KiB** |
+| waterfall cascade (58,240 cells) | — | 19 KiB |
+| load peak, waterfall cascade | — | 13.8 MiB |
 | load peak, snow mountain | 12.6 MiB | 10.9 MiB |
 
 What is left of the load peak is the engine's: while a map loads,
@@ -821,7 +952,7 @@ saved with (plus a synthetic piece with runs past 255 cells, never-place and
 * one map's box passes **65,536** cells (`MAX_MAP_VOLUME`);
 * the pack's total box volume passes **512,000** cells (`NODE_BUDGET`). This
   is a creep guard on how much world has to be generated and meshed, no longer
-  a heap figure: the thirteen maps are 308,166 cells, room for about six more
+  a heap figure: the fourteen maps are 366,406 cells, room for about four more
   the size of the concert arena.
 
 The limits used to be set by the box: a 120,000-cell cap before the cost was
@@ -831,10 +962,13 @@ concert arena each took a MiB or a quarter of one). With run-length storage the
 heap stopped being the constraint, so the heap cap was re-based on the
 measurement (110 KiB for eleven maps, capped at 512) and the cell cap at
 512,000. The two Weeks on Fire islands took it to 127 KiB and 308,166 cells,
-inside both caps. Raise them on
+and the waterfall cascade to 146 KiB and 366,406, inside both caps. The
+cascade is the biggest box in the pack (58,240 cells, under
+`MAX_MAP_VOLUME`), and its 13.8 MiB load peak is the closest any map comes to
+the 16 MiB budget. Raise them on
 purpose, with a new measurement in `wasm_porting.md`, rather than squeeze a map
-to fit. The schematics themselves are 22.8 KiB on disk and the fifteen textures
-under 8 KiB. The sounds are the lighthouse horn (4 KiB) and the chapel's three
+to fit. The schematics themselves are 26.4 KiB on disk and the twenty-two
+textures about 11 KiB. The sounds are the lighthouse horn (4 KiB) and the chapel's three
 thunder rolls (24 KiB). The chapel's organ slot and the cabaret's song slot are
 empty and cost nothing until files are dropped into them (see Thunder chapel
 and Cabaret club).
