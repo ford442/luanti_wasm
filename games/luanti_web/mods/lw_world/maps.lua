@@ -24,11 +24,12 @@
 --  (west-southwest)  (southwest)         rainbow storm
 --                                        (southeast)
 --
--- and three spurs off islands rather than the plaza, whose faces are full: the
+-- and five spurs off islands rather than the plaza, whose faces are full: the
 -- laser serpent west of the smoke caldera, out of its basalt tube, the mirror
--- hall east of the crystal bazaar, out of the end of its arcade, and the
+-- hall east of the crystal bazaar, out of the end of its arcade, the
 -- waterfall cascade south of the snowy mountain, out of its tunnel's south
--- mouth.
+-- mouth, the Christmas village east of the fruit garden, off the end of its
+-- path, and the Weeks on Fire Christmas south of the laser serpent's field.
 --
 -- Each map is one island with its own beach, in one sea, joined to the plaza
 -- by a paved causeway with a themed gate at the hub end. Fly is on for
@@ -333,6 +334,39 @@ function maps.causeways(api)
 				"five terraces past giant mushrooms; petals rain from the " ..
 				"clouds and a volcano erupts flowers. Ride the bikes until they " ..
 				"break, and dig the geodes for gems you can fuse.",
+		},
+		{
+			-- A spur out of the east end of the fruit garden's path (local 39,
+			-- 21), straight east over the water onto the Christmas village's
+			-- path, under its candy-cane arches. The gate stands on the
+			-- garden's east beach.
+			map = "christmas",
+			from = "fruit_garden",
+			legs = {
+				{x0 = 95, z0 = -8, x1 = 102, z1 = -6},
+			},
+			gate = {x = 94, z = -7},
+			post = "lw_maps:candy_cane",
+			sign = "East: the Christmas village. A tall tree with a chasing " ..
+				"garland and a star, presents, a workshop cabin with a fire, a " ..
+				"sleigh and reindeer, a frozen pond and snowmen. It is snowing " ..
+				"over there.",
+		},
+		{
+			-- A spur off the south side of the laser serpent's field (local
+			-- 18, 0), straight south over the water onto the Weeks on Fire
+			-- Christmas walk. The gate stands on the serpent's south beach.
+			map = "wof_christmas",
+			from = "laser_serpent",
+			legs = {
+				{x0 = -124, z0 = 13, x1 = -122, z1 = 20},
+			},
+			gate = {x = -123, z = 21},
+			post = "lw_maps:ember_block",
+			sign = "South: a Weeks on Fire Christmas. A tree on fire and " ..
+				"festive anyway, lasers spiralling up it, a mirror colonnade, " ..
+				"and a cabaret stage set for a holiday revue. Punch the console " ..
+				"on the stage to change the beams.",
 		},
 	}
 end

@@ -351,6 +351,47 @@ def cascade_landmarks() -> dict:
 	return marks
 
 
+def christmas_landmarks() -> dict:
+	cx, cz = maps.XMAS_TREE
+	c = maps.XMAS_CABIN
+	d0, _ = maps.XMAS_CABIN_DOOR_X
+	px, pz = maps.XMAS_POND
+	s = maps.XMAS_SLEIGH
+	return {
+		"path at the causeway": maps.XMAS_SPAWN,
+		"under the first arch": (maps.XMAS_ARCHES[0], maps.FLOOR, maps.XMAS_PATH_Z[0]),
+		"under the second arch": (maps.XMAS_ARCHES[1], maps.FLOOR, maps.XMAS_PATH_Z[1]),
+		"by the HOA holiday memo": (6, maps.FLOOR, maps.XMAS_PATH_Z[1]),
+		"at the foot of the tree, west": (cx - 7, maps.FLOOR, cz),
+		"at the foot of the tree, east": (cx + 7, maps.FLOOR, cz),
+		"in the cabin door": (d0, maps.FLOOR, c["z0"]),
+		"by the fire": (d0, maps.FLOOR, c["z1"] - 5),
+		"on the frozen pond": (px, maps.FLOOR, pz),
+		"beside the sleigh": (s["x0"] + 2, maps.FLOOR, s["z1"] + 2),
+		"by the snowmen": (maps.XMAS_SNOWMEN[0][0] + 2, maps.FLOOR, maps.XMAS_SNOWMEN[0][1]),
+	}
+
+
+def wof_christmas_landmarks() -> dict:
+	cx, cz = maps.WOF_XMAS_TREE
+	st = maps.WOF_XMAS_STAGE
+	d = maps.WOF_XMAS_DANCE
+	cx0, cy0, cz0 = maps.WOF_XMAS_CONSOLE
+	mx, _, mz, _ = maps.WOF_XMAS_MEMOS[1]
+	return {
+		"walk at the causeway": maps.WOF_XMAS_SPAWN,
+		"under the neon arch": (cx, maps.FLOOR, maps.WOF_XMAS_ARCH_Z),
+		"between the mirror pillars": (cx, maps.FLOOR, maps.WOF_XMAS_PILLARS_Z[1]),
+		"by the HOA holiday memo": (20, maps.FLOOR, 38),
+		"before the burning tree": (cx, maps.FLOOR, cz + 7),
+		"behind the burning tree": (cx, maps.FLOOR, cz - 7),
+		"on the dance floor": ((d["x0"] + d["x1"]) // 2, maps.FLOOR, (d["z0"] + d["z1"]) // 2),
+		"on the stage": ((st["x0"] + st["x1"]) // 2, maps.FLOOR + 1, st["z1"]),
+		"at the console": (cx0, cy0, cz0 + 1),
+		"by the dance floor's memo": (mx + 1, maps.FLOOR, mz),
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -369,6 +410,8 @@ LANDMARKS = {
 	"map_laser_serpent": lambda schem: serpent_landmarks(),
 	"map_mirror_hall": lambda schem: mirror_landmarks(),
 	"map_waterfall_cascade": lambda schem: cascade_landmarks(),
+	"map_christmas": lambda schem: christmas_landmarks(),
+	"map_wof_christmas": lambda schem: wof_christmas_landmarks(),
 }
 
 # Both arenas' trusses, for the checks that hold for either:
@@ -957,6 +1000,106 @@ def test_mirror_gallery_crystals_chase_round_it() -> None:
 			f"the chase controller at {(x, y, z)} is not over a parapet crystal")
 	assert_true(sorted(controllers.values()) ==
 		sorted(i % 8 for i in range(len(controllers))), "the gallery's chase has gaps")
+
+
+def test_christmas_tree_lights() -> None:
+	"""The village tree's garland: every chase controller over a dark bauble
+	on the tree, in one unbroken run of places; flicker over lit baubles in
+	between; and the star on the tip."""
+	schem = maps.schematics()["map_christmas"]
+	world = World(schem)
+	controllers = chase_controllers(schem)
+	dark = {b + "_off" for b in maps.BAUBLES}
+	assert_true(len(controllers) >= 30, f"only {len(controllers)} lights in the garland")
+	for (x, y, z), place in controllers.items():
+		assert_true(world.at(x, y - 1, z) in dark,
+			f"the chase controller at {(x, y, z)} is over {world.at(x, y - 1, z)}")
+	assert_true(sorted(controllers.values()) ==
+		sorted(i % 8 for i in range(len(controllers))), "the garland's chase has gaps")
+	flicker = schem.names.index(maps.FLICKER)
+	sx, sy = schem.size[0], schem.size[1]
+	twinkles = [(i % sx, (i // sx) % sy, i // (sx * sy))
+		for i, c in enumerate(schem.content) if c == flicker]
+	assert_true(len(twinkles) >= 10, "the tree has no twinkling baubles")
+	for x, y, z in twinkles:
+		assert_true(world.at(x, y - 1, z) in maps.BAUBLES,
+			f"the flicker at {(x, y, z)} is over {world.at(x, y - 1, z)}")
+	cx, cz = maps.XMAS_TREE
+	assert_true(world.at(cx, maps.XMAS_TREE_TOP + 1, cz) == maps.STAR, "the tree has no star")
+
+
+def test_wof_christmas_tree_burns() -> None:
+	"""The burning tree: embers under flicker, a garland of scales chasing up
+	it in one run, crystal baubles, presents round it, and a laser in the
+	star."""
+	schem = maps.schematics()["map_wof_christmas"]
+	world = World(schem)
+	controllers = chase_controllers(schem)
+	garland = {k: v for k, v in controllers.items()
+		if world.at(k[0], k[1] - 1, k[2]) == maps.SERPENT_SCALE_OFF}
+	assert_true(len(garland) >= 12, f"only {len(garland)} lights in the neon garland")
+	assert_true(sorted(garland.values()) == sorted(i % 8 for i in range(len(garland))),
+		"the garland's chase has gaps")
+	for (x, y, z), _ in controllers.items():
+		assert_true(world.at(x, y - 1, z) in (maps.SERPENT_SCALE_OFF, maps.CRYSTAL_DIM,
+			maps.LANTERN_OFF), f"the chase controller at {(x, y, z)} drives nothing")
+	flicker = schem.names.index(maps.FLICKER)
+	sx, sy = schem.size[0], schem.size[1]
+	embers = [(i % sx, (i // sx) % sy, i // (sx * sy))
+		for i, c in enumerate(schem.content) if c == flicker]
+	assert_true(len(embers) >= 20, "the tree is barely alight")
+	for x, y, z in embers:
+		assert_true(world.at(x, y - 1, z) == maps.EMBER,
+			f"the flicker at {(x, y, z)} is over {world.at(x, y - 1, z)}")
+	cx, cz = maps.WOF_XMAS_TREE
+	top = maps.WOF_XMAS_TREE_TOP
+	assert_true(world.at(cx, top + 2, cz) == maps.LASER_BLOCK, "the star has no laser in it")
+	presents = sum(1 for c in schem.content if schem.names[c] in maps.PRESENTS)
+	assert_true(presents >= 20, f"only {presents} presents on the island")
+
+
+def test_wof_christmas_lasers_spiral_the_tree() -> None:
+	"""lw_maps' coil for the tree is the generator's, its emitters climb clear
+	of the tree all the way up, the beams land on the dance floor, and the
+	sweep track runs over the pylon caps with room to ride."""
+	harness = run_lua_harness()
+	if harness is None:
+		return
+	c = maps.WOF_XMAS_COIL
+	got = harness["coil"]["wof_christmas"]
+	want = (c["x"], c["z"], c["radius"], c["y0"], c["rise"], c["turns"], c["start"])
+	assert_true(all(abs(a - b) < 1e-5 for a, b in zip(got, want)),
+		f"lw_maps' tree coil {got} is not the generator's {want}")
+	world = World(maps.schematics()["map_wof_christmas"])
+	for i in range(300):
+		s = i / 299
+		angle = c["start"] + s * c["turns"] * 2 * math.pi
+		cell = (int(round(c["x"] + c["radius"] * math.cos(angle))),
+			int(round(c["y0"] + s * c["rise"] + 1.3)),
+			int(round(c["z"] + c["radius"] * math.sin(angle))))
+		assert_true(not world.solid(*cell),
+			f"a tree emitter would climb through {world.at(*cell)} at {cell}")
+	x0, x1, z, y = harness["walk"]["wof_christmas"]
+	d = maps.WOF_XMAS_DANCE
+	assert_true(d["x0"] <= x0 and x1 <= d["x1"] and d["z0"] <= z <= d["z1"] and y == maps.FLOOR,
+		f"the beams land at x {x0}..{x1}, z {z}: not on the dance floor")
+	for x in range(x0, x1 + 1):
+		assert_true(world.solid(x, y - 1, z) and not world.solid(x, y, z),
+			f"the dance floor has no floor for the beams at {(x, y, z)}")
+	x0, z0, x1, z1, y = harness["tracks"]["wof_christmas"]
+	assert_true(y == maps.WOF_XMAS_PYLON_TOP, "the sweep track is not at the pylon caps")
+	assert_true({(x0, z0), (x1, z0), (x0, z1), (x1, z1)} == set(maps.WOF_XMAS_PYLONS),
+		"the sweep track does not run cap to cap")
+	ring = [(x, z0) for x in range(x0, x1 + 1)] + [(x, z1) for x in range(x0, x1 + 1)]
+	ring += [(x0, z) for z in range(z0, z1 + 1)] + [(x1, z) for z in range(z0, z1 + 1)]
+	for x, z in ring:
+		assert_true(not world.solid(x, y + 1, z),
+			f"an emitter would ride through {world.at(x, y + 1, z)} at {(x, y + 1, z)}")
+	(ax, ay, az), (bx, by, bz) = [box for kind, box in harness["ambient"]["wof_christmas"]
+		if kind == "embers"][0]
+	cx, cz = maps.WOF_XMAS_TREE
+	assert_true(ax <= cx <= bx and az <= cz <= bz and ay > maps.FLOOR,
+		"the embers do not rise off the tree")
 
 
 def test_cascade_falls_land_in_pools() -> None:

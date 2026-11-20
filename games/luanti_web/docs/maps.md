@@ -6,7 +6,7 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Fourteen authored maps ship with the showcase pack, as islands around the hub
+Sixteen authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
@@ -17,13 +17,14 @@ in about three minutes.
   [ thunder chapel ]---.                  .---[ Around arena ]  arena's east side)
     north-northwest    |                  |     north-northeast
   [ laser serpent ]--[ smoke caldera ]---.|   .---[ crystal bazaar ]--[ mirror hall ]
-  (spur from the       northwest    ||    |   |        northeast     (spur from the
-   caldera's tube)                  ||    |   |                       arcade's east end)
-        [ Halloween ]-++---[ hub plaza ]--'---+---[ fruit garden ]
-             west            |    |     |               east
-                             |    |     '----------.
-                             |  [ snow mountain ]  |
-                             |       south   |     |
+   |  (spur from the   northwest    ||    |   |        northeast     (spur from the
+   |   caldera's tube)              ||    |   |                       arcade's east end)
+   |    [ Halloween ]-++---[ hub plaza ]--'---+---[ fruit garden ]--[ Christmas village ]
+   |         west            |    |     |               east       (spur off the end
+   |                         |    |     '----------.                of the garden's path)
+ [ WoF Christmas ]           |  [ snow mountain ]  |
+  (spur off the serpent's    |       south   |     |
+   south side)               |               |     |
        [ lighthouse ]--------'               |     '--[ rainbow storm ]
          southwest                           |           southeast
                                    [ waterfall cascade ]  (spur from the
@@ -37,7 +38,9 @@ The laser serpent and the mirror hall are the pack's two Weeks on Fire
 islands. Neither has a causeway from the plaza, whose faces are full: like the
 concert arena, each is a spur off the island next to it. The waterfall
 cascade is a spur too, off the snow mountain: walk through the mountain's
-tunnel and keep going south.
+tunnel and keep going south. So are the two Christmas islands: the
+Christmas village off the far end of the fruit garden's path, and the Weeks
+on Fire Christmas off the south side of the laser serpent's field.
 
 Every causeway is walkable. Fly, fast and noclip are on for everyone, but the
 tour never needs them.
@@ -60,6 +63,8 @@ tour never needs them.
 | Laser serpent | `laser_serpent` | `map_laser_serpent.mts` | 35 × 16 × 35 | `(-139, 5, 23)` | `(-105, 9, 40)` | night (`0.1`, deep red and magenta sky, light fog at 96) |
 | Mirror hall | `mirror_hall` | `map_mirror_hall.mts` | 31 × 18 × 31 | `(100, 5, 27)` | `(100, 9, 42)` | twilight (`0.2`, violet sky over a cyan horizon, fog at 100) |
 | Waterfall cascade | `waterfall_cascade` | `map_waterfall_cascade.mts` | 40 × 28 × 52 | `(-20, 5, -136)` | `(-1, 9, -85)` | soft twilight (`0.3`, misty lilac sky over a teal horizon, light fog at 72) |
+| Christmas village | `christmas` | `map_christmas.mts` | 40 × 24 × 40 | `(103, 5, -27)` | `(103, 9, -7)` | blue twilight (`0.24`, navy sky over a pale blue horizon, fog at 120, snow) |
+| Weeks on Fire Christmas | `wof_christmas` | `map_wof_christmas.mts` | 36 × 22 × 40 | `(-141, 5, -27)` | `(-123, 9, 12)` | night (`0.12`, magenta and red sky, light fog at 88, snow and embers) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -689,6 +694,97 @@ crafting in this game, so fusing is done in Lua:
 Gems are not in the palette inventory: you dig for them. Nothing in
 `lw_cascade` does damage, and nothing uses hunger or health.
 
+### Christmas village
+
+A snowed-in village square at blue twilight, east of the giant fruit garden.
+Walk down the garden's path and out of its east end, and the spur carries on
+over the water onto the village's path. The box is 40 × 24 × 40 (38,400
+cells).
+
+* **The path** comes in from the causeway under two candy-cane arches, each
+  with a star and two red baubles on its lintel, between candy-cane posts and
+  lamp posts, to the square. An HOA holiday memo board stands by the first
+  arch (see below).
+* **The tree** stands in the middle of a swept square: a brown trunk under
+  fourteen courses of pine needles, every third course a little wider so it
+  reads as tiers of branches, and a star on the tip, a cross of the brightest
+  light there is. Two garlands of red, gold and blue baubles wind up it, half
+  a turn apart, with a `chase` controller over every bauble, so the lights
+  run up the tree. The baubles in between twinkle under `flicker`. Presents
+  in five wrappings ring its foot, with a gap on each side to walk in to the
+  trunk, and a lamp post stands on each of the square's diagonals.
+* **The workshop** is a plank cabin north-east of the square, on beam
+  corners, with lit windows and a red gable roof under snow. Lights hang
+  along both eaves and a brick chimney comes up through the roof. Inside
+  there is a fire in a brick fireplace (`lw_nodes:fire`, which does no
+  damage), a rug in front of it, a workbench along the west wall piled with
+  presents, and a small tree with its own star in the corner.
+* **The sleigh** stands south-east of the square: red, on gold runners, with
+  presents piled in the back. Four reindeer stand in harness in front of it,
+  in brown wool with dead-wood antlers, and the leader has a red nose.
+* **The corners**: a frozen pond (`lw_maps:ice`) with a bench on its bank to
+  the south-west, two snowmen with carrot noses, red scarves and top hats to
+  the north-west, and snow-capped pines all round the edge.
+* **Snow** falls round whoever is on the island. It is one particle spawner
+  attached to the visitor, a box over their head and not over the island,
+  like the storms' rain. It is the `snow` kind of `ambient` in the registry,
+  and it stops when they leave.
+
+### Weeks on Fire Christmas
+
+Christmas the Weeks on Fire way: snow falling on ash at night, south of the
+laser serpent. Walk off the south side of the serpent's field and the spur
+crosses the water onto a walk edged with neon. The box is 36 × 22 × 40
+(31,680 cells).
+
+* **The walk** comes in under a candy-cane arch whose lintel is a row of
+  glowing serpent scales with a star on it, between neon tubes and a mirror
+  colonnade. The colonnade is mirror pillars with glass between them and a
+  crystal on each pillar. The crystals chase down one side and back up the
+  other. An HOA holiday memo board stands by the causeway.
+* **The tree is on fire.** It is a charred basalt trunk under a cone of
+  ember blocks. Most of the needles facing up flicker (`ember_block` under
+  `flicker`, the laser serpent's ember pits on a tree), and two in five of
+  those facing out glow without flickering, so it reads as alight from any
+  side. It is festive anyway. A garland of serpent scales winds up it under
+  `chase`, crystal baubles glow among the embers, and a star with a laser
+  emitter at its heart stands on the tip. Presents ring the foot, a few of
+  them burnt down to an ember. Embers rise off it in a particle box
+  (`embers` in `ambient`). The fire is cool and solid like every ember in
+  the pack: nothing here burns, spreads or does damage.
+* **The lasers spiral up the tree.** This is the laser serpent's show with
+  the serpent's `coil` pattern on a tree. Four emitters in red, green,
+  magenta and gold climb a helix round the outside of the tree, three turns
+  from the foot to above the star, a lap every 16 s. Their beams land on the
+  dance floor and slither along it. The second pattern is `sweep`, the
+  emitters racing round the four corner pylons' laser caps with the beams
+  circling the tree.
+* **The cabaret stage** is set for a Christmas revue at the south end. It
+  is a black deck one node up with a gold lip, a velvet curtain behind it,
+  mirror wings either side, and a gold header and velvet valance over the
+  front. Bulbs (`lantern`) hang in front of the header and chase along it,
+  like the cabaret club's. There is a stair up at each end of the front. On
+  stage are two crystal trees with stars, presents, and the **console**
+  (`serpent_switch`): punch or right click it to switch the lasers between
+  `coil` and `sweep`, for everyone there.
+* **The dance floor** in front of the stage is a black and magenta checker.
+  A mirror ball hangs over it on a chain. Crystals and baubles with gold
+  caps float round it at different heights, hung from nothing at all. A
+  second HOA board stands at its west edge.
+* **Snow** falls round the visitor as on the village, here on ash: the
+  ground is snow with patches of dark ash, and the plaza round the tree is
+  scorched basalt.
+
+**HOA holiday memos.** Both Christmas islands have the HOA's holiday notice
+board, `lw_maps:hoa_holiday_memo`: the memo board with a red and green
+border. Punch it or right click it for the next of ten holiday memos
+(`lw_maps.HOA_HOLIDAY_MEMOS`). It works like the year-round board, which
+keeps its own twelve.
+
+The lasers run only while someone is on the island, as on the serpent's
+field. The two Christmas islands add fourteen nodes and no textures (see
+Nodes the pack adds). Neither one plays a song.
+
 ## Getting there
 
 * Walk. A causeway leaves the plaza for every map, each with a gate whose
@@ -698,7 +794,8 @@ Gems are not in the palette inventory: you dig for them. Nothing in
 * `/maps` lists the maps; `/maps <id>` travels to one (`/maps halloween_storm`
   for the thunder chapel, `/maps cabaret` for the cabaret club,
   `/maps laser_serpent` and `/maps mirror_hall` for the Weeks on Fire
-  islands, `/maps waterfall_cascade` for the falls). It emerges the area
+  islands, `/maps waterfall_cascade` for the falls, `/maps christmas` and
+  `/maps wof_christmas` for the two Christmas islands). It emerges the area
   around the spawn first and moves the visitor only once that is done, because
   the islands are far enough out that a visitor moved straight away can arrive
   before the chunk does and fall through the place it will be.
@@ -724,8 +821,8 @@ Geometry is why: the maps are cones, ellipsoids and a helical ramp, and doing
 that arithmetic once at build time keeps it off the browser's application
 worker, where chunk generation competes with the compositor. `.mts` is the
 committed form because it keeps `param2` (a theater seat still faces the stage,
-a chase controller knows its place in the loop) and compresses all fourteen maps
-to about 26 KiB.
+a chase controller knows its place in the loop) and compresses all sixteen maps
+to about 32 KiB.
 
 Once they are stamped into a world, `/lw_schem place map_halloween` puts the
 committed file back over an existing world, the same as any other piece.
@@ -826,7 +923,7 @@ generated map, or an `lw_maps` node from those games.
 
 ## Nodes the pack adds
 
-`lw_maps` registers seventy-five nodes. They are deliberately **not** in the
+`lw_maps` registers eighty-nine nodes. They are deliberately **not** in the
 `lw_palette` group — that group builds the material library's pedestals and the
 room is full — so they appear in the palette inventory (`i`) but not in the
 library. Everything else the maps are built from is a `lw_nodes` tile.
@@ -866,6 +963,11 @@ library. Everything else the maps are built from is a `lw_nodes` tile.
 | `glow_leaves`, `glow_leaves_dim` | the cascade's glowing tree crowns, breathing under `flicker` |
 | `glow_moss`, `glow_moss_dim` | the cascade's path lights, chased up the path |
 | `cloud` | the low clouds the morning glories hang from |
+| `present_red`, `_green`, `_blue`, `_gold`, `_violet` | wrapped presents on both Christmas islands |
+| `candy_cane` | the Christmas arches and the village path's posts |
+| `bauble_red`, `bauble_gold`, `bauble_blue` and their `_off` twins | the village tree's chasing garland and its twinkling baubles, the cabin's eaves, the floating ornaments |
+| `star` | the stars on the trees and the arches |
+| `hoa_holiday_memo` | a notice board that reads out the next HOA holiday memo when punched |
 
 `lw_cascade` adds five more, for the cascade only: `bike_rack`,
 `geode_red`, `geode_yellow`, `geode_blue` and `geode_spent`.
@@ -884,6 +986,9 @@ across: `lw_waterfall.png` (eight animation frames), `lw_glow_shroom.png`,
 `lw_glow_fern.png` and `lw_morning_glory.png` for its plants, and three
 particles, `lw_petal.png`, `lw_bloom.png` and `lw_mist.png`. Its giant
 mushrooms, glowing trees, moss and clouds are palette tiles re-tinted.
+The fourteen Christmas nodes add none either: the presents, the candy cane
+and the holiday board's border are palette tiles re-tinted with ribbons and
+stripes painted on by `[fill`, and the snow and the embers are `lw_mist.png`.
 `lw_cascade` ships four textures of its own (a gem, a geode's crystal, and
 the bicycle's paint and parts) and a low-poly bicycle mesh,
 `lw_bicycle.obj` (24 KiB, 204 faces).
@@ -898,7 +1003,8 @@ on costs nothing. They switch a lamp for its twin from a registered pair
 (`lw_maps.register_lamp_pair(lit, unlit)`); the jack-o'-lantern and the
 pumpkin are the first pair, the bazaar's lantern, the caldera's lava, the
 arena's truss light, the serpent's scales, the embers, the mirror hall's
-crystals and the cascade's tree crowns and moss the others, and a map that wants its own kind of lamp registers two nodes and
+crystals, the cascade's tree crowns and moss, and the three Christmas baubles
+the others, and a map that wants its own kind of lamp registers two nodes and
 reuses both controllers. Neither will grow a lamp where a visitor dug one
 out.
 
@@ -931,6 +1037,10 @@ loader under Lua 5.1:
 | mirror hall (17,298 cells) | — | 10 KiB |
 | fourteen maps kept (with the waterfall cascade) | — | **146 KiB** |
 | waterfall cascade (58,240 cells) | — | 19 KiB |
+| sixteen maps kept (with the two Christmas islands) | — | **168 KiB** |
+| Christmas village (38,400 cells) | — | 11 KiB |
+| Weeks on Fire Christmas (31,680 cells) | — | 11 KiB |
+| load peak, Christmas village | — | 9.4 MiB |
 | load peak, waterfall cascade | — | 13.8 MiB |
 | load peak, snow mountain | 12.6 MiB | 10.9 MiB |
 
@@ -952,7 +1062,7 @@ saved with (plus a synthetic piece with runs past 255 cells, never-place and
 * one map's box passes **65,536** cells (`MAX_MAP_VOLUME`);
 * the pack's total box volume passes **512,000** cells (`NODE_BUDGET`). This
   is a creep guard on how much world has to be generated and meshed, no longer
-  a heap figure: the fourteen maps are 366,406 cells, room for about four more
+  a heap figure: the sixteen maps are 436,486 cells, room for about two more
   the size of the concert arena.
 
 The limits used to be set by the box: a 120,000-cell cap before the cost was
@@ -962,12 +1072,13 @@ concert arena each took a MiB or a quarter of one). With run-length storage the
 heap stopped being the constraint, so the heap cap was re-based on the
 measurement (110 KiB for eleven maps, capped at 512) and the cell cap at
 512,000. The two Weeks on Fire islands took it to 127 KiB and 308,166 cells,
-and the waterfall cascade to 146 KiB and 366,406, inside both caps. The
+the waterfall cascade to 146 KiB and 366,406, and the two Christmas islands
+to 168 KiB and 436,486, inside both caps. The
 cascade is the biggest box in the pack (58,240 cells, under
 `MAX_MAP_VOLUME`), and its 13.8 MiB load peak is the closest any map comes to
 the 16 MiB budget. Raise them on
 purpose, with a new measurement in `wasm_porting.md`, rather than squeeze a map
-to fit. The schematics themselves are 26.4 KiB on disk and the twenty-two
+to fit. The schematics themselves are 31.6 KiB on disk and the twenty-two
 textures about 11 KiB. The sounds are the lighthouse horn (4 KiB) and the chapel's three
 thunder rolls (24 KiB). The chapel's organ slot and the cabaret's song slot are
 empty and cost nothing until files are dropped into them (see Thunder chapel

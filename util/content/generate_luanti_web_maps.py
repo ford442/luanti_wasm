@@ -25,8 +25,10 @@ the compositor.
 Layout, in the atlas the hub plaza sits in the middle of::
 
     [ laser serpent ]-[ smoke caldera ]  [ crystal bazaar ]-[ mirror hall ]
-    [ halloween ]------[ hub ]------[ fruit garden ]
-                         |
+          |
+    [ wof christmas ]
+             [ halloween ]------[ hub ]------[ fruit garden ]-[ christmas ]
+                                  |
     [ lighthouse ]  [ snow mountain ]   [ rainbow storm ]
 
 and the Around arena north-east of the hub, beyond the gallery, with the
@@ -36,7 +38,9 @@ diagonal four, the arenas and the chapel are reached by causeways that turn
 in the open water, and the cabaret club, west of the lighthouse, by one that
 turns twice. The two Weeks on Fire islands are spurs: the laser serpent off
 the mouth of the caldera's tube, the mirror hall off the end of the bazaar's
-arcade;
+arcade, and so are the two Christmas islands: the village off the far end of
+the fruit garden's path, the Weeks on Fire Christmas off the south side of
+the serpent's field;
 lw_world/maps.lua has the legs, and games/luanti_web/docs/maps.md the recipe
 for adding a map.
 
@@ -3274,6 +3278,541 @@ def build_waterfall_cascade() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 15. Christmas village
+# --------------------------------------------------------------------------
+
+# A snowed-in village square at twilight, east of the giant fruit garden: walk
+# down the garden's path and out of its east edge, and the spur runs on over
+# the water, under two candy-cane arches, to a tall tree whose baubles chase
+# round it in a garland and twinkle in between, with presents round its foot
+# and a star on top. A workshop cabin with a fire, a sleigh and its reindeer,
+# a frozen pond, snowmen and snow-capped pines fill the corners, and snow
+# falls round whoever is there (lw_maps' `snow` ambience).
+#
+# 40 x 24 x 40 is 38,400 cells.
+XMAS_SIZE = (40, 24, 40)
+# The causeway lands on the west face, on the middle of the path.
+XMAS_SPAWN = (0, FLOOR, 20)
+
+XMAS_PATH_Z = (19, 21)
+XMAS_ARCHES = (4, 10)                 # x of the candy-cane arches over the path
+XMAS_TREE = (20, 20)                  # x, z of the big tree's trunk
+XMAS_TREE_BASE = FLOOR + 2            # its lowest course of needles
+XMAS_TREE_TOP = FLOOR + 15            # its tip; the star stands on it
+XMAS_TREE_RADIUS = 6.0                # at the lowest course
+XMAS_SQUARE_RADIUS = 10.5             # the swept square round the tree
+XMAS_CABIN = dict(x0=25, x1=35, z0=29, z1=37)
+XMAS_CABIN_DOOR_X = (30, 31)
+XMAS_SLEIGH = dict(x0=26, x1=31, z0=6, z1=8)
+XMAS_REINDEER = ((33, 6), (33, 8), (36, 6), (36, 8))   # (x of the rump, z)
+XMAS_POND = (9, 9)
+XMAS_POND_RADIUS = 5.0
+XMAS_SNOWMEN = ((6, 30), (11, 33))
+# (x, z, height) of the snow-capped pines round the edge.
+XMAS_PINES = ((3, 3, 7), (17, 3, 6), (37, 14, 6), (37, 23, 7), (21, 36, 6),
+	(3, 37, 7), (15, 37, 5), (2, 13, 5))
+
+PRESENTS = tuple("lw_maps:present_" + c for c in ("red", "green", "blue", "gold", "violet"))
+BAUBLES = tuple("lw_maps:bauble_" + c for c in ("red", "gold", "blue"))
+CANDY = "lw_maps:candy_cane"
+STAR = "lw_maps:star"
+HOA_HOLIDAY_MEMO = "lw_maps:hoa_holiday_memo"
+
+
+def cone_radius(y: int, base: int, top: int, radius: float) -> float:
+	"""A Christmas tree's radius at course `y`: a cone from `radius` at `base`
+	to nothing at `top`, every third course a little wider, so it reads as
+	tiers of branches rather than a smooth spike."""
+	if y < base or y > top:
+		return -1.0
+	t = (y - base) / (top - base)
+	r = radius * (1 - t)
+	if (y - base) % 3 == 0:
+		r += 0.7 * (1 - t)
+	return max(r, 0.5)
+
+
+def build_tree_cone(build: Build, cx: int, cz: int, base: int, top: int,
+		radius: float, fill: str) -> list[tuple[int, int, int]]:
+	"""A cone of `fill`. Returns its outer cells with open air above them —
+	the ones a light can sit in with a controller over it — lowest first."""
+	reach = int(radius + 1.5)
+	cells = set()
+	for y in range(base, top + 1):
+		r = cone_radius(y, base, top, radius)
+		for x in range(cx - reach, cx + reach + 1):
+			for z in range(cz - reach, cz + reach + 1):
+				if math.hypot(x - cx, z - cz) <= r:
+					build.set(x, y, z, fill)
+					cells.add((x, y, z))
+	exposed = [c for c in cells if (c[0], c[1] + 1, c[2]) not in cells
+		and (c[0], c[2]) != (cx, cz)]
+	exposed.sort(key=lambda c: (c[1], math.atan2(c[2] - cz, c[0] - cx)))
+	return exposed
+
+
+def garland(cells, cx: int, cz: int, base: int, turn: float, phase: float,
+		spread: float = 0.45) -> list[tuple[int, int, int]]:
+	"""The exposed cells a garland winding up the tree passes through: one
+	turn every `turn` courses, starting at angle `phase`. In chase order,
+	bottom to top."""
+	picked = []
+	for x, y, z in cells:
+		want = phase + (y - base) / turn * 2 * math.pi
+		got = math.atan2(z - cz, x - cx)
+		diff = (got - want + math.pi) % (2 * math.pi) - math.pi
+		if abs(diff) <= spread:
+			picked.append((x, y, z, (y - base) * 10 + diff))
+	picked.sort(key=lambda c: c[3])
+	return [(x, y, z) for x, y, z, _ in picked]
+
+
+def snow_pine(build: Build, x: int, z: int, height: int) -> None:
+	"""A small pine with a cap of snow: a brown trunk and a cone of needles."""
+	build.set(x, FLOOR, z, wool("brown"))
+	top = FLOOR + height - 1
+	build_tree_cone(build, x, z, FLOOR + 1, top, 2.2, PINE_LEAVES)
+	build.set(x, top + 1, z, SNOW)
+
+
+def build_xmas_ground(build: Build) -> None:
+	"""Snow everywhere, a swept square round the tree, the path in from the
+	causeway with its arches and posts, and paths out to the cabin and the
+	sleigh."""
+	sx, _, sz = build.sx, build.sy, build.sz
+	build.ground(SNOW)
+	cx, cz = XMAS_TREE
+	for x in range(sx):
+		for z in range(sz):
+			if math.hypot(x - cx, z - cz) <= XMAS_SQUARE_RADIUS:
+				build.set(x, SURFACE, z, PACKED_SNOW)
+	z0, z1 = XMAS_PATH_Z
+	build.box(0, SURFACE, z0, cx, SURFACE, z1, PAVING)
+	# Paths out of the square: north-east to the cabin door, south-east to
+	# the sleigh.
+	d0, d1 = XMAS_CABIN_DOOR_X
+	build.box(d0 - 1, SURFACE, 26, d1 + 1, SURFACE, XMAS_CABIN["z0"] - 1, PAVING)
+	build.box(27, SURFACE, 10, 29, SURFACE, 13, PAVING)
+	# Candy-cane posts along the path, every other node, both sides, and a
+	# lamp post every five.
+	for x in range(1, 13):
+		if x in XMAS_ARCHES:
+			continue
+		if x % 2 == 0:
+			build.set(x, FLOOR, z0 - 1, CANDY)
+			build.set(x, FLOOR, z1 + 1, CANDY)
+	for x in (2, 7, 13):
+		for z in (z0 - 2, z1 + 2):
+			build.box(x, FLOOR, z, x, FLOOR + 1, z, COLUMN)
+			build.set(x, FLOOR + 2, z, LANTERN)
+	# The arches: candy-cane posts, a lintel four over the path, and a red
+	# bauble and a star on top.
+	for x in XMAS_ARCHES:
+		for z in (z0 - 1, z1 + 1):
+			build.box(x, FLOOR, z, x, FLOOR + 3, z, CANDY)
+		build.box(x, FLOOR + 4, z0 - 1, x, FLOOR + 4, z1 + 1, CANDY)
+		build.set(x, FLOOR + 5, (z0 + z1) // 2, STAR)
+		for z in (z0 - 1, z1 + 1):
+			build.set(x, FLOOR + 5, z, BAUBLES[0])
+	# The HOA's holiday notice, on a pedestal by the first arch, facing the
+	# path.
+	build.set(6, FLOOR, z1 + 2, PEDESTAL)
+	build.set(6, FLOOR + 1, z1 + 2, HOA_HOLIDAY_MEMO, NORTH)
+
+
+def build_xmas_tree(build: Build) -> list[tuple[int, int, int]]:
+	"""The big tree: trunk, tiers, a chasing garland, twinkling baubles, the
+	star, and presents round its foot. Returns the garland in chase order."""
+	cx, cz = XMAS_TREE
+	build.box(cx, FLOOR, cz, cx, XMAS_TREE_TOP - 1, cz, wool("brown"))
+	exposed = build_tree_cone(build, cx, cz, XMAS_TREE_BASE, XMAS_TREE_TOP,
+		XMAS_TREE_RADIUS, PINE_LEAVES)
+	# Two garlands, half a turn apart, each in its own colour run.
+	lights = []
+	taken = set()
+	for phase in (0.0, math.pi):
+		for cell in garland(exposed, cx, cz, XMAS_TREE_BASE, 5.0, phase):
+			if cell not in taken:
+				taken.add(cell)
+				lights.append(cell)
+	lights.sort(key=lambda c: (c[1], (math.atan2(c[2] - cz, c[0] - cx)
+		- (c[1] - XMAS_TREE_BASE) / 5.0 * 2 * math.pi) % math.pi))
+	for index, (x, y, z) in enumerate(lights):
+		build.set(x, y, z, BAUBLES[index % len(BAUBLES)] + "_off")
+		build.set(x, y + 1, z, CHASE, index % 8)
+	# Twinkling baubles in between, under flicker.
+	for x, y, z in exposed:
+		if (x, y, z) in taken or y >= XMAS_TREE_TOP - 1:
+			continue
+		if (x * 7 + y * 13 + z * 5) % 5 == 0:
+			build.set(x, y, z, BAUBLES[(x + z + y) % len(BAUBLES)])
+			build.set(x, y + 1, z, FLICKER)
+	# The star: a cross standing on the tip, facing the path.
+	top = XMAS_TREE_TOP
+	build.box(cx, top + 1, cz, cx, top + 3, cz, STAR)
+	build.set(cx, top + 2, cz - 1, STAR)
+	build.set(cx, top + 2, cz + 1, STAR)
+	# Presents round the foot, with a gap on each side to get in to the tree.
+	for index in range(28):
+		angle = index / 28 * 2 * math.pi
+		if any(abs((angle - gap + math.pi) % (2 * math.pi) - math.pi) < 0.3
+				for gap in (0, math.pi / 2, math.pi, 3 * math.pi / 2)):
+			continue
+		radius = 7 + (index % 2)
+		x = int(round(cx + radius * math.cos(angle)))
+		z = int(round(cz + radius * math.sin(angle)))
+		build.set(x, FLOOR, z, PRESENTS[index % len(PRESENTS)])
+	# Lamp posts on the square's diagonals.
+	for dx, dz in ((-7, -7), (7, -7), (-7, 7), (7, 7)):
+		build.box(cx + dx, FLOOR, cz + dz, cx + dx, FLOOR + 2, cz + dz, COLUMN)
+		build.set(cx + dx, FLOOR + 3, cz + dz, LANTERN)
+	return lights
+
+
+def build_xmas_cabin(build: Build) -> None:
+	"""The workshop: plank walls on beam corners, lit windows, a snowy gable
+	roof with lights along the eaves, a fire and a chimney, a workbench piled
+	with presents."""
+	c = XMAS_CABIN
+	x0, x1, z0, z1 = c["x0"], c["x1"], c["z0"], c["z1"]
+	wall_top = FLOOR + 3
+	build.box(x0, SURFACE, z0, x1, SURFACE, z1, PLANKS)
+	for y in range(FLOOR, wall_top + 1):
+		for x in range(x0, x1 + 1):
+			for z in range(z0, z1 + 1):
+				if x0 < x < x1 and z0 < z < z1:
+					continue
+				corner = x in (x0, x1) and z in (z0, z1)
+				window = (y in (FLOOR + 1, FLOOR + 2) and not corner and (
+					(z in (z0, z1) and x % 3 == 0) or (x in (x0, x1) and z % 3 == 0)))
+				build.set(x, y, z, BEAM if corner else GLASS if window else PLANKS)
+	build.clear(x0 + 1, FLOOR, z0 + 1, x1 - 1, wall_top, z1 - 1)
+	# The door.
+	d0, d1 = XMAS_CABIN_DOOR_X
+	build.clear(d0, FLOOR, z0, d1, FLOOR + 2, z0)
+	# The roof: courses stepping in from both long sides, red under snow.
+	span = (z1 - z0) // 2 + 1
+	for k in range(span + 1):
+		y = wall_top + 1 + k
+		lo, hi = z0 - 1 + k, z1 + 1 - k
+		if lo > hi:
+			break
+		build.box(x0 - 1, y, lo, x1 + 1, y, hi, wool("red"))
+		# Gable ends, and the attic's hollow behind them.
+		if hi - lo >= 2:
+			build.clear(x0 + 1, y, lo + 1, x1 - 1, y, hi - 1)
+		for x in range(x0 - 1, x1 + 2):
+			build.set(x, y + 1, lo, SNOW_SLAB)
+			build.set(x, y + 1, hi, SNOW_SLAB)
+	# Lights along both eaves.
+	for x in range(x0 - 1, x1 + 2):
+		for z in (z0 - 1, z1 + 1):
+			if x % 2 == 0:
+				build.set(x, wall_top, z, BAUBLES[(x // 2) % len(BAUBLES)])
+	# A ceiling to keep the attic out of sight, lit from under it.
+	build.box(x0 + 1, wall_top + 1, z0 + 1, x1 - 1, wall_top + 1, z1 - 1, PLANKS)
+	for x in (x0 + 3, x1 - 3):
+		build.set(x, wall_top, (z0 + z1) // 2, HIDDEN_LIGHT)
+	# The fireplace on the north wall, its chimney up through the roof.
+	fx = (d0 + d1) // 2
+	build.box(fx - 2, FLOOR, z1 - 1, fx + 3, FLOOR + 3, z1 - 1, BRICK)
+	build.clear(fx, FLOOR, z1 - 1, fx + 1, FLOOR + 1, z1 - 1)
+	build.box(fx, FLOOR, z1 - 1, fx + 1, FLOOR, z1 - 1, FIRE)
+	build.box(fx, SURFACE, z1 - 1, fx + 1, SURFACE, z1 - 1, BRICK)
+	build.box(fx, wall_top + 1, z1, fx + 1, wall_top + span + 2, z1, BRICK)
+	# A rug in front of it, a workbench with presents along the west wall,
+	# and a small tree in the south-east corner.
+	build.box(fx - 1, FLOOR, z1 - 4, fx + 2, FLOOR, z1 - 2, CARPET)
+	build.box(x0 + 1, FLOOR, z0 + 2, x0 + 1, FLOOR, z1 - 2, PLANKS)
+	for z in range(z0 + 2, z1 - 1, 2):
+		build.set(x0 + 1, FLOOR + 1, z, PRESENTS[z % len(PRESENTS)])
+	build.set(x1 - 1, FLOOR, z0 + 1, wool("brown"))
+	build.box(x1 - 1, FLOOR + 1, z0 + 1, x1 - 1, FLOOR + 2, z0 + 1, PINE_LEAVES)
+	build.set(x1 - 1, FLOOR + 3, z0 + 1, STAR)
+
+
+def build_xmas_sleigh(build: Build) -> None:
+	"""A red sleigh on gold runners, piled with presents, and four reindeer
+	in harness in front of it, the leader with a red nose."""
+	s = XMAS_SLEIGH
+	x0, x1, z0, z1 = s["x0"], s["x1"], s["z0"], s["z1"]
+	for z in (z0, z1):
+		build.box(x0, FLOOR, z, x1, FLOOR, z, GOLD)
+		build.set(x1 + 1, FLOOR + 1, z, GOLD)
+	build.box(x0, FLOOR + 1, z0, x1, FLOOR + 1, z1, wool("red"))
+	for z in (z0, z1):
+		build.box(x0, FLOOR + 2, z, x1 - 1, FLOOR + 2, z, wool("red"))
+		build.set(x1, FLOOR + 2, z, GOLD)
+	build.box(x0, FLOOR + 2, z0, x0, FLOOR + 3, z1, wool("red"))
+	build.box(x0, FLOOR + 4, z0, x0, FLOOR + 4, z1, GOLD)
+	for index, x in enumerate(range(x0 + 1, x1)):
+		build.set(x, FLOOR + 2, (z0 + z1) // 2, PRESENTS[index % len(PRESENTS)])
+	build.set(x0 + 1, FLOOR + 3, (z0 + z1) // 2, PRESENTS[3])
+	for index, (x, z) in enumerate(XMAS_REINDEER):
+		build.set(x, FLOOR, z, FENCE)
+		build.set(x + 1, FLOOR, z, FENCE)
+		build.box(x, FLOOR + 1, z, x + 1, FLOOR + 1, z, wool("brown"))
+		build.set(x + 2, FLOOR + 2, z, wool("brown"))
+		# Antlers: up off the head, and one tine back over the neck.
+		build.set(x + 2, FLOOR + 3, z, DEAD_WOOD)
+		build.set(x + 1, FLOOR + 4, z, DEAD_WOOD)
+		if index >= 2:
+			build.set(x + 3, FLOOR + 2, z, BAUBLES[0] if index == 2 else wool("black"))
+
+
+def build_xmas_corners(build: Build) -> None:
+	"""The pond, the snowmen and the pines."""
+	px, pz = XMAS_POND
+	for x in range(px - 6, px + 7):
+		for z in range(pz - 6, pz + 7):
+			d = math.hypot(x - px, z - pz)
+			if d <= XMAS_POND_RADIUS:
+				build.set(x, SURFACE, z, ICE)
+			elif d <= XMAS_POND_RADIUS + 1 and (x + z) % 3 == 0:
+				build.set(x, FLOOR, z, SNOW_SLAB)
+	# A bench on the pond's north bank, facing the ice.
+	for x in (px - 1, px, px + 1):
+		build.set(x, FLOOR, pz + 6, PLANK_STAIR, NORTH)
+	for cx, cz in XMAS_SNOWMEN:
+		build.sphere(cx, FLOOR + 1, cz, 1.5, SNOW)
+		build.set(cx, FLOOR + 3, cz, SNOW)
+		build.set(cx + 1, FLOOR + 3, cz, wool("orange"))
+		build.box(cx, FLOOR + 4, cz, cx, FLOOR + 5, cz, wool("black"))
+		build.set(cx + 1, FLOOR + 2, cz, wool("black"))
+		build.set(cx, FLOOR + 2, cz - 1, wool("red"))
+		build.set(cx, FLOOR + 2, cz + 1, wool("red"))
+	for x, z, height in XMAS_PINES:
+		snow_pine(build, x, z, height)
+
+
+def build_christmas() -> Build:
+	sx, sy, sz = XMAS_SIZE
+	build = Build(sx, sy, sz)
+	build_xmas_ground(build)
+	build_xmas_corners(build)
+	build_xmas_tree(build)
+	build_xmas_cabin(build)
+	build_xmas_sleigh(build)
+	return build
+
+
+# --------------------------------------------------------------------------
+# 16. Weeks on Fire Christmas
+# --------------------------------------------------------------------------
+
+# Christmas the Weeks on Fire way, south of the laser serpent: walk off the
+# south side of its ash field and the spur crosses the water onto a mirror
+# colonnade under a neon arch. Snow falls on ash. At the end of the walk a
+# Christmas tree is on fire — ember needles under flicker controllers, a neon
+# garland chasing up it, crystal baubles, a star — and festive anyway, with
+# presents round it, embers rising off it, and lasers spiralling up it like
+# tinsel (lw_maps' laser show with the serpent's `coil` pattern). Beyond it a
+# cabaret stage puts on a Christmas revue: velvet curtain, mirror wings,
+# chasing bulbs, crystal trees and a console that switches the lasers; a
+# mirror ball hangs over the dance floor. Two HOA boards keep the holiday
+# memos.
+#
+# 36 x 22 x 40 is 31,680 cells.
+WOF_XMAS_SIZE = (36, 22, 40)
+# The causeway lands on the north face, on the middle of the walk.
+WOF_XMAS_SPAWN = (18, FLOOR, 39)
+
+WOF_XMAS_WALK_X = (17, 19)
+WOF_XMAS_WALK_Z0 = 31                # the walk runs from here to the north edge
+WOF_XMAS_ARCH_Z = 37
+WOF_XMAS_COLONNADE_X = (14, 22)
+WOF_XMAS_PILLARS_Z = (31, 34, 37)
+WOF_XMAS_TREE = (18, 24)
+WOF_XMAS_TREE_BASE = FLOOR + 1
+WOF_XMAS_TREE_TOP = FLOOR + 13
+WOF_XMAS_TREE_RADIUS = 5.0
+WOF_XMAS_PLAZA_RADIUS = 9.5
+# The lasers' `coil`: a helix outside the tree, which the emitters climb.
+# lw_maps' wof_christmas `lasers.coil` is the same; the test checks both.
+WOF_XMAS_COIL = dict(x=18, z=24, radius=7.0, y0=FLOOR + 1, rise=11, turns=3.0,
+	start=math.pi / 2)
+WOF_XMAS_STAGE = dict(x0=7, x1=28, z0=2, z1=7)    # the deck; stand on it at +1
+WOF_XMAS_STAGE_STAIRS = ((8, 9), (26, 27))
+WOF_XMAS_CONSOLE = (18, FLOOR + 1, 3)
+WOF_XMAS_DANCE = dict(x0=8, x1=27, z0=9, z1=14)
+WOF_XMAS_BALL = (18, FLOOR + 8, 11)
+WOF_XMAS_PYLONS = ((2, 2), (33, 2), (2, 37), (33, 37))
+WOF_XMAS_PYLON_TOP = FLOOR + 11
+WOF_XMAS_MEMOS = ((21, FLOOR + 1, 38, EAST), (5, FLOOR + 1, 11, WEST))
+
+
+def build_wof_xmas_ground(build: Build) -> None:
+	"""Snow on ash, the scorched plaza round the tree, the walk in and its
+	neon, the arch and the mirror colonnade, the pylons."""
+	sx, _, sz = build.sx, build.sy, build.sz
+	build.ground(SNOW, sub=STONE)
+	for x in range(sx):
+		for z in range(sz):
+			if (x * 5 + z * 3 + (x * z) % 7) % 9 < 2:
+				build.set(x, SURFACE, z, wool("dark_grey"))
+	cx, cz = WOF_XMAS_TREE
+	for x in range(sx):
+		for z in range(sz):
+			d = math.hypot(x - cx, z - cz)
+			if d <= WOF_XMAS_PLAZA_RADIUS:
+				build.set(x, SURFACE, z, PACKED_BASALT)
+	x0, x1 = WOF_XMAS_WALK_X
+	build.box(x0, SURFACE, WOF_XMAS_WALK_Z0, x1, SURFACE, sz - 1, PACKED_BASALT)
+	for z in range(WOF_XMAS_WALK_Z0, sz - 2):
+		build.set(x0 - 1, FLOOR, z, NEON, EAST)
+		build.set(x1 + 1, FLOOR, z, NEON, EAST)
+	# The arch: candy-cane posts and a lintel of glowing serpent scales.
+	z = WOF_XMAS_ARCH_Z
+	for x in (x0 - 2, x1 + 2):
+		build.box(x, FLOOR, z, x, FLOOR + 3, z, CANDY)
+	build.box(x0 - 2, FLOOR + 4, z, x1 + 2, FLOOR + 4, z, SERPENT_SCALE)
+	build.set((x0 + x1) // 2, FLOOR + 5, z, STAR)
+	# Pylons at the corners, a laser emitter on each: the `sweep` pattern's
+	# emitters race round from cap to cap.
+	for x, z in WOF_XMAS_PYLONS:
+		build.box(x, SURFACE, z, x, WOF_XMAS_PYLON_TOP - 1, z, PACKED_BASALT)
+		build.set(x, WOF_XMAS_PYLON_TOP, z, LASER_BLOCK)
+	for mx, my, mz, facing in WOF_XMAS_MEMOS:
+		build.set(mx, my - 1, mz, PEDESTAL)
+		build.set(mx, my, mz, HOA_HOLIDAY_MEMO, facing)
+
+
+def build_wof_xmas_colonnade(build: Build) -> list[tuple[int, int, int]]:
+	"""Mirror pillars either side of the walk, glass between them, a crystal
+	on each that chases down one side and back up the other."""
+	lamps = []
+	for side, x in enumerate(WOF_XMAS_COLONNADE_X):
+		zs = WOF_XMAS_PILLARS_Z if side == 0 else tuple(reversed(WOF_XMAS_PILLARS_Z))
+		for z in zs:
+			build.box(x, FLOOR, z, x, FLOOR + 2, z, MIRROR)
+			build.set(x, FLOOR + 3, z, CRYSTAL_DIM)
+			build.set(x, FLOOR + 4, z, CHASE, len(lamps) % 8)
+			lamps.append((x, FLOOR + 3, z))
+		for a, b in zip(WOF_XMAS_PILLARS_Z, WOF_XMAS_PILLARS_Z[1:]):
+			build.box(x, FLOOR, a + 1, x, FLOOR + 1, b - 1, GLASS)
+	return lamps
+
+
+def build_burning_tree(build: Build) -> list[tuple[int, int, int]]:
+	"""The tree on fire: a charred trunk, needles of ember blocks that
+	flicker, a neon garland chasing up it, crystal baubles, a star with a
+	laser at its heart, and presents round the foot. Returns the garland."""
+	cx, cz = WOF_XMAS_TREE
+	base, top = WOF_XMAS_TREE_BASE, WOF_XMAS_TREE_TOP
+	build.box(cx, FLOOR, cz, cx, top - 1, cz, PACKED_BASALT)
+	exposed = build_tree_cone(build, cx, cz, base, top, WOF_XMAS_TREE_RADIUS, EMBER_OFF)
+	lights = garland(exposed, cx, cz, base, 4.0, math.pi / 2)
+	for index, (x, y, z) in enumerate(lights):
+		build.set(x, y, z, SERPENT_SCALE_OFF)
+		build.set(x, y + 1, z, CHASE, index % 8)
+	taken = set(lights)
+	for x, y, z in exposed:
+		if (x, y, z) in taken:
+			continue
+		h = (x * 7 + y * 13 + z * 5) % 6
+		if h == 0 and y < top - 1:
+			build.set(x, y, z, CRYSTAL)
+		elif h in (1, 2, 3):
+			build.set(x, y, z, EMBER)
+			build.set(x, y + 1, z, FLICKER)
+	# Smoulder on the sides as well: two in five of the needles facing out
+	# glow without flickering, so the tree reads as alight from any side.
+	reach = int(WOF_XMAS_TREE_RADIUS + 2)
+	for y in range(base, top + 1):
+		for x in range(cx - reach, cx + reach + 1):
+			for z in range(cz - reach, cz + reach + 1):
+				if build.get(x, y, z) != EMBER_OFF:
+					continue
+				if any(build.get(x + dx, y, z + dz) == AIR
+						for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1))) \
+						and (x * 3 + y * 7 + z * 11) % 5 < 2:
+					build.set(x, y, z, EMBER)
+	build.box(cx, top + 1, cz, cx, top + 3, cz, STAR)
+	build.set(cx - 1, top + 2, cz, STAR)
+	build.set(cx + 1, top + 2, cz, STAR)
+	build.set(cx, top + 2, cz, LASER_BLOCK)
+	# Presents, a few of them singed.
+	for index in range(24):
+		angle = index / 24 * 2 * math.pi
+		if abs((angle - math.pi / 2 + math.pi) % (2 * math.pi) - math.pi) < 0.35:
+			continue                         # the way in from the walk
+		x = int(round(cx + 6.2 * math.cos(angle)))
+		z = int(round(cz + 6.2 * math.sin(angle)))
+		build.set(x, FLOOR, z, EMBER_OFF if index % 7 == 3 else
+			PRESENTS[index % len(PRESENTS)])
+	# Uplights in the plaza, pointing at the smoke.
+	for dx, dz in ((-8, 0), (8, 0), (0, -8)):
+		build.set(cx + dx, FLOOR, cz + dz, UPLIGHT)
+	return lights
+
+
+def build_wof_xmas_stage(build: Build) -> list[tuple[int, int]]:
+	"""The revue stage and its dance floor. Returns the proscenium bulbs in
+	chase order, west to east."""
+	s = WOF_XMAS_STAGE
+	x0, x1, z0, z1 = s["x0"], s["x1"], s["z0"], s["z1"]
+	top = FLOOR + 6
+	build.box(x0, FLOOR, z0, x1, FLOOR, z1, wool("black"))
+	build.box(x0, FLOOR, z1, x1, FLOOR, z1, GOLD)
+	# Velvet backdrop, mirror wings, gold header and a velvet valance.
+	build.box(x0 - 1, SURFACE, z0 - 1, x1 + 1, top, z0 - 1, CURTAIN)
+	for x in (x0 - 1, x1 + 1):
+		build.box(x, SURFACE, z0, x, top, z1, MIRROR)
+	build.box(x0 - 1, top, z1, x1 + 1, top, z1, GOLD)
+	build.box(x0, top - 1, z1, x1, top - 1, z1, CURTAIN)
+	# Stairs up at each end of the front.
+	for a, b in WOF_XMAS_STAGE_STAIRS:
+		build.box(a, FLOOR, z1 + 1, b, FLOOR, z1 + 1, PLANK_STAIR, SOUTH)
+	# Chasing bulbs in front of the header.
+	bulbs = []
+	for x in range(x0, x1 + 1, 3):
+		build.set(x, top - 1, z1 + 1, LANTERN_OFF)
+		build.set(x, top, z1 + 1, CHASE, len(bulbs) % 8)
+		bulbs.append((x, z1 + 1))
+	# The console, facing the floor, and the revue's set: presents, two
+	# crystal trees with stars, and lights hidden in the flies.
+	build.set(*WOF_XMAS_CONSOLE, SERPENT_SWITCH, SOUTH)
+	for x in (x0 + 2, x0 + 3, x1 - 3, x1 - 2):
+		build.set(x, FLOOR + 1, z0 + 1, PRESENTS[x % len(PRESENTS)])
+	for tx in (x0 + 4, x1 - 4):
+		for y, r in ((FLOOR + 1, 1.5), (FLOOR + 2, 1.0), (FLOOR + 3, 0.5)):
+			for x in range(tx - 2, tx + 3):
+				for z in range(z0 + 1, z0 + 6):
+					if math.hypot(x - tx, z - (z0 + 3)) <= r:
+						build.set(x, y, z, CRYSTAL)
+		build.set(tx, FLOOR + 4, z0 + 3, STAR)
+	for x in (x0 + 6, (x0 + x1) // 2, x1 - 6):
+		build.set(x, top - 1, z0 + 2, HIDDEN_LIGHT)
+	# The dance floor: black and magenta, a mirror ball over it on a chain.
+	d = WOF_XMAS_DANCE
+	for x in range(d["x0"], d["x1"] + 1):
+		for z in range(d["z0"], d["z1"] + 1):
+			build.set(x, SURFACE, z, wool("magenta") if (x // 2 + z // 2) % 2 else wool("black"))
+	bx, by, bz = WOF_XMAS_BALL
+	build.sphere(bx, by, bz, 1.5, MIRROR)
+	build.box(bx, by + 2, bz, bx, by + 4, bz, FENCE)
+	# Floating ornaments round the floor: crystals with gold caps, hung from
+	# nothing at all.
+	for index, (x, z) in enumerate(((10, 10), (14, 13), (22, 13), (26, 10), (12, 16),
+			(24, 16))):
+		y = FLOOR + 5 + index % 3
+		build.set(x, y, z, CRYSTAL if index % 2 == 0 else BAUBLES[index % 3])
+		build.set(x, y + 1, z, GOLD)
+		build.set(x, y + 2, z, FENCE)
+	return bulbs
+
+
+def build_wof_christmas() -> Build:
+	sx, sy, sz = WOF_XMAS_SIZE
+	build = Build(sx, sy, sz)
+	build_wof_xmas_ground(build)
+	build_wof_xmas_colonnade(build)
+	build_burning_tree(build)
+	build_wof_xmas_stage(build)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -3318,6 +3857,8 @@ SPECS = [
 	MapSpec("map_mirror_hall", MIRROR_SIZE, MIRROR_SPAWN, build_mirror_hall),
 	MapSpec("map_waterfall_cascade", CASCADE_SIZE, CASCADE_SPAWN,
 		build_waterfall_cascade),
+	MapSpec("map_christmas", XMAS_SIZE, XMAS_SPAWN, build_christmas),
+	MapSpec("map_wof_christmas", WOF_XMAS_SIZE, WOF_XMAS_SPAWN, build_wof_christmas),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}
