@@ -32,6 +32,7 @@ globals = {
 	"lw_cascade",
 	"lw_core",
 	"lw_dance",
+	"lw_flora",
 	"lw_maps",
 	"lw_nodes",
 	"lw_theater",

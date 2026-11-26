@@ -53,7 +53,7 @@ local pages = {}
 
 -- Sort so the inventory reads like the material library: terrain, structure,
 -- architecture, lighting, exhibition, then the dyed cubes, then the tools.
-local GROUP_ORDER = {"lw_nodes:", "lw_theater:", "lw_maps:", "lw_cascade:", "lw_tools:"}
+local GROUP_ORDER = {"lw_nodes:", "lw_theater:", "lw_maps:", "lw_cascade:", "lw_flora:", "lw_tools:"}
 
 local function catalogue()
 	if palette_items then
@@ -174,6 +174,7 @@ lw_core.starter_tools = {
 	"lw_tools:stamp",
 	"lw_tools:laser_wand",
 	"lw_tools:ember_tool",
+	"lw_flora:designer",
 }
 
 lw_core.starter_kit = {}
