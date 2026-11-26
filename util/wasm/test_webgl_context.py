@@ -146,18 +146,39 @@ def scenario_lose(browser: Browser, base: str, extra: str) -> None:
 
 
 def world_files(page: Page) -> dict:
-	"""What the world on disk looks like: world.mt and the two databases."""
+	"""What the world on disk looks like: world.mt and the two databases.
+
+	The databases of a world on OPFS (client/web/storage.js) are read from
+	OPFS, as test_first_playable.read_stored() does; everything else from
+	the Emscripten FS."""
 	return page.evaluate("""async world => {
-		const read = path => FS.analyzePath(path).exists ? FS.readFile(path) : null;
+		const storage = Module.luantiStorage;
+		const id = storage ? storage.readMarker(world) : null;
+		const root = id ? await (await navigator.storage.getDirectory())
+			.getDirectoryHandle(storage.opfsRoot) : null;
+		const read = async path => {
+			const name = path.slice(path.lastIndexOf("/") + 1);
+			if (root && /\\.sqlite$/.test(name)) {
+				try {
+					const file = await (await (await root.getDirectoryHandle(id))
+						.getFileHandle(name)).getFile();
+					return new Uint8Array(await file.arrayBuffer());
+				} catch (e) {
+					return null;
+				}
+			}
+			return FS.analyzePath(path).exists ? FS.readFile(path) : null;
+		};
 		const hash = async bytes => bytes ? Array.from(new Uint8Array(
 			await crypto.subtle.digest("SHA-256", bytes)),
 			b => b.toString(16).padStart(2, "0")).join("") : null;
 		const header = bytes => bytes ?
 			new TextDecoder().decode(bytes.subarray(0, 15)) : null;
-		const map = read(world + "/map.sqlite");
-		const players = read(world + "/players.sqlite");
+		const map = await read(world + "/map.sqlite");
+		const players = await read(world + "/players.sqlite");
 		return {
-			worldMt: await hash(read(world + "/world.mt")),
+			storage: id ? "opfs" : "fs",
+			worldMt: await hash(await read(world + "/world.mt")),
 			mapHeader: header(map),
 			mapSize: map ? map.length : 0,
 			playersHeader: header(players)
@@ -247,11 +268,13 @@ def scenario_restore(browser: Browser, base: str, extra: str,
 		playable.send_chat(page, console, f"/giveme {playable.DIG_ITEMS['devtest']}")
 		# The engine drops the first camera movement after the window
 		# becomes active (Game::updateCameraDirection), and dig_nodes()
-		# pitches the view down with a single movement; without this turn
+		# pitches the view down with a single movement; without these turns
 		# the player can stay looking at the horizon, out of reach of
-		# anything to dig. test_first_playable.py's placing step does the
-		# same turn before its dig.
-		playable.look(page, 0, 40)
+		# anything to dig, with or without a context loss before. The pitch
+		# clamps at straight down, so extra turns do no harm.
+		# test_first_playable.py's placing step turns before its dig too.
+		for _ in range(3):
+			playable.look(page, 0, 40)
 		dig_start = len(console)
 		dug = playable.dig_nodes(page, console)
 		# Proxy mode starves the internal server on SwiftShader (steps lag by
