@@ -7,6 +7,7 @@
   "license": "LGPL-2.1-or-later",
   "scripts": {
     "start": "node server.mjs",
+    "check": "node check.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
