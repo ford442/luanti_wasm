@@ -1,0 +1,15 @@
+{
+  "name": "luanti-websocket-udp-proxy",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Self-hostable UDP-over-WebSocket proxy for Luanti WASM",
+  "license": "LGPL-2.1-or-later",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  }
+}

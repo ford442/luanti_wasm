@@ -13,8 +13,48 @@
 #include "util/tracy_wrapper.h"
 #include "filesys.h"
 #include "porting.h"
+#ifdef __EMSCRIPTEN__
+#include "porting_emscripten.h"
+#endif
 
 namespace sound {
+
+#ifdef __EMSCRIPTEN__
+namespace {
+
+// The AudioContext behind Emscripten's OpenAL is the thing a silent session
+// usually comes down to, and it changes without the engine being told: it
+// starts locked until a click, and a browser may suspend it when the tab is
+// hidden. Log the transitions (once each, with the sounds that are waiting on
+// it), polled slowly because reading it is a round trip to the main thread.
+constexpr f32 WEB_AUDIO_POLL_INTERVAL = 2.0f;
+
+void watchWebAudioState(f32 dtime, size_t num_playing)
+{
+	static f32 timer = 0.0f;
+	static std::string last;
+	timer -= dtime;
+	if (timer > 0.0f)
+		return;
+	timer = WEB_AUDIO_POLL_INTERVAL;
+
+	const std::string state = getWebAudioState();
+	if (state == last)
+		return;
+	const bool was_suspended = last.find("suspended") != std::string::npos;
+	const bool is_suspended = state.find("suspended") != std::string::npos;
+	if (is_suspended) {
+		warningstream << "Audio: context suspended (" << state << "): "
+			<< num_playing << " sound(s) are silent until the page gets a click "
+			"or key press, or becomes visible again" << std::endl;
+	} else if (was_suspended) {
+		actionstream << "Audio: context resumed (" << state << ")" << std::endl;
+	}
+	last = state;
+}
+
+} // namespace
+#endif
 
 void OpenALSoundManager::stepStreams(f32 dtime)
 {
@@ -192,6 +232,24 @@ void OpenALSoundManager::playSoundGeneric(sound_handle_t id, const std::string &
 	std::string sound_name = use_local_fallback ?
 			getOrLoadLoadedSoundNameFromGroup(group_name) :
 			getLoadedSoundNameFromGroup(group_name);
+#ifdef __EMSCRIPTEN__
+	{
+		// The first request, and the first few misses, are visible in the
+		// browser console: a silent session is usually either a locked
+		// AudioContext or a game that has no such sound at all.
+		static int requests = 0;
+		static int misses = 0;
+		if (requests++ == 0)
+			actionstream << "Audio: first sound request reached OpenAL: \""
+				<< group_name << "\" (" << (sound_name.empty() ? "not found" : "found")
+				<< "), AudioContext " << getWebAudioState() << std::endl;
+		else if (sound_name.empty() && misses < 8)
+			actionstream << "Audio: file missing: no sound named \"" << group_name
+				<< "\" in this game's media" << std::endl;
+		if (sound_name.empty())
+			misses++;
+	}
+#endif
 	if (sound_name.empty()) {
 		infostream << "OpenALSoundManager: \"" << group_name << "\" not found."
 				<< std::endl;
@@ -335,6 +393,14 @@ OpenALSoundManager::~OpenALSoundManager()
 
 void OpenALSoundManager::step(f32 dtime)
 {
+#ifdef __EMSCRIPTEN__
+	watchWebAudioState(dtime, m_sounds_playing.size());
+	// Embedder pause (Module.luantiLauncher.setPaused): the frame loop stands
+	// still, and the page suspends the AudioContext with it. Stepping the
+	// streams anyway would only decode ahead of a clock that is not moving.
+	if (porting::emscripten_engine_paused())
+		return;
+#endif
 	m_time_until_dead_removal -= dtime;
 	if (m_time_until_dead_removal <= 0.0f) {
 		if (!m_sounds_playing.empty()) {

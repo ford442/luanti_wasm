@@ -1,0 +1,6 @@
+<!-- Luanti | SPDX-License-Identifier: LGPL-2.1-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+	<rect width="512" height="512" rx="112" fill="#142019"/>
+	<path fill="#a6d85f" d="M256 64 421 160v192L256 448 91 352V160zm0 58-112 65v130l112 65 112-65V187z"/>
+	<path fill="#a6d85f" d="m226 173 52-30v83h90v60h-90v83l-52-30v-53h-82v-60h82z"/>
+</svg>

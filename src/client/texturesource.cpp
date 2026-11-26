@@ -114,6 +114,10 @@ public:
 	// Shall be called from the main thread.
 	void rebuildImagesAndTextures();
 
+#ifdef __EMSCRIPTEN__
+	bool reuploadAfterContextLoss() override;
+#endif
+
 	video::SColor getTextureAverageColor(const std::string &name);
 
 	core::dimension2du getTextureDimensions(const std::string &image);
@@ -587,6 +591,50 @@ void TextureSource::rebuildImagesAndTextures()
 
 	// FIXME: we should rebuild palettes too
 }
+
+#ifdef __EMSCRIPTEN__
+bool TextureSource::reuploadAfterContextLoss()
+{
+	sanity_check(std::this_thread::get_id() == m_main_thread);
+	MutexAutoLock lock(m_textureinfo_cache_mutex);
+
+	video::IVideoDriver *driver = RenderingEngine::get_video_driver();
+	sanity_check(driver);
+
+	// Same images as generateTexture() / generateArrayTexture() made, from
+	// the source images still cached in m_imagesource (or read again from
+	// disk). Array textures upload one image per layer.
+	size_t done = 0, missing = 0, refused = 0;
+	for (TextureInfo &ti : m_textureinfo_cache) {
+		if (ti.name.empty() || !ti.texture)
+			continue;
+		std::vector<video::IImage *> imgs;
+		std::set<std::string> unused;
+		for (const std::string &name : ti.images) {
+			video::IImage *img = getOrGenerateImage(name, unused);
+			if (!img)
+				break;
+			imgs.push_back(img);
+		}
+		if (imgs.empty() || imgs.size() != ti.images.size())
+			missing++;
+		else if (driver->reuploadTexture(ti.texture, imgs))
+			done++;
+		else
+			refused++;
+		for (video::IImage *img : imgs)
+			img->drop();
+	}
+
+	infostream << "TextureSource: re-uploaded " << done << " textures after "
+		"WebGL context restore (" << missing << " without an image, "
+		<< refused << " refused)" << std::endl;
+	if (missing > 0)
+		warningstream << "TextureSource: " << missing << " textures could not be "
+			"generated again and stay blank" << std::endl;
+	return refused == 0;
+}
+#endif
 
 void TextureSource::rebuildTexture(video::IVideoDriver *driver, TextureInfo &ti)
 {

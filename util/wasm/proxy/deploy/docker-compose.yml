@@ -1,0 +1,44 @@
+# Luanti WebSocket UDP proxy behind Caddy TLS.
+#
+#   cd util/wasm/proxy/deploy
+#   cp .env.example .env     # then edit it
+#   docker compose up -d --build
+#
+# Point the web client at wss://$PROXY_DOMAIN/.
+services:
+  proxy:
+    build: ..
+    restart: unless-stopped
+    environment:
+      LUANTI_PROXY_ALLOWED_ORIGINS: ${PROXY_ALLOWED_ORIGINS:?set PROXY_ALLOWED_ORIGINS, e.g. https://play.example.org}
+      LUANTI_PROXY_TRUST_PROXY: "1"
+      LUANTI_PROXY_ALLOW_PUBLIC: ${PROXY_ALLOW_PUBLIC:-0}
+      LUANTI_PROXY_ALLOWED_TARGETS: ${PROXY_ALLOWED_TARGETS:-127.0.0.1:30000}
+      LUANTI_PROXY_ALLOWED_PORTS: ${PROXY_ALLOWED_PORTS:-30000-30010}
+      LUANTI_PROXY_SERVER_LIST_URL: ${PROXY_SERVER_LIST_URL:-}
+      LUANTI_PROXY_MAX_CONNECTIONS: ${PROXY_MAX_CONNECTIONS:-256}
+      LUANTI_PROXY_MAX_CONNECTIONS_PER_IP: ${PROXY_MAX_CONNECTIONS_PER_IP:-8}
+      LUANTI_PROXY_METRICS_TOKEN: ${PROXY_METRICS_TOKEN:?set PROXY_METRICS_TOKEN (openssl rand -hex 24)}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    expose: ["8080"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [proxy]
+    environment:
+      PROXY_DOMAIN: ${PROXY_DOMAIN:?set PROXY_DOMAIN, e.g. proxy.example.org}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

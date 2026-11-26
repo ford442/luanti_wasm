@@ -299,6 +299,27 @@ public:
 		return BufferID;
 	}
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	//! After a WebGL context loss: create a new framebuffer and attach the
+	//! (already recreated) textures to it again on the next update().
+	bool recreateAfterContextLoss()
+	{
+		BufferID = 0;
+		if (ColorAttachment > 0) {
+			Driver->irrGlGenFramebuffers(1, &BufferID);
+			if (!BufferID)
+				return false;
+		}
+		for (u32 i = 0; i < AssignedTextures.size(); ++i)
+			AssignedTextures[i] = GL_NONE;
+		AssignedDepth = false;
+		AssignedStencil = false;
+		RequestTextureUpdate = true;
+		RequestDepthStencilUpdate = true;
+		return true;
+	}
+#endif
+
 	const core::dimension2d<u32> &getSize() const
 	{
 		return Size;

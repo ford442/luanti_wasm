@@ -266,7 +266,13 @@ endif(ENABLE_OPENSSL)
 
 
 find_package(ZLIB REQUIRED)
-find_package(Zstd REQUIRED)
+if(TARGET libzstd_static)
+	# Supplied by EmscriptenDependencies.cmake. FindZstd performs a try-link and
+	# cannot pass a build-tree target into its isolated check project.
+	set(ZSTD_LIBRARY libzstd_static)
+else()
+	find_package(Zstd REQUIRED)
+endif()
 
 
 if(NOT MSVC)
@@ -326,6 +332,10 @@ if(WIN32)
 			set(LUA_DLL "" CACHE FILEPATH "Path to luajit-5.1.dll for installation (optional)")
 		endif()
 	endif()
+elseif(EMSCRIPTEN)
+	# Emscripten / WebAssembly — no native sockets, no platform threading libs needed
+	# SDL2, ZLIB, and Freetype are provided via Emscripten ports (USE_SDL=2 etc.)
+	# pthreads come from the -pthread compile/link flag added to the target below
 else()
 	# Unix probably
 	list(APPEND PLATFORM_LIBS ${CMAKE_DL_LIBS})
@@ -534,6 +544,10 @@ set(common_SRCS
 
 if(ANDROID)
 	list(APPEND common_SRCS porting_android.cpp)
+endif()
+
+if(EMSCRIPTEN)
+	list(APPEND common_SRCS porting_emscripten.cpp)
 endif()
 
 if(BUILD_UNITTESTS OR BUILD_BENCHMARKS)
@@ -793,6 +807,209 @@ if(BUILD_CLIENT)
 
 	if(PRECOMPILE_HEADERS)
 		target_precompile_headers(${PROJECT_NAME} PRIVATE ${PRECOMPILED_HEADERS_LIST})
+	endif()
+
+	if(EMSCRIPTEN)
+		# 11 = the engine's threads plus the OPFS world storage thread
+		# (database/sqlite3_opfs_vfs.cpp), which starts before the server.
+		set(WASM_PTHREAD_POOL_SIZE "11" CACHE STRING
+			"Pre-spawned pthread pool size (integer or JS expression, e.g. navigator.hardwareConcurrency)")
+		# WASM_ENABLE_LTO / WASM_ENABLE_SIMD are applied to every target in
+		# the top-level CMakeLists.txt.
+		set(WASM_MALLOC "" CACHE STRING "Emscripten allocator override: dlmalloc, emmalloc or mimalloc (empty = default)")
+		# The heap the binary is linked for. These two numbers are the only
+		# place they are written: they feed -sINITIAL_MEMORY / -sMAXIMUM_MEMORY
+		# below and the generated Module.luantiBuild that client/web/startup.js
+		# probes against, so the page can never ask for a memory the binary
+		# was not linked to accept.
+		set(WASM_INITIAL_MEMORY 268435456)  # 256 MiB
+		# Just over 2 GiB on purpose: with the default minimum Firefox,
+		# emcc's link.py turns WEBGL_USE_GARBAGE_FREE_APIS off past 2^31
+		# (it is an internal setting; -sWEBGL_USE_GARBAGE_FREE_APIS=0 is
+		# rejected). Those APIs hand WebGL whole-heap views, which on a
+		# growable shared heap throw "ArrayBuffer value must not be
+		# resizable" (see client/web/webgl_compat.js, kept as a backstop
+		# for the large-count paths that still pass heap subarrays).
+		set(WASM_MAXIMUM_MEMORY 2147549184)  # 2 GiB + 64 KiB
+		# A browser that will not reserve that maximum is not a second build:
+		# startup.js creates the shared memory with a smaller maximum and
+		# hands it to this same binary, whose import only requires
+		# maximum <= WASM_MAXIMUM_MEMORY. The memory (and so the glue that
+		# keeps WEBGL_USE_GARBAGE_FREE_APIS off) is identical in every case.
+		if(WASM_ENABLE_SIMD)
+			set(WASM_BUILD_SIMD true)
+		else()
+			set(WASM_BUILD_SIMD false)
+		endif()
+		if(WASM_ENABLE_LTO AND CMAKE_BUILD_TYPE MATCHES "^(Release|MinSizeRel)$")
+			set(WASM_BUILD_LTO true)
+		else()
+			set(WASM_BUILD_LTO false)
+		endif()
+		set(WASM_BUILD_MALLOC "default")
+		if(WASM_MALLOC)
+			set(WASM_BUILD_MALLOC "${WASM_MALLOC}")
+		endif()
+		set(WASM_BUILD_INFO "${CMAKE_CURRENT_BINARY_DIR}/luanti-build-info.js")
+		configure_file("${CMAKE_SOURCE_DIR}/client/web/build-info.js.in" "${WASM_BUILD_INFO}" @ONLY)
+		# Emscripten ports and WebAssembly-specific linker flags
+		target_compile_options(${PROJECT_NAME} PRIVATE
+			-pthread
+			-fexceptions
+			-sUSE_SDL=2
+			-sUSE_ZLIB=1
+			-sUSE_FREETYPE=1
+			$<$<BOOL:${USE_SOUND}>:-sUSE_OGG=1>
+			$<$<BOOL:${USE_SOUND}>:-sUSE_VORBIS=1>
+		)
+		target_link_options(${PROJECT_NAME} PRIVATE
+			-fexceptions
+			-sUSE_SDL=2
+			-sUSE_ZLIB=1
+			-sUSE_FREETYPE=1
+			$<$<BOOL:${USE_SOUND}>:-sUSE_OGG=1>
+			$<$<BOOL:${USE_SOUND}>:-sUSE_VORBIS=1>
+			-sFULL_ES2=1
+			-sMAX_WEBGL_VERSION=2
+			# Keep Luanti's synchronous launcher/game stack off the browser UI
+			# thread. GL is proxied to the browser main thread; OFFSCREEN_FRAMEBUFFER
+			# supplies the intermediate FBO that commit_frame presents. Do not
+			# enable OFFSCREENCANVAS_SUPPORT — transferring #canvas blanked the
+			# game under PROXY_TO_PTHREAD in practice.
+			-sPROXY_TO_PTHREAD=1
+			-sOFFSCREEN_FRAMEBUFFER=1
+			-sALLOW_MEMORY_GROWTH=1
+			-sINITIAL_MEMORY=${WASM_INITIAL_MEMORY}
+			-sMAXIMUM_MEMORY=${WASM_MAXIMUM_MEMORY}
+			-pthread
+			-sSHARED_MEMORY=1
+			-sFETCH=1
+			-sFORCE_FILESYSTEM=1
+			-sEXIT_RUNTIME=0
+			# Exceptions: -fexceptions already implies DISABLE_EXCEPTION_CATCHING=0,
+			# so the explicit setting that used to live here was redundant.
+			# Pre-spawned worker pool. Luanti starts a dozen+ threads (app,
+			# server, emerge, mesh, sound, async Lua, connection send/recv);
+			# without a pool every std::thread has to round-trip through the
+			# browser main thread, which is also servicing proxied GL.
+			# WASM_PTHREAD_POOL_SIZE may be an integer or a JS expression.
+			-sPTHREAD_POOL_SIZE=${WASM_PTHREAD_POOL_SIZE}
+			# HEAPU8 is for client/web/videotexture.js (Theater Tier C spike):
+			# with ALLOW_MEMORY_GROWTH, listing it here is what keeps
+			# Module.HEAPU8 pointing at the live buffer after a growth instead
+			# of a detached one.
+			-sEXPORTED_RUNTIME_METHODS=callMain,HEAPU8
+			-lidbfs.js
+			# First, so a browser that cannot run this build stops luanti.js
+			# before packages.js starts downloading or anything is reserved.
+			"SHELL:--pre-js ${WASM_BUILD_INFO}"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/startup.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/storage.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/worlds.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/packages.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/runtime_media.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/webgl_compat.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/audio_unlock.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/perf.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/present.js"
+			"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/client/web/shell.html"
+			# Assets are NOT preloaded. util/wasm/packages.json lists the
+			# packages (core engine data, one per game, optional songs);
+			# util/wasm/build_packages.py turns them into content-addressed
+			# assets/<name>.<hash>.data files that client/web/packages.js streams
+			# in on demand. Check the content budget in wasm_porting.md before
+			# growing `core`. Runtime media (theater clips, songs) stays in
+			# client/web/media and is fetched on demand (runtime_media.js).
+		)
+		# Build-type specific profile. See "Appendix: Flag Matrix" in
+		# wasm_porting.md before changing any of these.
+		if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+			# Full runtime checking; slow. For chasing memory/threading bugs.
+			target_link_options(${PROJECT_NAME} PRIVATE
+				-sASSERTIONS=2
+				-sSAFE_HEAP=1
+				-sSTACK_OVERFLOW_CHECK=2
+				--profiling-funcs
+				-gsource-map
+			)
+		elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+			# Release speed with readable stacks and source maps for profiling.
+			target_link_options(${PROJECT_NAME} PRIVATE
+				-sASSERTIONS=1
+				--profiling-funcs
+				-gsource-map
+			)
+		else()
+			# Release / MinSizeRel: shipped build, no runtime assertions.
+			target_link_options(${PROJECT_NAME} PRIVATE
+				-sASSERTIONS=0
+				-O3
+			)
+		endif()
+		if(WASM_MALLOC)
+			target_link_options(${PROJECT_NAME} PRIVATE -sMALLOC=${WASM_MALLOC})
+		endif()
+		# Emit .html shell so the build is directly servable
+		set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
+		set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
+			${WASM_BUILD_INFO}
+			${CMAKE_SOURCE_DIR}/client/web/startup.js
+			${CMAKE_SOURCE_DIR}/client/web/network.js
+			${CMAKE_SOURCE_DIR}/client/web/persistence.js
+			${CMAKE_SOURCE_DIR}/client/web/storage.js
+			${CMAKE_SOURCE_DIR}/client/web/worlds.js
+			${CMAKE_SOURCE_DIR}/client/web/packages.js
+			${CMAKE_SOURCE_DIR}/client/web/runtime_media.js
+			${CMAKE_SOURCE_DIR}/client/web/webgl_compat.js
+			${CMAKE_SOURCE_DIR}/client/web/audio_unlock.js
+			${CMAKE_SOURCE_DIR}/client/web/perf.js
+			${CMAKE_SOURCE_DIR}/client/web/present.js
+			${CMAKE_SOURCE_DIR}/client/web/shell.html
+			${CMAKE_SOURCE_DIR}/client/web/launcher.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher.css
+			${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+			${CMAKE_SOURCE_DIR}/client/web/theater.js
+			${CMAKE_SOURCE_DIR}/client/web/videotexture.js
+			${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
+			${CMAKE_SOURCE_DIR}/client/web/service-worker.js
+			${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
+			${CMAKE_SOURCE_DIR}/client/web/.htaccess
+		)
+		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				${CMAKE_SOURCE_DIR}/client/web/launcher.js
+				${CMAKE_SOURCE_DIR}/client/web/launcher.css
+				${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+				${CMAKE_SOURCE_DIR}/client/web/theater.js
+				${CMAKE_SOURCE_DIR}/client/web/videotexture.js
+				${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
+				${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
+				${CMAKE_SOURCE_DIR}/client/web/.htaccess
+				$<TARGET_FILE_DIR:${PROJECT_NAME}>
+			# Theater clips are served from media/ at runtime rather than baked
+			# into the asset packages. The directory ships with only its README; a
+			# deployment drops real clips in beside it.
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+				${CMAKE_SOURCE_DIR}/client/web/media
+				$<TARGET_FILE_DIR:${PROJECT_NAME}>/media
+			COMMENT "Copying Luanti web launcher and PWA assets"
+		)
+		# Streamed asset packages + asset-manifest.json, and the service worker
+		# stamped with this build's id (it is not copied verbatim above). Always out of date on
+		# purpose (it hashes the source trees, so changing a game never needs an
+		# engine relink) and cheap when nothing changed.
+		find_package(Python3 REQUIRED COMPONENTS Interpreter)
+		add_custom_target(luanti_packages ALL
+			COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/util/wasm/build_packages.py
+				--root ${CMAKE_SOURCE_DIR}
+				--config ${CMAKE_SOURCE_DIR}/util/wasm/packages.json
+				--output $<TARGET_FILE_DIR:${PROJECT_NAME}>
+			COMMENT "Building Luanti asset packages"
+			VERBATIM
+		)
+		add_dependencies(luanti_packages ${PROJECT_NAME})
 	endif()
 endif(BUILD_CLIENT)
 

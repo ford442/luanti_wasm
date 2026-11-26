@@ -32,6 +32,9 @@ void RenderingCore::draw(video::SColor _skycolor, bool _show_hud,
 
 	pipeline->reset(context);
 	pipeline->run(context);
+#ifdef __EMSCRIPTEN__
+	device->getVideoDriver()->setRenderTargetEx(nullptr, video::ECBF_NONE);
+#endif
 }
 
 v2u32 RenderingCore::getVirtualSize() const

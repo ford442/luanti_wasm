@@ -59,6 +59,14 @@ public:
 
 	IVideoDriver *getVideoDriver() override;
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	//! After a WebGL context loss: build a new program from the given source,
+	//! keeping this renderer (and its material ID). The old program belonged
+	//! to the lost context and is dropped, not deleted. Uniform indices keep
+	//! their order, since callbacks may have cached them.
+	virtual bool recompile(const c8 *vertexShaderProgram, const c8 *pixelShaderProgram);
+#endif
+
 protected:
 	COpenGL3MaterialRenderer(COpenGL3DriverBase *driver,
 			IShaderConstantSetCallBack *callback = 0,

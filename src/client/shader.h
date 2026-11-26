@@ -89,11 +89,25 @@ public:
 	multiple different shaders. But you probably don't want to anyway.
 */
 
+#ifdef __EMSCRIPTEN__
+// Bumped when a WebGL context restore recompiled every program: values the
+// helpers below remember sending went to programs that no longer exist.
+extern u32 g_shader_program_generation;
+#define SHADER_SETTING_CACHE_VALID() (m_generation == g_shader_program_generation)
+#define SHADER_SETTING_CACHE_MARK() (m_generation = g_shader_program_generation)
+#else
+#define SHADER_SETTING_CACHE_VALID() true
+#define SHADER_SETTING_CACHE_MARK() ((void)0)
+#endif
+
 template <typename T, std::size_t count, bool cache>
 class CachedShaderSetting {
 	const char *m_name;
 	T m_sent[count];
 	bool has_been_set = false;
+#ifdef __EMSCRIPTEN__
+	u32 m_generation = 0;
+#endif
 	bool is_pixel;
 protected:
 	CachedShaderSetting(const char *name, bool is_pixel) :
@@ -102,7 +116,8 @@ protected:
 public:
 	void set(const T value[count], video::IMaterialRendererServices *services)
 	{
-		if (cache && has_been_set && std::equal(m_sent, m_sent + count, value))
+		if (cache && has_been_set && SHADER_SETTING_CACHE_VALID() &&
+				std::equal(m_sent, m_sent + count, value))
 			return;
 		if (is_pixel)
 			services->setPixelShaderConstant(services->getPixelShaderConstantID(m_name), value, count);
@@ -112,6 +127,7 @@ public:
 		if (cache) {
 			std::copy(value, value + count, m_sent);
 			has_been_set = true;
+			SHADER_SETTING_CACHE_MARK();
 		}
 	}
 
@@ -186,6 +202,9 @@ class CachedStructShaderSetting {
 	const char *m_name;
 	T m_sent[count];
 	bool has_been_set = false;
+#ifdef __EMSCRIPTEN__
+	u32 m_generation = 0;
+#endif
 	std::array<const char*, count> m_fields;
 public:
 	CachedStructShaderSetting(const char *name, std::array<const char*, count> &&fields) :
@@ -194,7 +213,8 @@ public:
 
 	void set(const T value[count], video::IMaterialRendererServices *services)
 	{
-		if (cache && has_been_set && std::equal(m_sent, m_sent + count, value))
+		if (cache && has_been_set && SHADER_SETTING_CACHE_VALID() &&
+				std::equal(m_sent, m_sent + count, value))
 			return;
 
 		for (std::size_t i = 0; i < count; i++) {
@@ -209,6 +229,7 @@ public:
 		if (cache) {
 			std::copy(value, value + count, m_sent);
 			has_been_set = true;
+			SHADER_SETTING_CACHE_MARK();
 		}
 	}
 };
@@ -315,6 +336,12 @@ public:
 	virtual void insertSourceShader(const std::string &name_of_shader,
 		const std::string &filename, const std::string &program)=0;
 	virtual void rebuildShaders()=0;
+
+#ifdef __EMSCRIPTEN__
+	/// After a WebGL context restore: compile every shader again into the
+	/// material it already has (IDs stay valid). Returns false on failure.
+	virtual bool recompileAfterContextLoss() = 0;
+#endif
 
 	/// @note Takes ownership of @p setter.
 	virtual void addShaderConstantSetter(std::unique_ptr<IShaderConstantSetter> setter) = 0;

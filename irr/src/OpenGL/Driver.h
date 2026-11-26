@@ -21,6 +21,9 @@ namespace video
 struct VertexType;
 
 class COpenGL3Renderer2D;
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+class COpenGL3MaterialRenderer;
+#endif
 
 class COpenGL3DriverBase : public CNullDriver, public IMaterialRendererServices, public COpenGL3ExtensionHandler
 {
@@ -34,6 +37,10 @@ public:
 	//! destructor
 	virtual ~COpenGL3DriverBase();
 
+	//! Uniform buffer objects exist (GL >= 3.0 / GLES >= 3.0). False on ES 2.0
+	//! contexts such as the WebGL1 fallback, where the entry points are missing.
+	bool supportsUniformBlocks() const noexcept { return isVersionAtLeast(3, 0); }
+
 	virtual bool beginScene(u16 clearFlag, SColor clearColor = SColor(255, 0, 0, 0), f32 clearDepth = 1.f, u8 clearStencil = 0,
 			const SExposedVideoData &videoData = SExposedVideoData(), core::rect<s32> *sourceRect = 0) override;
 
@@ -44,12 +51,10 @@ public:
 
 	struct SHWBufferLink_opengl : public SHWBufferLink
 	{
-		SHWBufferLink_opengl(const scene::HWBuffer *buf) :
-				SHWBufferLink(buf),
-				Vbo(buf->getBufferType() == scene::HWBuffer::Type::INDEX ?
-						OGLBufferObject::TARGET_IBO :
-						OGLBufferObject::TARGET_VBO)
-		{}
+		SHWBufferLink_opengl(const scene::HWBuffer *buf) : SHWBufferLink(buf),
+			Vbo(buf && buf->getBufferType() == scene::HWBuffer::Type::INDEX
+				? OGLBufferObject::TARGET_IBO
+				: OGLBufferObject::TARGET_VBO) {}
 
 		OGLBufferObject Vbo;
 	};
@@ -243,6 +248,14 @@ public:
 
 	COpenGL3CacheHandler *getCacheHandler() const;
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	bool recreateAfterContextLoss() override;
+	void setContextRestoreHandler(std::function<bool()> handler) override;
+	bool reuploadTexture(ITexture *texture, const std::vector<IImage *> &images) override;
+	bool recompileShaderMaterial(s32 material, const c8 *vertexShaderProgram,
+			const c8 *pixelShaderProgram) override;
+#endif
+
 protected:
 	virtual bool genericDriverInit(const core::dimension2d<u32> &screenSize, bool stencilBuffer);
 
@@ -303,11 +316,17 @@ protected:
 	void drawArrays(GLenum primitiveType, const VertexType &vertexType, const void *vertices, int vertexCount);
 	void drawElements(GLenum primitiveType, const VertexType &vertexType, const void *vertices, int vertexCount, const u16 *indices, int indexCount);
 
-	void drawGeneric(const void *vertices, const void *indexList, u32 primitiveCount,
+	void drawGeneric(const void *vertices, u32 vertexCount, const void *indexList, u32 primitiveCount,
 		E_VERTEX_TYPE vType, scene::E_PRIMITIVE_TYPE pType, E_INDEX_TYPE iType);
 
 	void beginDraw(const VertexType &vertexType, uintptr_t verticesBase);
 	void endDraw(const VertexType &vertexType);
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	void bindClientVertexBuffer(const void *vertices, u32 vertexCount, u32 vertexSize);
+	void bindClientIndexBuffer(const void *indices, u32 indexCount, GLenum indexType);
+	void resetVertexInputState();
+#endif
 
 	COpenGL3CacheHandler *CacheHandler;
 	core::stringc Name;
@@ -358,11 +377,23 @@ private:
 	bool EnableErrorTest;
 
 	OGLBufferObject QuadIndexVBO = OGLBufferObject(OGLBufferObject::TARGET_IBO);
+	std::vector<u16> QuadsIndices;
 	void initQuadsIndices(u32 max_vertex_count = 65536);
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	OGLBufferObject ClientVertexVBO = OGLBufferObject(OGLBufferObject::TARGET_VBO);
+	OGLBufferObject ClientIndexVBO = OGLBufferObject(OGLBufferObject::TARGET_IBO);
+#endif
 
 	u16 MaxJointTransforms = 0;
 	void initMaxJointTransforms();
 	OGLBufferObject JointTransformsUBO = OGLBufferObject(OGLBufferObject::TARGET_UBO);
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	std::function<bool()> ContextRestoreHandler;
+	bool recompileFromFiles(COpenGL3MaterialRenderer *renderer,
+			const io::path &vertexShaderName, const io::path &fragmentShaderName);
+#endif
 
 	void debugCb(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message);
 	static void APIENTRY debugCb(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void *userParam);

@@ -410,6 +410,23 @@ void Camera::update(LocalPlayer* player, f32 frametime, f32 tool_reload_ratio)
 	v3f abs_cam_up = m_headnode->getAbsoluteTransformation()
 			.rotateAndScaleVect(rel_cam_up);
 
+	// Keep camera up orthonormal to look direction. View bobbing and
+	// pitch near ±90° can leave a tiny side axis that WebGL then
+	// stretches into black wedges across the view.
+	{
+		v3f fwd = m_camera_direction;
+		if (fwd.getLengthSQ() > 1e-12f)
+			fwd.normalize();
+		v3f up = abs_cam_up;
+		if (up.getLengthSQ() > 1e-12f)
+			up.normalize();
+		if (std::fabs(fwd.dotProduct(up)) > 0.95f)
+			up = (std::fabs(fwd.Y) > 0.5f) ? v3f(0, 0, 1) : v3f(0, 1, 0);
+		up = up - fwd * fwd.dotProduct(up);
+		if (up.getLengthSQ() > 1e-12f)
+			abs_cam_up = up.normalize();
+	}
+
 	// Reposition the camera for third person view
 	if (m_camera_mode > CAMERA_MODE_FIRST)
 	{

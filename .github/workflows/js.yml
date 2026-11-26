@@ -1,0 +1,82 @@
+name: js
+
+# Lint, type-check and unit-test the browser-side JavaScript (client/web) and
+# the WebSocket proxy (util/wasm/proxy). No Emscripten build needed.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+    paths:
+      - '.github/workflows/js.yml'
+      - 'client/web/**'
+      - 'util/wasm/**'
+      - 'eslint.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+  pull_request:
+    paths:
+      - '.github/workflows/js.yml'
+      - 'client/web/**'
+      - 'util/wasm/**'
+      - 'eslint.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: js-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ESLint, tsc and proxy tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out Luanti
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            util/wasm/proxy/package-lock.json
+
+      - name: Install tooling
+        run: npm ci
+
+      - name: Install proxy dependencies
+        run: npm run proxy:install
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Proxy tests
+        run: npm test
+
+      # Catches a broken Compose file (bad interpolation, a missing required
+      # variable, invalid YAML) without a public host. It does not start Caddy
+      # or request a certificate: that needs a real DNS name and stays operator
+      # work (util/wasm/proxy/README.md). The file has required ${VAR:?}
+      # variables, so the example env file supplies them.
+      - name: Validate the proxy Compose file
+        run: |
+          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            docker compose \
+              --env-file util/wasm/proxy/deploy/.env.example \
+              -f util/wasm/proxy/deploy/docker-compose.yml \
+              config --quiet
+          else
+            echo "::warning::Docker Compose is not available on this runner; the proxy Compose file was not validated"
+          fi

@@ -31,6 +31,7 @@
 #include "minimap.h"
 #include "node_visuals.h"
 #include "profiler.h"
+#include "porting_emscripten.h"
 #include "shader.h"
 #include "translation.h"
 #include "util/auth.h"
@@ -383,8 +384,11 @@ Client::~Client()
 	m_media_downloader.reset();
 
 	// Write the changes and delete
-	if (m_mod_storage_database)
+	if (m_mod_storage_database) {
 		m_mod_storage_database->endSave();
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
+	}
 	delete m_mod_storage_database;
 	m_mod_storage_database = nullptr;
 
@@ -597,10 +601,23 @@ void Client::step(float dtime)
 		}
 	}
 
+#ifdef __EMSCRIPTEN__
+	serviceVideoTextureSpike();
+#endif
+
 	/*
 		Replace updated meshes
 	*/
 	{
+#ifdef __EMSCRIPTEN__
+		// Mesh worker pthreads often stall under PROXY_TO_PTHREAD. Generate a
+		// few meshes on the application worker so blocks get ACKed and drawn.
+		// Tunable (wasm_mesh_app_thread_items) now that a pthread pool exists.
+		static const int app_thread_items = std::max(0,
+				g_settings->getS32("wasm_mesh_app_thread_items"));
+		if (app_thread_items > 0)
+			m_mesh_update_manager->processOnThisThread(app_thread_items);
+#endif
 		// This can cause pending mesh updates to lose their validity, so do it
 		// before processing them.
 		updateStaticLighting(player->getLighting().static_);
@@ -779,6 +796,8 @@ void Client::step(float dtime)
 	if (m_mod_storage_save_timer <= 0.0f) {
 		m_mod_storage_save_timer = g_settings->getFloat("server_map_save_interval");
 		m_mod_storage_database->endSave();
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Periodic);
 		m_mod_storage_database->beginSave();
 	}
 
@@ -1043,7 +1062,7 @@ void Client::ProcessData(NetworkPacket *pkt)
 		system to know the ids
 	*/
 	if (pkt->getPeerId() != PEER_ID_SERVER) {
-		infostream << "Client::ProcessData(): Discarding data not "
+		actionstream << "Client::ProcessData(): Discarding data not "
 			"coming from server: peer_id=" << static_cast<int>(pkt->getPeerId())
 			<< " command=" << static_cast<unsigned>(command) << std::endl;
 		return;
@@ -2041,6 +2060,39 @@ ITextureSource* Client::getTextureSource()
 {
 	return m_tsrc;
 }
+
+#ifdef __EMSCRIPTEN__
+size_t Client::getQueuedMeshCount()
+{
+	return m_mesh_update_manager ? m_mesh_update_manager->queuedCount() : 0;
+}
+
+void Client::serviceVideoTextureSpike()
+{
+	std::string texture_name;
+	const std::uint8_t *pixels = nullptr;
+	int width = 0;
+	int height = 0;
+	if (!porting::emscripten_poll_video_texture_frame(
+			&texture_name, &pixels, &width, &height))
+		return;
+
+	video::IVideoDriver *driver = RenderingEngine::get_video_driver();
+	// createImageFromData() with ownForeignMemory=false copies the pixels, so
+	// the frame buffer can be reused by the next decoded frame right away.
+	video::IImage *img = driver->createImageFromData(video::ECF_A8R8G8B8,
+			core::dimension2d<u32>(width, height),
+			const_cast<std::uint8_t *>(pixels), false);
+	if (!img)
+		return;
+
+	// insertSourceImage() takes ownership of img. If a texture already exists
+	// under this name it is rebuilt in place -- lock/memcpy/unlock/
+	// regenerateMipMapLevels, i.e. the glTexSubImage2D-style upload the Tier C
+	// spike asked for, with no IrrlichtMt changes needed.
+	m_tsrc->insertSourceImage(texture_name, img);
+}
+#endif
 IWritableShaderSource* Client::getShaderSource()
 {
 	return m_shsrc;

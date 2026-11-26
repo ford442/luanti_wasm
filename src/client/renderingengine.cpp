@@ -3,6 +3,7 @@
 // Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
 // Copyright (C) 2017 nerzhul, Loic Blot <loic.blot@unix-experience.fr>
 
+#include <atomic>
 #include <optional>
 #include <irrlicht.h>
 #include "fontengine.h"
@@ -17,6 +18,7 @@
 #include "camera.h"
 #include "minimap.h"
 #include "porting.h"
+#include "porting_emscripten.h"
 #include "clientmap.h"
 #include "renderingengine.h"
 #include "render/core.h"
@@ -24,6 +26,7 @@
 #include "filesys.h"
 #include "irrlicht_changes/static_text.h"
 #include "irr_ptr.h"
+#include "util/string.h"
 #include "IAnimatedMesh.h"
 
 RenderingEngine *RenderingEngine::s_singleton = nullptr;
@@ -37,6 +40,20 @@ void FpsControl::reset()
 
 void FpsControl::limit(IrrlichtDevice *device, f32 *dtime)
 {
+#ifdef __EMSCRIPTEN__
+	// Embedder pause (Module.luantiLauncher.setPaused): stand still without
+	// advancing the world. Sleeping here blocks the application worker only;
+	// the browser main thread keeps servicing the launcher.
+	if (porting::emscripten_engine_paused()) {
+		while (porting::emscripten_engine_paused()) {
+			porting::emscripten_service_browser_frame();
+			porting::preciseSleepUs(50000);
+		}
+		// Do not hand the paused time to the simulation as one huge step.
+		last_time = porting::getTimeUs();
+	}
+#endif
+
 	const float fps_limit = device->isWindowFocused()
 			? g_settings->getFloat("fps_max")
 			: g_settings->getFloat("fps_max_unfocused");
@@ -66,6 +83,20 @@ void FpsControl::limit(IrrlichtDevice *device, f32 *dtime)
 		*dtime = 0;
 
 	last_time = time;
+
+#ifdef __EMSCRIPTEN__
+	// The browser build used to run on a constant 16 ms step. Show the first
+	// measured values so a headless run can tell the clock really moves.
+	porting::emscripten_frame_clock_record(*dtime);
+	static std::atomic<int> logged_frames{0};
+	if (logged_frames.load(std::memory_order_relaxed) < 8 &&
+			logged_frames.fetch_add(1, std::memory_order_relaxed) < 8) {
+		actionstream << "Frame clock: dtime=" << (*dtime * 1000.0f)
+			<< " ms, busy=" << (busy_time / 1000.0f)
+			<< " ms, slept=" << (sleep_time / 1000.0f)
+			<< " ms, fps_limit=" << fps_limit << std::endl;
+	}
+#endif
 }
 
 class FogShaderUniformSetter : public IShaderUniformSetter
@@ -163,7 +194,11 @@ RenderingEngine::RenderingEngine(MyEventReceiver *receiver)
 
 	// Resolution selection
 	bool fullscreen = g_settings->getBool("fullscreen");
-#ifdef __ANDROID__
+#ifdef __EMSCRIPTEN__
+	u16 screen_w = 1, screen_h = 1;
+	bool window_maximized = false;
+	fullscreen = false;
+#elif defined(__ANDROID__)
 	u16 screen_w = 0, screen_h = 0;
 	bool window_maximized = false;
 #else
@@ -211,7 +246,12 @@ RenderingEngine::RenderingEngine(MyEventReceiver *receiver)
 	verbosestream << "Using the " << getVideoDriverName(driver->getDriverType()) << " video driver" << std::endl;
 
 	// This changes the minimum allowed number of vertices in a VBO. Default is 500.
+	// WebGL forbids client-memory vertex arrays; keep every mesh on a VBO.
+#ifdef __EMSCRIPTEN__
+	driver->setMinHardwareBufferVertexCount(1);
+#else
 	driver->setMinHardwareBufferVertexCount(4);
+#endif
 
 	m_receiver = receiver;
 
@@ -292,6 +332,7 @@ void RenderingEngine::draw_load_screen(const std::wstring &text,
 		gui::IGUIEnvironment *guienv, ITextureSource *tsrc, float dtime,
 		int percent, float *indef_pos, const std::wstring &bottom_text)
 {
+	porting::emscripten_report_status(wide_to_utf8(text), percent, "loading");
 	v2u32 screensize = getWindowSize();
 
 	v2s32 textsize(g_fontengine->getTextWidth(text), g_fontengine->getLineHeight());
@@ -390,12 +431,19 @@ std::vector<video::E_DRIVER_TYPE> RenderingEngine::getSupportedVideoDrivers()
 {
 	// Only check these drivers. We do not support software and D3D in any capacity.
 	// ordered by preference (best first)
+#ifdef __EMSCRIPTEN__
+	static const video::E_DRIVER_TYPE glDrivers[] = {
+		video::EDT_OGLES2,
+		video::EDT_NULL,
+	};
+#else
 	static const video::E_DRIVER_TYPE glDrivers[] = {
 		video::EDT_OPENGL3,
 		video::EDT_OPENGL,
 		video::EDT_OGLES2,
 		video::EDT_NULL,
 	};
+#endif
 	std::vector<video::E_DRIVER_TYPE> drivers;
 
 	for (auto driver : glDrivers) {

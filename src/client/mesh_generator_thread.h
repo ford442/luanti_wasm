@@ -184,10 +184,18 @@ public:
 
 	bool isRunning();
 
+	// Process up to max_items mesh jobs on the calling thread. Used on
+	// Emscripten when worker mesh threads stall under PROXY_TO_PTHREAD.
+	int processOnThisThread(int max_items);
+
+	// Blocks waiting to be meshed, for diagnostics (Module.luantiPerf).
+	size_t queuedCount();
+
 private:
 	typedef MutexedQueue<MeshUpdateResult> ResultQueue;
 
 	void deferUpdate();
+	int processOneUnlocked();
 
 	// Epoch counter: used to identify outdated mesh results
 	u16 m_epoch = 0;
@@ -197,4 +205,5 @@ private:
 	ResultQueue m_queue_out_urgent;
 
 	std::vector<std::unique_ptr<MeshUpdateWorkerThread>> m_workers;
+	Client *m_client;
 };

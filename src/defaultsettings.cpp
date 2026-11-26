@@ -11,6 +11,9 @@
 #include "mapgen/mapgen.h" // Mapgen::setDefaultSettings
 #include "util/string.h"
 #include "server.h" // flagdesc_anticheat
+#ifdef __EMSCRIPTEN__
+#include "porting_emscripten.h"
+#endif
 
 
 /*
@@ -22,6 +25,12 @@ static bool detect_touch()
 {
 #if defined(__ANDROID__)
 	return true;
+#elif defined(__EMSCRIPTEN__)
+	// Emscripten defines __linux__ but has no chassis files. The page reports
+	// whether the primary pointer is a finger. A touch screen on a desktop
+	// does not count here; "touch_controls = auto" still reacts to a real touch.
+	const auto &probe = porting::emscripten_input_probe();
+	return probe.coarse_pointer;
 #elif defined(__linux__)
 	std::string chassis_type;
 
@@ -83,7 +92,13 @@ void set_default_settings()
 	// Client
 	settings->setDefault("address", "");
 	settings->setDefault("remote_port", "30000");
-#if defined(__unix__) && !defined(__APPLE__) && !defined (__ANDROID__)
+#if defined(__EMSCRIPTEN__)
+	// Browsers synthesize mouse events after a tap, which makes "auto" drop the
+	// HUD again right after showing it. Where the page says the primary pointer
+	// is a finger, pin the HUD on. Elsewhere "auto" still switches on the
+	// first touch (e.g. a touch screen on a desktop).
+	settings->setDefault("touch_controls", has_touch ? "true" : "auto");
+#elif defined(__unix__) && !defined(__APPLE__) && !defined (__ANDROID__)
 	// On Linux+X11 (not Linux+Wayland or Linux+XWayland), I've encountered a bug
 	// where fake mouse events were generated from touch events if in relative
 	// mouse mode, resulting in the touchscreen controls being instantly disabled
@@ -316,7 +331,13 @@ void set_default_settings()
 	settings->setDefault("minimap_double_scan_height", "true");
 
 	// Effects
+#ifndef __EMSCRIPTEN__
 	settings->setDefault("enable_post_processing", "true");
+#else
+	// PP render targets are not reliably presented through Emscripten's
+	// offscreen framebuffer commit path yet.
+	settings->setDefault("enable_post_processing", "false");
+#endif
 	settings->setDefault("post_processing_texture_bits", "10");
 	settings->setDefault("directional_colored_fog", "true");
 	settings->setDefault("inventory_items_animations", "false");
@@ -441,8 +462,26 @@ void set_default_settings()
 #endif
 
 	// Network
+#ifdef __EMSCRIPTEN__
+	// WASM thread workarounds (see wasm_porting.md, "Flag Matrix"). They were
+	// added when pthreads were created on demand under PROXY_TO_PTHREAD; with
+	// -sPTHREAD_POOL_SIZE the workers are pre-spawned, so each knob can be
+	// relaxed and measured independently. Defaults keep the original behaviour.
+	// Meshes generated on the application thread per frame (0 = off).
+	settings->setDefault("wasm_mesh_app_thread_items", "4");
+	// Mesh worker threads (0 = use mesh_generation_threads/auto).
+	settings->setDefault("wasm_mesh_threads", "1");
+	// Minimum server Receive() wait in ms (0 = off).
+	settings->setDefault("wasm_server_min_receive_ms", "5");
+
+	// The browser proxy protocol is IPv4-only. Singleplayer also uses the
+	// in-process IPv4 loopback implemented by the Emscripten socket adapter.
+	settings->setDefault("enable_ipv6", "false");
+	settings->setDefault("ipv6_server", "false");
+#else
 	settings->setDefault("enable_ipv6", "true");
 	settings->setDefault("ipv6_server", "true");
+#endif
 	settings->setDefault("max_packets_per_iteration", "1024");
 	settings->setDefault("port", "30000");
 	settings->setDefault("strict_protocol_version_checking", "false");

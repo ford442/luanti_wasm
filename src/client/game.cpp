@@ -33,6 +33,7 @@
 #include "nodemetadata.h"
 #include "particles.h"
 #include "porting.h"
+#include "porting_emscripten.h"
 #include "profiler.h"
 #include "raycast.h"
 #include "server.h"
@@ -51,6 +52,9 @@
 #include <ICameraSceneNode.h>
 #include "util/tracy_wrapper.h"
 #include "item_visuals_manager.h"
+#ifdef __EMSCRIPTEN__
+#include "guiscalingfilter.h"
+#endif
 
 #if USE_SOUND
 	#include "client/sound/sound_openal.h"
@@ -393,6 +397,10 @@ Game::Game() :
 
 Game::~Game()
 {
+#ifdef __EMSCRIPTEN__
+	if (auto *drv = RenderingEngine::get_video_driver())
+		drv->setContextRestoreHandler(nullptr);
+#endif
 	delete client;
 	soundmaker.reset();
 	sound_manager.reset();
@@ -487,6 +495,10 @@ void Game::run()
 	}
 
 	draw_times.reset();
+
+	set_light_curve(g_settings->getFloat("display_gamma"));
+	porting::emscripten_report_status("Entering world…", 100, "playing");
+	actionstream << "World ready; entering game loop" << std::endl;
 
 	m_touch_simulate_aux1 = g_settings->getBool("fast_move")
 			&& client->checkPrivilege("fast");
@@ -687,6 +699,20 @@ bool Game::init(GameStartData &start_data)
 
 	shader_src = createShaderSource();
 
+#ifdef __EMSCRIPTEN__
+	// WebGL context restore (irr CIrrDeviceSDL::restoreAfterContextLoss()):
+	// the driver has recreated its GL objects; put our texture content and
+	// shader programs back into them. Runs on this thread, between frames.
+	if (auto *drv = RenderingEngine::get_video_driver()) {
+		drv->setContextRestoreHandler([this, drv]() {
+			const bool textures = texture_src->reuploadAfterContextLoss();
+			guiScalingCacheReupload(drv);
+			const bool shaders = shader_src->recompileAfterContextLoss();
+			return textures && shaders;
+		});
+	}
+#endif
+
 	itemdef_manager = createItemDefManager();
 	nodedef_manager = createNodeDefManager();
 
@@ -729,6 +755,11 @@ bool Game::initSound()
 		infostream << "Using dummy audio." << std::endl;
 		sound_manager = std::make_unique<DummySoundManager>();
 	}
+#ifdef __EMSCRIPTEN__
+	actionstream << "Audio: game sound manager is "
+		<< (dynamic_cast<DummySoundManager *>(sound_manager.get()) ? "dummy (silent)" : "OpenAL")
+		<< std::endl;
+#endif
 
 	soundmaker = std::make_unique<SoundMaker>(sound_manager.get(), nodedef_manager);
 	soundmaker->registerReceiver(eventmgr);
@@ -740,25 +771,24 @@ bool Game::createServer(GameStartData &start_data)
 {
 	showOverlayMessage(N_("Creating server..."), 0, 5);
 
-	std::string bind_str;
-	if (simple_singleplayer_mode) {
-		// Make the simple singleplayer server only accept connections from localhost,
-		// which also makes Windows Defender not show a warning.
-		bind_str = "127.0.0.1";
-	} else {
-		bind_str = g_settings->get("bind_address");
-	}
-
 	Address bind_addr(0, 0, 0, 0, start_data.socket_port);
 
-	if (g_settings->getBool("ipv6_server"))
-		bind_addr.setAddress(static_cast<IPv6AddressBytes*>(nullptr));
-	try {
-		bind_addr.Resolve(bind_str.c_str());
-	} catch (const ResolveError &e) {
-		warningstream << "Resolving bind address \"" << bind_str
-			<< "\" failed: " << e.what()
-			<< " -- Listening on all addresses." << std::endl;
+	if (simple_singleplayer_mode) {
+		// Bind loopback by numeric address (no DNS). On Emscripten,
+		// getaddrinfo("127.0.0.1") with AI_ADDRCONFIG fails and we used to
+		// fall back to 0.0.0.0, which breaks in-process singleplayer connect.
+		bind_addr = Address(127, 0, 0, 1, start_data.socket_port);
+	} else {
+		std::string bind_str = g_settings->get("bind_address");
+		if (g_settings->getBool("ipv6_server"))
+			bind_addr.setAddress(static_cast<IPv6AddressBytes*>(nullptr));
+		try {
+			bind_addr.Resolve(bind_str.c_str());
+		} catch (const ResolveError &e) {
+			warningstream << "Resolving bind address \"" << bind_str
+				<< "\" failed: " << e.what()
+				<< " -- Listening on all addresses." << std::endl;
+		}
 	}
 	if (bind_addr.isIPv6() && !g_settings->getBool("enable_ipv6")) {
 		errordata->setError(fmtgettext("Unable to listen on %s because IPv6 is disabled",
@@ -774,6 +804,25 @@ bool Game::createServer(GameStartData &start_data)
 		simple_singleplayer_mode, std::move(server_socket),
 		false, nullptr, &(errordata->message));
 
+#ifdef __EMSCRIPTEN__
+	// Under PROXY_TO_PTHREAD, booting the internal server on a helper thread
+	// while the application worker keeps issuing proxied WebGL frames can
+	// stall (browser main is contended by GL proxy + MAIN_THREAD_EM_ASM).
+	// Sequential start on the application worker is slower to paint but
+	// reliably finishes; status text is pushed via emscripten_report_status.
+	try {
+		porting::emscripten_report_status("Creating server…", 5, "loading");
+		server->start();
+		porting::emscripten_report_status("Caching media…", 12, "loading");
+		copyServerClientCache();
+		porting::emscripten_report_status("Server ready", 15, "loading");
+	} catch (const std::exception &e) {
+		errordata->setError(std::string("Failed to start server: ") + e.what());
+		errorstream << errordata->message << std::endl;
+		return false;
+	}
+	return true;
+#else
 	auto start_thread = runInThread([=] {
 		server->start();
 		copyServerClientCache();
@@ -800,6 +849,7 @@ bool Game::createServer(GameStartData &start_data)
 	start_thread->rethrow();
 
 	return success;
+#endif
 }
 
 void Game::copyServerClientCache()
@@ -827,6 +877,11 @@ bool Game::createClient(const GameStartData &start_data)
 	std::string *error_message = &(errordata->message);
 
 	showOverlayMessage(N_("Creating client..."), 0, 10);
+	actionstream << "Creating client, connecting to internal server on port "
+		<< start_data.socket_port << std::endl;
+#ifdef __EMSCRIPTEN__
+	porting::emscripten_report_status("Connecting to local server…", 16, "loading");
+#endif
 
 	draw_control = new MapDrawControl();
 	if (!draw_control)
@@ -949,8 +1004,10 @@ bool Game::initGui()
 	gui_chat_console = make_irr<GUIChatConsole>(guienv, guienv->getRootGUIElement(),
 			-1, chat_backend, client, &g_menumgr);
 
-	if (shouldShowTouchControls())
+	if (shouldShowTouchControls()) {
 		g_touchcontrols = new TouchControls(device, texture_src);
+		actionstream << "Touch controls enabled" << std::endl;
+	}
 
 	return true;
 }
@@ -1047,11 +1104,22 @@ bool Game::connectToServer(const GameStartData &start_data,
 
 		auto framemarker = FrameMarker("Game::connectToServer()-frame").started();
 
-		while (m_rendering_engine->run()) {
-
+		while (true) {
+#ifdef __EMSCRIPTEN__
+			// HELLO/auth arrive on the connection event queue. Do not wait on
+			// RenderingEngine::run() first — proxied WebGL can stall and leave
+			// those events unprocessed (server already sent TOCLIENT_HELLO).
+			porting::emscripten_service_browser_frame();
 			framemarker.end();
 			fps_control.limit(device, &dtime);
 			framemarker.start();
+#else
+			if (!m_rendering_engine->run())
+				break;
+			framemarker.end();
+			fps_control.limit(device, &dtime);
+			framemarker.start();
+#endif
 
 			// Update client and server
 			step(dtime);
@@ -1059,6 +1127,10 @@ bool Game::connectToServer(const GameStartData &start_data,
 			// End condition
 			if (client->getState() == LC_Init) {
 				*connect_ok = true;
+				actionstream << "Connected to internal server" << std::endl;
+#ifdef __EMSCRIPTEN__
+				porting::emscripten_report_status("Connected, loading content…", 20, "loading");
+#endif
 				break;
 			}
 
@@ -1076,6 +1148,15 @@ bool Game::connectToServer(const GameStartData &start_data,
 			}
 
 			wait_time += dtime;
+			if (server) {
+				int waited = (int)wait_time;
+				if (waited > 0 && waited % 3 == 0 &&
+						waited != (int)(wait_time - dtime)) {
+					actionstream << "Waiting for internal server handshake "
+						<< "(client state=" << (int)client->getState()
+						<< ", t=" << waited << "s)" << std::endl;
+				}
+			}
 			if (server) {
 				// never time out
 			} else if (wait_time > GAME_FALLBACK_TIMEOUT && !did_fallback) {
@@ -1111,7 +1192,11 @@ bool Game::getServerContent(bool *aborted)
 	fps_control.reset();
 
 	auto framemarker = FrameMarker("Game::getServerContent()-frame").started();
-	while (m_rendering_engine->run()) {
+	while (true) {
+		// On the web this also pumps the real frame loop so the canvas resizes
+		// and load-screen / first world frames are actually presented.
+		if (!m_rendering_engine->run())
+			return false;
 		framemarker.end();
 		fps_control.limit(device, &dtime);
 		framemarker.start();
@@ -1369,6 +1454,7 @@ void Game::processUserInput(f32 dtime)
 	bool desired = shouldShowTouchControls();
 	if (desired && !g_touchcontrols) {
 		g_touchcontrols = new TouchControls(device, texture_src);
+		actionstream << "Touch controls enabled" << std::endl;
 
 	} else if (!desired && g_touchcontrols) {
 		delete g_touchcontrols;
@@ -3706,13 +3792,29 @@ void Game::drawScene(ProfilerGraph *graph, RunStats *stats)
 					NULL);
 	}
 
+#ifdef __EMSCRIPTEN__
+	this->driver->setRenderTargetEx(nullptr, video::ECBF_NONE);
+#endif
+
 	// Must be called immediately before endScene() to capture the rendered frame
 	this->client->takeScreenshotIfRequested();
 
+#ifdef __EMSCRIPTEN__
+	const u64 swap_start_us = porting::getTimeUs();
+#endif
 	this->driver->endScene();
 
 	stats->drawtime = tt_draw.stop(true);
 	g_profiler->graphAdd("Draw scene [us]", stats->drawtime);
+#ifdef __EMSCRIPTEN__
+	{
+		const u64 swap_us = porting::getTimeUs() - swap_start_us;
+		const video::SFrameStats &fs = this->driver->getFrameStats();
+		porting::emscripten_record_frame(stats->drawtime / 1000.0f,
+			swap_us / 1000.0f, fs.Drawcalls, fs.PrimitivesDrawn,
+			static_cast<u32>(client->getQueuedMeshCount()));
+	}
+#endif
 
 }
 
@@ -3815,4 +3917,7 @@ void the_game(volatile std::sig_atomic_t *kill,
 	}
 
 	game.shutdown();
+	porting::emscripten_mark_persistence_dirty(
+		porting::EmscriptenPersistenceReason::Disconnect, true);
+	porting::emscripten_service_persistence();
 }

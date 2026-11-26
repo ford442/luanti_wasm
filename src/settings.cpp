@@ -16,6 +16,7 @@
 #include "log.h"
 #include "filesys.h"
 #include "noise.h"
+#include "porting_emscripten.h"
 #include <cctype>
 #include <set>
 #include <algorithm>
@@ -411,6 +412,10 @@ bool Settings::updateConfigFile(const char *filename)
 
 	if (!fs::safeWriteToFile(filename, os.str()))
 		return false;
+
+	if (g_settings_path == filename)
+		porting::emscripten_mark_persistence_dirty(
+			porting::EmscriptenPersistenceReason::Settings);
 
 	return true;
 }

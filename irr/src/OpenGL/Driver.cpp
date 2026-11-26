@@ -176,6 +176,10 @@ COpenGL3DriverBase::COpenGL3DriverBase(const SIrrlichtCreationParameters &params
 COpenGL3DriverBase::~COpenGL3DriverBase()
 {
 	QuadIndexVBO.destroy();
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	ClientVertexVBO.destroy();
+	ClientIndexVBO.destroy();
+#endif
 	JointTransformsUBO.destroy();
 
 	deleteMaterialRenders();
@@ -204,10 +208,11 @@ void COpenGL3DriverBase::initQuadsIndices(u32 max_vertex_count)
 {
 	u32 max_quad_count = max_vertex_count / 4;
 	u32 indices_size = 6 * max_quad_count;
-	if (indices_size == QuadIndexVBO.getSize() * sizeof(u16))
+	if (indices_size == QuadsIndices.size() &&
+			indices_size * sizeof(u16) == QuadIndexVBO.getSize())
 		return;
 	// initialize buffer contents
-	std::vector<u16> QuadsIndices;
+	QuadsIndices.clear();
 	QuadsIndices.reserve(indices_size);
 	for (u32 k = 0; k < max_quad_count; k++) {
 		QuadsIndices.push_back(4 * k + 0);
@@ -276,6 +281,13 @@ bool COpenGL3DriverBase::genericDriverInit(const core::dimension2d<u32> &screenS
 
 	initQuadsIndices();
 	initMaxJointTransforms();
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// WebGL has no client-memory vertex arrays. Meshes below the native VBO
+	// threshold were drawn from CPU pointers while a previous ARRAY_BUFFER
+	// (or the OFFSCREEN_FRAMEBUFFER blit triangle) stayed bound, which
+	// stretches a vertex to the origin and produces flickering triangles.
+	setMinHardwareBufferVertexCount(1);
+#endif
 
 	// reset cache handler
 	delete CacheHandler;
@@ -457,6 +469,18 @@ bool COpenGL3DriverBase::beginScene(u16 clearFlag, SColor clearColor, f32 clearD
 	if (ContextManager)
 		ContextManager->activateContext(videoData, true);
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	resetVertexInputState();
+	// emscripten_webgl_commit_frame() blits via a scratch triangle and
+	// leaves FrontFace/cull/depth/program in the WebGL default state.
+	// Irrlicht only sets FrontFace(GL_CW) at init; after the first present
+	// the cache still believes CW is set, so every face is drawn with
+	// inverted winding (dark interior triangles).
+	GL.FrontFace(GL_CW);
+	if (CacheHandler)
+		CacheHandler->invalidateCachedState();
+#endif
+
 	clearBuffers(clearFlag, clearColor, clearDepth, clearStencil);
 
 	return true;
@@ -465,6 +489,13 @@ bool COpenGL3DriverBase::beginScene(u16 clearFlag, SColor clearColor, f32 clearD
 bool COpenGL3DriverBase::endScene()
 {
 	CNullDriver::endScene();
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// emscripten_webgl_commit_frame() presents via a scratch triangle. Leave
+	// attribs and buffer bindings cleared so that blit cannot reuse game
+	// meshes, and so the next frame does not sample the blit VBO.
+	resetVertexInputState();
+#endif
 
 	GL.Flush();
 
@@ -577,6 +608,15 @@ void COpenGL3DriverBase::drawBuffers(const scene::IVertexBuffer *vb,
 	if (!vb || !ib)
 		return;
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// First-person local player hiding uses Front+Back culling. WebGL
+	// (ANGLE) does not reliably honor glCullFace(GL_FRONT_AND_BACK), so
+	// the player head/torso still rasterizes and clips through the near
+	// plane as dark wedges when looking down.
+	if (Material.FrontfaceCulling && Material.BackfaceCulling)
+		return;
+#endif
+
 	const auto *wb = vb->getWeightBuffer();
 	SHWBufferLink_opengl *hw_weights = nullptr;
 	if (wb) {
@@ -603,6 +643,11 @@ void COpenGL3DriverBase::drawBuffers(const scene::IVertexBuffer *vb,
 		GL.BindBuffer(GL_ARRAY_BUFFER, 0);
 	}
 
+	// Apply materials before binding VBOs. OnSetMaterial/OnRender can upload
+	// other buffers and leave GL_ARRAY_BUFFER unbound; WebGL then rejects
+	// vertexAttribIPointer with a non-zero offset (EVA_AUX).
+	setRenderStates3DMode();
+
 	const void *vertices = vb->getData();
 	if (hwvert) {
 		assert(hwvert->Vbo.exists());
@@ -613,12 +658,22 @@ void COpenGL3DriverBase::drawBuffers(const scene::IVertexBuffer *vb,
 	const void *indexList = ib->getData();
 	if (hwidx) {
 		assert(hwidx->Vbo.exists());
-		GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, hwidx->Vbo.getName());
-		indexList = nullptr;
+		if (hwvert && hwvert->Vbo.getName() == hwidx->Vbo.getName()) {
+			os::Printer::log(
+				"WebGL: vertex and index data share one buffer object; "
+				"drawing without ELEMENT_ARRAY VBO", ELL_WARNING);
+			indexList = ib->getData();
+		} else {
+			GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, hwidx->Vbo.getName());
+			indexList = nullptr;
+		}
 	}
 
+	const bool prev_lock = LockRenderStateMode;
+	LockRenderStateMode = true;
 	drawVertexPrimitiveList(vertices, vb->getCount(), indexList,
 		PrimitiveCount, vb->getType(), PrimitiveType, ib->getType());
+	LockRenderStateMode = prev_lock;
 
 	if (hw_weights) {
 		GL.DisableVertexAttribArray(EVA_WEIGHTS);
@@ -672,6 +727,11 @@ void COpenGL3DriverBase::drawVertexPrimitiveList(const void *vertices, u32 verte
 	if (!primitiveCount || !vertexCount)
 		return;
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	if (Material.FrontfaceCulling && Material.BackfaceCulling)
+		return;
+#endif
+
 	if (!checkPrimitiveCount(primitiveCount))
 		return;
 
@@ -679,7 +739,7 @@ void COpenGL3DriverBase::drawVertexPrimitiveList(const void *vertices, u32 verte
 
 	setRenderStates3DMode();
 
-	drawGeneric(vertices, indexList, primitiveCount, vType, pType, iType);
+	drawGeneric(vertices, vertexCount, indexList, primitiveCount, vType, pType, iType);
 }
 
 //! draws a vertex primitive list in 2d
@@ -715,7 +775,7 @@ void COpenGL3DriverBase::draw2DVertexPrimitiveList(const void *vertices, u32 ver
 		have_texture_alpha
 	);
 
-	drawGeneric(vertices, indexList, primitiveCount, vType, pType, iType);
+	drawGeneric(vertices, vertexCount, indexList, primitiveCount, vType, pType, iType);
 }
 
 void COpenGL3DriverBase::draw2DImage(const video::ITexture *texture, const core::position2d<s32> &destPos,
@@ -982,25 +1042,112 @@ void COpenGL3DriverBase::drawQuad(const VertexType &vertexType, const S3DVertex 
 	drawArrays(GL_TRIANGLE_FAN, vertexType, vertices, 4);
 }
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+void COpenGL3DriverBase::bindClientVertexBuffer(const void *vertices, u32 vertexCount, u32 vertexSize)
+{
+	if (!vertices || vertexCount == 0 || vertexSize == 0)
+		return;
+	const size_t size = static_cast<size_t>(vertexCount) * vertexSize;
+	ClientVertexVBO.upload(vertices, size, 0, GL_STREAM_DRAW);
+	GL.BindBuffer(GL_ARRAY_BUFFER, ClientVertexVBO.getName());
+}
+
+void COpenGL3DriverBase::bindClientIndexBuffer(const void *indices, u32 indexCount, GLenum indexType)
+{
+	if (!indices || indexCount == 0)
+		return;
+	const size_t size = static_cast<size_t>(indexCount) *
+			(indexType == GL_UNSIGNED_INT ? 4u : 2u);
+	ClientIndexVBO.upload(indices, size, 0, GL_STREAM_DRAW);
+	GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, ClientIndexVBO.getName());
+}
+
+void COpenGL3DriverBase::resetVertexInputState()
+{
+	if (CacheHandler)
+		CacheHandler->setProgram(0);
+	GL.BindBuffer(GL_ARRAY_BUFFER, 0);
+	GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+	for (u32 i = 0; i < EVA_COUNT; ++i)
+		GL.DisableVertexAttribArray(i);
+	GL.Disable(GL_SCISSOR_TEST);
+}
+#endif
+
 void COpenGL3DriverBase::drawArrays(GLenum primitiveType, const VertexType &vertexType, const void *vertices, int vertexCount)
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	bindClientVertexBuffer(vertices, vertexCount, vertexType.VertexSize);
+	beginDraw(vertexType, 0);
+#else
 	beginDraw(vertexType, reinterpret_cast<uintptr_t>(vertices));
+#endif
 	GL.DrawArrays(primitiveType, 0, vertexCount);
 	endDraw(vertexType);
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	GL.BindBuffer(GL_ARRAY_BUFFER, 0);
+#endif
 }
 
 void COpenGL3DriverBase::drawElements(GLenum primitiveType, const VertexType &vertexType, const void *vertices, int vertexCount, const u16 *indices, int indexCount)
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	bindClientVertexBuffer(vertices, vertexCount, vertexType.VertexSize);
+	if (indices) {
+		bindClientIndexBuffer(indices, indexCount, GL_UNSIGNED_SHORT);
+		indices = nullptr;
+	}
+	beginDraw(vertexType, 0);
+	GL.DrawElements(primitiveType, indexCount, GL_UNSIGNED_SHORT, indices);
+#else
 	beginDraw(vertexType, reinterpret_cast<uintptr_t>(vertices));
 	GL.DrawRangeElements(primitiveType, 0, vertexCount - 1, indexCount, GL_UNSIGNED_SHORT, indices);
+#endif
 	endDraw(vertexType);
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	GL.BindBuffer(GL_ARRAY_BUFFER, 0);
+	GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+#endif
 }
 
-void COpenGL3DriverBase::drawGeneric(const void *vertices, const void *indexList,
+static u32 indexCountFromPrimitive(scene::E_PRIMITIVE_TYPE pType, u32 primitiveCount)
+{
+	switch (pType) {
+	case scene::EPT_POINTS:
+	case scene::EPT_POINT_SPRITES:
+		return primitiveCount;
+	case scene::EPT_LINE_STRIP:
+		return primitiveCount + 1;
+	case scene::EPT_LINE_LOOP:
+		return primitiveCount;
+	case scene::EPT_LINES:
+		return primitiveCount * 2;
+	case scene::EPT_TRIANGLE_STRIP:
+	case scene::EPT_TRIANGLE_FAN:
+		return primitiveCount + 2;
+	case scene::EPT_TRIANGLES:
+		return primitiveCount * 3;
+	default:
+		return 0;
+	}
+}
+
+void COpenGL3DriverBase::drawGeneric(const void *vertices, u32 vertexCount, const void *indexList,
 		u32 primitiveCount,
 		E_VERTEX_TYPE vType, scene::E_PRIMITIVE_TYPE pType, E_INDEX_TYPE iType)
 {
 	auto &vTypeDesc = getVertexTypeDescription(vType);
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	if (vertices) {
+		bindClientVertexBuffer(vertices, vertexCount, vTypeDesc.VertexSize);
+		vertices = nullptr;
+	}
+	if (indexList && pType != scene::EPT_POINTS && pType != scene::EPT_POINT_SPRITES) {
+		const GLenum indexType = (iType == EIT_32BIT) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
+		bindClientIndexBuffer(indexList, indexCountFromPrimitive(pType, primitiveCount), indexType);
+		indexList = nullptr;
+	}
+#endif
 	beginDraw(vTypeDesc, reinterpret_cast<uintptr_t>(vertices));
 	GLenum indexSize = 0;
 
@@ -1041,16 +1188,32 @@ void COpenGL3DriverBase::drawGeneric(const void *vertices, const void *indexList
 	}
 
 	endDraw(vTypeDesc);
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	GL.BindBuffer(GL_ARRAY_BUFFER, 0);
+	GL.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+#endif
 }
 
 void COpenGL3DriverBase::beginDraw(const VertexType &vertexType, uintptr_t verticesBase)
 {
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	// CPU pointers are illegal as attrib offsets unless ARRAY_BUFFER is 0.
+	// Emscripten's FULL_ES2 path then uploads them; a leftover VBO would
+	// treat the pointer as a huge offset and emit screen-covering triangles.
+	if (verticesBase != 0)
+		GL.BindBuffer(GL_ARRAY_BUFFER, 0);
+	bool enabled[EVA_COUNT] = {};
+#endif
 	for (auto &attr : vertexType) {
 		if (attr.mode == VertexAttribute::Mode::Integer && Version.Major < 3) {
 			// assume we know what we're doing and just skip if not supported
 			continue;
 		}
 
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+		if (attr.Index < EVA_COUNT)
+			enabled[attr.Index] = true;
+#endif
 		GL.EnableVertexAttribArray(attr.Index);
 		switch (attr.mode) {
 		case VertexAttribute::Mode::Regular:
@@ -1060,10 +1223,27 @@ void COpenGL3DriverBase::beginDraw(const VertexType &vertexType, uintptr_t verti
 			GL.VertexAttribPointer(attr.Index, attr.ComponentCount, attr.ComponentType, GL_TRUE, vertexType.VertexSize, reinterpret_cast<void *>(verticesBase + attr.Offset));
 			break;
 		case VertexAttribute::Mode::Integer:
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+			// WebGL forbids vertexAttribIPointer without ARRAY_BUFFER when
+			// the offset is non-zero. Client-memory draws pass a CPU pointer
+			// as the "base"; skip integer attribs (shader default is 0).
+			if (verticesBase != 0) {
+				GL.DisableVertexAttribArray(attr.Index);
+				if (attr.Index < EVA_COUNT)
+					enabled[attr.Index] = false;
+				break;
+			}
+#endif
 			GL.VertexAttribIPointer(attr.Index, attr.ComponentCount, attr.ComponentType, vertexType.VertexSize, reinterpret_cast<void *>(verticesBase + attr.Offset));
 			break;
 		}
 	}
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	for (u32 i = 0; i < EVA_COUNT; ++i) {
+		if (!enabled[i])
+			GL.DisableVertexAttribArray(i);
+	}
+#endif
 }
 
 void COpenGL3DriverBase::endDraw(const VertexType &vertexType)
@@ -1469,6 +1649,10 @@ void COpenGL3DriverBase::setRenderStates2DMode(bool alpha, bool texture, bool al
 {
 	if (LockRenderStateMode)
 		return;
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+	GL.Disable(GL_SCISSOR_TEST);
+#endif
 
 	COpenGL3Renderer2D *nextActiveRenderer = texture ? MaterialRenderer2DTexture : MaterialRenderer2DNoTexture;
 
@@ -1916,6 +2100,147 @@ const SMaterial &COpenGL3DriverBase::getCurrentMaterial() const
 {
 	return Material;
 }
+
+#ifdef _IRR_EMSCRIPTEN_PLATFORM_
+bool COpenGL3DriverBase::recompileFromFiles(COpenGL3MaterialRenderer *renderer,
+		const io::path &vertexShaderName, const io::path &fragmentShaderName)
+{
+	c8 *vs = nullptr, *fs = nullptr;
+	loadShaderData(vertexShaderName, fragmentShaderName, &vs, &fs);
+	const bool ok = vs && fs && renderer->recompile(vs, fs);
+	delete[] vs;
+	delete[] fs;
+	return ok;
+}
+
+bool COpenGL3DriverBase::recreateAfterContextLoss()
+{
+	// Every GL name held below belongs to the lost context. Names are
+	// forgotten rather than deleted (deleting them on the new context would
+	// at best be an error), then created again in place so that textures,
+	// buffers and material IDs held by the scene stay valid.
+	while (GL.GetError() != GL_NO_ERROR) {
+	}
+	os::Printer::log("Recreating GL resources after WebGL context loss", ELL_INFORMATION);
+
+	if (CacheHandler)
+		CacheHandler->getTextureCache().clear();
+	delete CacheHandler;
+	CacheHandler = new COpenGL3CacheHandler(this);
+
+	GL.PixelStorei(GL_PACK_ALIGNMENT, 1);
+	GL.ClearDepthf(1.0f);
+	GL.FrontFace(GL_CW);
+
+	// Buffers: the vertex and index data are still in the mesh buffers, and
+	// updateHardwareBuffer() uploads again when a link has no GL buffer.
+	QuadIndexVBO.forget();
+	initQuadsIndices();
+	ClientVertexVBO.forget();
+	ClientIndexVBO.forget();
+	JointTransformsUBO.forget();
+	for (auto *link : HWBufferList)
+		static_cast<SHWBufferLink_opengl *>(link)->Vbo.forget();
+
+	// Built-in programs, from the same files createMaterialRenderers() used.
+	static const char *const builtInFragmentShaders[] = {
+		"Solid.fsh",
+		"TransparentAlphaChannel.fsh",
+		"TransparentAlphaChannelRef.fsh",
+		"TransparentVertexAlpha.fsh",
+		"OneTextureBlend.fsh",
+	};
+	static_assert(sizeof(builtInFragmentShaders) / sizeof(builtInFragmentShaders[0]) == numBuiltInMaterials);
+	bool ok = true;
+	for (u32 i = 0; i < numBuiltInMaterials && i < MaterialRenderers.size(); ++i) {
+		auto *renderer = dynamic_cast<COpenGL3MaterialRenderer *>(MaterialRenderers[i].Renderer);
+		if (renderer && !recompileFromFiles(renderer, "Solid.vsh", builtInFragmentShaders[i])) {
+			os::Printer::log("Could not recompile built-in material", builtInFragmentShaders[i], ELL_ERROR);
+			ok = false;
+		}
+	}
+	if (!recompileFromFiles(MaterialRenderer2DTexture, "Renderer2D.vsh", "Renderer2D.fsh") ||
+			!recompileFromFiles(MaterialRenderer2DNoTexture, "Renderer2D.vsh", "Renderer2D_noTex.fsh")) {
+		os::Printer::log("Could not recompile the 2D renderers", ELL_ERROR);
+		ok = false;
+	}
+	MaterialRenderer2DActive = nullptr;
+
+	// Textures keep their objects; meshes and GUI elements hold pointers.
+	u32 needContent = 0;
+	for (u32 i = 0; i < Textures.size(); ++i) {
+		auto *texture = static_cast<COpenGL3Texture *>(Textures[i].Surface);
+		const int state = texture->recreateAfterContextLoss();
+		if (state < 0) {
+			os::Printer::log("Could not recreate texture", texture->getName().getPath(), ELL_ERROR);
+			ok = false;
+		} else if (state == 0) {
+			// A texture loaded from a file (menu images) can come back from
+			// the same file; anything else is up to the restore handler.
+			const io::path &path = texture->getName().getPath();
+			IImage *image = nullptr;
+			if (!path.empty() && FileSystem->existFile(path))
+				image = createImageFromFile(path);
+			if (image && texture->getType() == ETT_2D) {
+				texture->reupload({image});
+			} else {
+				needContent++;
+			}
+			if (image)
+				image->drop();
+		}
+	}
+
+	for (u32 i = 0; i < RenderTargets.size(); ++i) {
+		if (!static_cast<COpenGL3RenderTarget *>(RenderTargets[i])->recreateAfterContextLoss())
+			ok = false;
+	}
+
+	char buf[160];
+	snprintf_irr(buf, sizeof(buf), "Recreated %u textures (%u without a CPU copy), "
+			"%u render targets, %u hardware buffers",
+			Textures.size(), needContent, RenderTargets.size(), (u32)HWBufferList.size());
+	os::Printer::log(buf, ELL_INFORMATION);
+
+	// The application re-uploads its textures and recompiles its shaders.
+	if (ok && ContextRestoreHandler && !ContextRestoreHandler())
+		ok = false;
+
+	CurrentRenderMode = ERM_NONE;
+	ResetRenderStates = true;
+	Transformation3DChanged = true;
+	setRenderStates3DMode();
+	setFog(FogColor, FogType, FogStart, FogEnd, FogDensity, PixelFog, RangeFog);
+	// The default framebuffer is the context's own; make sure the next frame
+	// binds it and sets a viewport again.
+	setRenderTargetEx(nullptr, ECBF_NONE);
+
+	while (GL.GetError() != GL_NO_ERROR) {
+	}
+	return ok;
+}
+
+void COpenGL3DriverBase::setContextRestoreHandler(std::function<bool()> handler)
+{
+	ContextRestoreHandler = std::move(handler);
+}
+
+bool COpenGL3DriverBase::reuploadTexture(ITexture *texture, const std::vector<IImage *> &images)
+{
+	if (!texture)
+		return false;
+	return static_cast<COpenGL3Texture *>(texture)->reupload(images);
+}
+
+bool COpenGL3DriverBase::recompileShaderMaterial(s32 material, const c8 *vertexShaderProgram,
+		const c8 *pixelShaderProgram)
+{
+	if (material < 0 || (u32)material >= MaterialRenderers.size())
+		return false;
+	auto *renderer = dynamic_cast<COpenGL3MaterialRenderer *>(MaterialRenderers[material].Renderer);
+	return renderer && renderer->recompile(vertexShaderProgram, pixelShaderProgram);
+}
+#endif
 
 COpenGL3CacheHandler *COpenGL3DriverBase::getCacheHandler() const
 {

@@ -386,6 +386,10 @@ public:
 	// Shall be called from the main thread.
 	void rebuildShaders() override;
 
+#ifdef __EMSCRIPTEN__
+	bool recompileAfterContextLoss() override;
+#endif
+
 	void addShaderConstantSetter(std::unique_ptr<IShaderConstantSetter> setter) override
 	{
 		m_constant_setters.emplace_back(std::move(setter));
@@ -416,6 +420,12 @@ private:
 	bool m_fully_programmable = false;
 	// Driver supports GLSL (ES) 3.x?
 	bool m_have_glsl3 = false;
+
+#ifdef __EMSCRIPTEN__
+	// Set by recompileAfterContextLoss(): generateShader() recompiles into
+	// the existing material instead of adding one.
+	bool m_recompiling = false;
+#endif
 
 	// Cache of source shaders
 	// This should be only accessed from the main thread
@@ -650,6 +660,37 @@ void ShaderSource::rebuildShaders()
 }
 
 
+#ifdef __EMSCRIPTEN__
+u32 g_shader_program_generation = 0;
+
+bool ShaderSource::recompileAfterContextLoss()
+{
+	sanity_check(std::this_thread::get_id() == m_main_thread);
+	MutexAutoLock lock(m_shaderinfo_cache_mutex);
+
+	bool ok = true;
+	size_t n = 0;
+	m_recompiling = true;
+	for (ShaderInfo &info : m_shaderinfo_cache) {
+		if (info.name.empty() || info.material == video::EMT_INVALID)
+			continue;
+		try {
+			generateShader(info);
+			n++;
+		} catch (const ShaderException &e) {
+			errorstream << "ShaderSource: " << e.what() << std::endl;
+			ok = false;
+		}
+	}
+	m_recompiling = false;
+	g_shader_program_generation++;
+
+	infostream << "ShaderSource: recompiled " << n << " shaders after WebGL "
+		"context restore" << std::endl;
+	return ok;
+}
+#endif
+
 void ShaderSource::generateShader(ShaderInfo &shaderinfo)
 {
 	const auto &name = shaderinfo.name;
@@ -695,12 +736,25 @@ void ShaderSource::generateShader(ShaderInfo &shaderinfo)
 			shaders_header << R"(
 				#ifdef GL_FRAGMENT_PRECISION_HIGH
 				precision highp float;
+				precision highp int;
 				precision highp sampler2D;
 				#else
 				precision mediump float;
+				precision mediump int;
 				precision mediump sampler2D;
 				#endif
 			)";
+			// GLSL ES 3 default precision statements only allow float, int, and
+			// sampler types — not uint (unsigned integers inherit int precision).
+			if (use_glsl3) {
+				shaders_header << R"(
+					#ifdef GL_FRAGMENT_PRECISION_HIGH
+					precision highp sampler2DArray;
+					#else
+					precision mediump sampler2DArray;
+					#endif
+				)";
+			}
 		} else {
 			assert(false);
 		}
@@ -839,6 +893,21 @@ void ShaderSource::generateShader(ShaderInfo &shaderinfo)
 		geometry_shader = common_header + geometry_header + final_header + geometry_shader;
 		geometry_shader_ptr = geometry_shader.c_str();
 	}
+
+#ifdef __EMSCRIPTEN__
+	if (m_recompiling) {
+		// WebGL has no geometry shaders, so none to pass on.
+		infostream << "Recompiling shaders for " << log_name << std::endl;
+		if (!driver->recompileShaderMaterial(shaderinfo.material,
+				vertex_shader.c_str(), fragment_shader.c_str())) {
+			dumpShaderProgram(warningstream, "vertex", vertex_shader);
+			dumpShaderProgram(warningstream, "fragment", fragment_shader);
+			throw ShaderException(fmtgettext("Failed to compile the \"%s\" shader.",
+				log_name.c_str()));
+		}
+		return;
+	}
+#endif
 
 	auto cb = make_irr<ShaderCallback>(name, m_uniform_factories);
 	cb->setExtraSetter(shaderinfo.setter_cb.get());

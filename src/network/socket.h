@@ -7,6 +7,11 @@
 #include "irrlichttypes.h"
 #include "address.h"
 
+#ifdef __EMSCRIPTEN__
+#include <memory>
+struct EmscriptenUDPSocketState;
+#endif
+
 void sockets_init();
 void sockets_cleanup();
 
@@ -15,11 +20,18 @@ class UDPSocket
 public:
 	UDPSocket() = default;
 	UDPSocket(UDPSocket &&other):
+#ifdef __EMSCRIPTEN__
+		m_emscripten(std::move(other.m_emscripten)),
+		m_bound_port(other.m_bound_port),
+#endif
 		m_handle(other.m_handle),
 		m_timeout_ms(other.m_timeout_ms),
 		m_addr_family(other.m_addr_family)
 	{
 		other.m_handle = -1;
+#ifdef __EMSCRIPTEN__
+		other.m_bound_port = 0;
+#endif
 	}
 	~UDPSocket()
 	{
@@ -28,6 +40,11 @@ public:
 	UDPSocket &operator=(UDPSocket &&other)
 	{
 		Close();
+#ifdef __EMSCRIPTEN__
+		m_emscripten = std::move(other.m_emscripten);
+		m_bound_port = other.m_bound_port;
+		other.m_bound_port = 0;
+#endif
 		m_handle = other.m_handle;
 		m_timeout_ms = other.m_timeout_ms;
 		m_addr_family = other.m_addr_family;
@@ -68,6 +85,10 @@ public:
 	int GetHandle() const { return m_handle; };
 
 private:
+#ifdef __EMSCRIPTEN__
+	std::shared_ptr<EmscriptenUDPSocketState> m_emscripten;
+	u16 m_bound_port = 0;
+#endif
 	int m_handle = -1;
 	int m_timeout_ms = -1;
 	unsigned short m_addr_family = 0;

@@ -29,7 +29,9 @@ DEALINGS IN THE SOFTWARE.
 #include "porting.h"
 
 // for setName
-#if defined(__linux__)
+#if defined(__EMSCRIPTEN__)
+	// no thread-naming API in Emscripten
+#elif defined(__linux__)
 	#include <sys/prctl.h>
 #elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
 	#include <pthread_np.h>
@@ -45,7 +47,9 @@ DEALINGS IN THE SOFTWARE.
 #endif
 
 // for bindToProcessor
-#if __FreeBSD_version >= 702106
+#if defined(__EMSCRIPTEN__)
+	// no CPU affinity API in Emscripten
+#elif __FreeBSD_version >= 702106
 	typedef cpuset_t cpu_set_t;
 #elif defined(__sun) || defined(sun)
 	#include <sys/types.h>
@@ -210,7 +214,12 @@ Thread *Thread::getCurrentThread()
 
 void Thread::setName(const std::string &name)
 {
-#if defined(__linux__)
+#if defined(__EMSCRIPTEN__)
+
+	// Thread naming is not supported under Emscripten pthreads; silently ignore.
+	(void)name;
+
+#elif defined(__linux__)
 
 	// It would be cleaner to do this with pthread_setname_np,
 	// which was added to glibc in version 2.12, but some major
@@ -269,7 +278,11 @@ unsigned int Thread::getNumberOfProcessors()
 
 bool Thread::bindToProcessor(unsigned int proc_number)
 {
-#if defined(__ANDROID__)
+#if defined(__EMSCRIPTEN__)
+
+	return false;
+
+#elif defined(__ANDROID__)
 
 	return false;
 

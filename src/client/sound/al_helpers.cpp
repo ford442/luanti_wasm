@@ -8,7 +8,29 @@
 
 #include "al_helpers.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <cstdlib>
+#endif
+
 namespace sound {
+
+#ifdef __EMSCRIPTEN__
+std::string getWebAudioState()
+{
+	// Module.luantiAudioState comes from client/web/audio_unlock.js.
+	char *state = (char *)MAIN_THREAD_EM_ASM_PTR({
+		var s = (typeof Module !== "undefined" && Module["luantiAudioState"]) ?
+			Module["luantiAudioState"]() : "unknown";
+		return stringToNewUTF8(s);
+	});
+	if (!state)
+		return "unknown";
+	std::string out(state);
+	free(state);
+	return out;
+}
+#endif
 
 /*
  * RAIIALSoundBuffer

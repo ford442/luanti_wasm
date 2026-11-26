@@ -238,6 +238,10 @@ public:
 	void sendUpdateClientInfo(const ClientDynamicInfo &info);
 
 	ClientEnvironment& getEnv() { return m_env; }
+#ifdef __EMSCRIPTEN__
+	// Blocks waiting for a mesh worker (Module.luantiPerf).
+	size_t getQueuedMeshCount();
+#endif
 	ITextureSource *tsrc() { return getTextureSource(); }
 	ISoundManager *sound() { return getSoundManager(); }
 	static const std::string &getClientModsLuaPath();
@@ -497,6 +501,12 @@ private:
 	bool updateStaticLighting(const StaticLighting &future);
 
 	bool canSendChatMessage() const;
+
+#ifdef __EMSCRIPTEN__
+	// Theater Tier C spike (GH issue #29): pull a decoded browser video frame,
+	// if a mod started one, and upload it onto its named engine texture.
+	void serviceVideoTextureSpike();
+#endif
 
 	float m_packetcounter_timer = 0.0f;
 	float m_connection_reinit_timer = 0.1f;

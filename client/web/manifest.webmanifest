@@ -1,0 +1,20 @@
+{
+	"name": "Luanti Web",
+	"short_name": "Luanti",
+	"description": "A free, open-source voxel game engine in your browser",
+	"id": "./luanti.html",
+	"start_url": "./luanti.html",
+	"scope": "./",
+	"display": "fullscreen",
+	"orientation": "any",
+	"background_color": "#0c1510",
+	"theme_color": "#17251d",
+	"icons": [
+		{
+			"src": "luanti-web.svg",
+			"sizes": "any",
+			"type": "image/svg+xml",
+			"purpose": "any maskable"
+		}
+	]
+}

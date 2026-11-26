@@ -23,6 +23,7 @@
 #include "config.h"
 #include "player.h"
 #include "porting.h"
+#include "porting_emscripten.h"
 #include "serialization.h" // SER_FMT_VER_HIGHEST_*
 #include "serverenvironment.h"
 #include "servermap.h"
@@ -134,6 +135,7 @@ int main(int argc, char *argv[])
 {
 	int retval;
 	debug_set_exception_handler();
+	porting::emscripten_validate_main_loop();
 
 	g_logger.registerThread("Main");
 	g_logger.addOutputMaxLevel(&stderr_output, LL_ACTION);
@@ -187,7 +189,6 @@ int main(int argc, char *argv[])
 
 	porting::signal_handler_init();
 	porting::initializePaths();
-
 	if (!create_userdata_path()) {
 		errorstream << "Cannot create user data directory" << std::endl;
 		return 1;
@@ -298,6 +299,11 @@ int main(int argc, char *argv[])
 	// Update configuration file
 	if (!g_settings_path.empty())
 		g_settings->updateConfigFile(g_settings_path.c_str());
+
+	porting::emscripten_mark_persistence_dirty(
+		porting::EmscriptenPersistenceReason::Shutdown, true);
+	porting::emscripten_service_persistence();
+	porting::emscripten_wait_for_persistence();
 
 	print_modified_quicktune_values();
 
@@ -448,6 +454,12 @@ static void set_allowed_options(OptionList *allowed_options)
 			_("Skip main menu, go directly in-game"))));
 	allowed_options->insert(std::make_pair("console", ValueSpec(VALUETYPE_FLAG,
 			_("Start with the console open (Windows only)"))));
+#ifdef __EMSCRIPTEN__
+	allowed_options->insert(std::make_pair("language", ValueSpec(VALUETYPE_STRING,
+			_("Set language for the browser session"))));
+	allowed_options->insert(std::make_pair("viewing-range", ValueSpec(VALUETYPE_STRING,
+			_("Set viewing range for the browser session"))));
+#endif
 #endif
 
 #undef SERVER_ONLY
@@ -769,6 +781,10 @@ static bool init_common(const Settings &cmd_args, int argc, char *argv[])
 {
 	startup_message();
 
+	// WASM uses the in-process UDP queue (and optional WSS proxy). sockets_init()
+	// only flips the initialized flag there; it is required so UDPSocket::init()
+	// does not silently fail and later abort ConnectionSend with
+	// "Socket is not initialized".
 	sockets_init();
 
 	// Initialize g_settings
@@ -781,9 +797,23 @@ static bool init_common(const Settings &cmd_args, int argc, char *argv[])
 	if (!read_config_file(cmd_args))
 		return false;
 
+#ifdef __EMSCRIPTEN__
+	// These launcher-owned overrides are applied after persisted configuration is
+	// loaded, but before localization and rendering consume them.
+	if (cmd_args.exists("language"))
+		g_settings->set("language", cmd_args.get("language"));
+	if (cmd_args.exists("viewing-range"))
+		g_settings->setS32("viewing_range",
+				mystoi(cmd_args.get("viewing-range"), 20, 300));
+#endif
+
 	migrate_settings();
 
 	init_log_streams(cmd_args);
+
+	// World databases on OPFS. After the logs (the migration reports through
+	// them) and before anything opens a world.
+	porting::emscripten_init_world_storage();
 
 	// Initialize random seed
 	u64 seed;
@@ -814,7 +844,9 @@ static void uninit_common()
 {
 	httpfetch_cleanup();
 
+#ifndef __EMSCRIPTEN__
 	sockets_cleanup();
+#endif
 
 	// It'd actually be okay to leak these but we want to please valgrind...
 	for (int i = 0; i < (int)SL_TOTAL_COUNT; i++)

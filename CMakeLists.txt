@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.12)
 if(POLICY CMP0177)
     cmake_policy(SET CMP0177 NEW)
 endif()
+if(POLICY CMP0135)
+	cmake_policy(SET CMP0135 NEW)
+endif()
 
 # This can be read from ${PROJECT_NAME} after project() is called
 project(luanti)
@@ -92,6 +95,30 @@ set(ENABLE_UPDATE_CHECKER (NOT ${DEVELOPMENT_BUILD}) CACHE BOOL
 # Included stuff
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 
+# Emscripten's built-in ports are installed lazily, but Irrlicht and Luanti run
+# find_package() during configure. Populate the pinned SDK's cache first and
+# provide the one required dependency (zstd) that Emscripten does not ship.
+if(EMSCRIPTEN)
+	# Every object linked into shared WebAssembly memory must be compiled with
+	# atomics and bulk-memory support, including Irrlicht and bundled libraries.
+	add_compile_options(-pthread -fexceptions)
+	# SIMD and LTO must reach every target, not just the executable: most of
+	# the engine is the EngineCommon object library, and IrrlichtMt, Lua and
+	# zstd are separate targets. Per-target flags left -msimd128 on the client
+	# sources only and mixed bitcode with regular objects under -flto.
+	option(WASM_ENABLE_LTO "Link-time optimisation for the Release WASM build (experimental)" OFF)
+	option(WASM_ENABLE_SIMD "Build with -msimd128 (needs a SIMD-capable browser)" OFF)
+	if(WASM_ENABLE_SIMD)
+		add_compile_options(-msimd128)
+		add_link_options(-msimd128)
+	endif()
+	if(WASM_ENABLE_LTO AND CMAKE_BUILD_TYPE MATCHES "^(Release|MinSizeRel)$")
+		add_compile_options(-flto)
+		add_link_options(-flto)
+	endif()
+	include(EmscriptenDependencies)
+endif()
+
 # Load default options for Android
 if(ANDROID)
 	cmake_minimum_required(VERSION 3.20)
@@ -105,6 +132,25 @@ if(TRUE)
 
 		if(NOT TARGET IrrlichtMt)
 			message(FATAL_ERROR "IrrlichtMt project is missing a CMake target?!")
+		endif()
+		if(EMSCRIPTEN)
+			# Which thread owns the WebGL context by default; the page can
+			# override it with ?render= (see "Render thread" in wasm_porting.md).
+			set(WASM_RENDER_THREAD "proxy" CACHE STRING
+				"Default WebGL owner: proxy (browser main thread), offscreen (engine worker, no fallback) or auto (offscreen, else proxy)")
+			set_property(CACHE WASM_RENDER_THREAD PROPERTY STRINGS proxy offscreen auto)
+			if(WASM_RENDER_THREAD STREQUAL "proxy")
+				set(WASM_RENDER_THREAD_ID 0)
+			elseif(WASM_RENDER_THREAD STREQUAL "offscreen")
+				set(WASM_RENDER_THREAD_ID 1)
+			elseif(WASM_RENDER_THREAD STREQUAL "auto")
+				set(WASM_RENDER_THREAD_ID 2)
+			else()
+				message(FATAL_ERROR "WASM_RENDER_THREAD must be proxy, offscreen or auto")
+			endif()
+			# CIrrDeviceSDL.cpp is compiled in this object library.
+			target_compile_definitions(IRROTHEROBJ PRIVATE
+				LUANTI_WASM_RENDER_THREAD_DEFAULT=${WASM_RENDER_THREAD_ID})
 		endif()
 	else()
 		add_library(IrrlichtMt::IrrlichtMt INTERFACE IMPORTED)

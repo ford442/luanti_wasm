@@ -1001,12 +1001,26 @@ void ConnectionReceiveThread::receive(SharedBuffer<u8> &packetdata,
 		}
 
 		// Validate peer address
-
 		if (sender != peer->getAddress()) {
-			LOG(derr_con << m_connection->getDesc()
-				<< " Peer " << peer_id << " sending from different address."
-				" Ignoring." << std::endl);
-			return;
+#ifdef __EMSCRIPTEN__
+			// In-process singleplayer stamps 127.0.0.1; the peer may still be
+			// stored as 0.0.0.0 or the same loopback with a matching port.
+			const Address &expected = peer->getAddress();
+			const bool loopback_ok =
+				sender.getPort() == expected.getPort() &&
+				(sender.isLocalhost() || sender.isAny()) &&
+				(expected.isLocalhost() || expected.isAny());
+			if (!loopback_ok)
+#endif
+			{
+				actionstream << m_connection->getDesc()
+					<< " Ignoring packet from unexpected address "
+					<< sender.serializeString() << ":" << sender.getPort()
+					<< " (peer " << peer_id << " is "
+					<< peer->getAddress().serializeString() << ":"
+					<< peer->getAddress().getPort() << ")" << std::endl;
+				return;
+			}
 		}
 
 		if (knew_peer_id) {

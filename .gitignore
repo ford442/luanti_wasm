@@ -61,6 +61,11 @@ AppDir
 /bin/
 /games/*
 !/games/devtest/
+!/games/flower_island/
+!/games/log_ride/
+!/games/luanti_web/
+!/games/rollercoaster/
+!/games/spire_tunnel/
 /games/devtest/mods/soundstuff/sounds/gitignored_sounds/*
 !/games/devtest/mods/soundstuff/sounds/gitignored_sounds/custom_sounds_here.txt
 /cache
@@ -79,6 +84,8 @@ AppDir
 
 ## Configuration/log files
 minetest.conf
+# Game-layer defaults are content, not local configuration.
+!/games/luanti_web/minetest.conf
 debug.txt
 debug.txt.1
 
@@ -142,3 +149,19 @@ lib/irrlichtmt
 
 # Generated mod storage database
 client/mod_storage.sqlite
+
+# Python bytecode from the util/ scripts
+__pycache__/
+*.pyc
+
+# Build output (any CMake build dir other than the in-tree `build/`)
+build-*/
+
+# JavaScript dependencies and tooling output
+node_modules/
+
+# Browser smoke-test screenshots dropped at the repo root
+/*.png
+
+# lw_amps songs are runtime media (client/web/media/songs); a native install may copy them here
+/games/luanti_web/mods/lw_amps/songs/*.ogg
