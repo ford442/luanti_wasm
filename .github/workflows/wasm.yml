@@ -185,6 +185,15 @@ jobs:
       - name: Shared-memory ceiling fallback in Chrome
         run: python3 util/wasm/test_memory_probe_browser.py --browser "$(command -v google-chrome)"
 
+      # World databases on OPFS: IDBFS worlds migrate only after an integrity
+      # check, and a browser killed mid-commit leaves an intact world.
+      # wasm_porting.md, "World databases on OPFS".
+      - name: OPFS world storage (migration, kill mid-save) in Chrome
+        shell: bash
+        run: |
+          source "$EMSDK_DIR/emsdk_env.sh"
+          python3 util/wasm/test_storage_browser.py --browser "$(command -v google-chrome)"
+
       - name: World library (create, export, delete, import, share link) in Chrome
         run: python3 util/wasm/test_worlds_browser.py --browser "$(command -v google-chrome)"
 

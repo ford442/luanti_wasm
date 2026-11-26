@@ -36,7 +36,7 @@ This document describes the current state, blockers, and step-by-step plan for b
 ### Remaining Work
 
 - The proxy is hardened for public exposure (connection caps, shared rate limit, Origin and port/server-list allowlists, health and metrics, Docker + Caddy recipe). A deployed TLS proxy and public-server multiplayer acceptance are still outstanding.
-- Full world persistence acceptance across Chrome/Edge/Firefox is outstanding.
+- Full world persistence acceptance across Chrome/Edge/Firefox is outstanding. World databases are on OPFS where the browser has sync access handles (see "World databases on OPFS"); only Chrome has been measured.
 - CI and public demo hosting are not yet configured.
 - Sound and complete keyboard, pointer-lock, and touch acceptance remain.
 
@@ -155,6 +155,9 @@ Emscripten provides virtual file systems:
 2. At runtime, mount an `IDBFS` on `/home/web_user/.luanti/` for `worlds/`, `minetest.conf`, and `debug.txt`
 3. Hydrate with `FS.syncfs(true)` from the `Module.preRun` bootstrap before `main()`
 4. Submit committed saves to the serialized `FS.syncfs(false)` service
+5. World databases (`worlds/<world>/*.sqlite`) go to OPFS through a SQLite VFS
+   on sync access handles, off the browser main thread (see "World databases
+   on OPFS" below); IDBFS keeps the small files
 
 **Files to modify:**
 - `src/filesys.cpp` — Path logic, directory listing
@@ -812,9 +815,131 @@ only after the player confirms. `autostart=1` is ignored with `world=`. The
 host must send CORS headers; under `COEP: require-corp` that is what makes the
 cross-origin fetch allowed.
 
-**Still IDBFS.** The OPFS backend (tracking issue Part A) is not done: every
-sync still rewrites whole changed files and the world stays in memory.
-Export/import is the safety net for that migration.
+**World databases on OPFS.** Where the browser has OPFS sync access
+handles, a world's `*.sqlite` files are in OPFS, not IDBFS (next section).
+Every operation above handles them with the rest of the world: `list` adds
+their size and reports `storage: "opfs"`, export streams them from OPFS
+`File` objects, import writes them straight to a fresh OPFS storage id with
+`createWritable` (a large map is never held in memory), duplicate copies them
+to a new id, and delete removes the id after the directory is gone. The
+marker that names the id is never exported and never taken from an archive
+(an archive's marker would point at another world's databases).
+
+#### World databases on OPFS
+
+The SQLite stall measured in "Frame-time baseline" came from Emscripten's
+JavaScript filesystem: every read and write a worker makes is a synchronous
+call run on the browser main thread, so the server and emerge threads waited
+on the thread that also drains proxied WebGL, and each sync rewrote the whole
+`map.sqlite` into IndexedDB from a copy held in memory.
+
+**Design (option 2 of the tracking issue).** `src/database/sqlite3_opfs_vfs.cpp`
+is a SQLite VFS, registered as the default under `__EMSCRIPTEN__`, that sends
+`worlds/<world>/<name>.sqlite` and SQLite's journals to OPFS. SQLite stays the
+Emscripten pthread port on its POSIX code path; only those files move.
+
+- One dedicated pthread owns every `FileSystemSyncAccessHandle`. VFS calls on
+  the server, emerge or main application thread block on it with
+  `emscripten_proxy_sync_with_ctx`, never on the browser main thread (a call
+  made from the browser main thread is refused). Reads and writes go straight
+  between the handle and the Wasm heap; opening, deleting and lookups are
+  promise-based and serialized on that thread so two opens of one file never
+  race for its single handle. Locks between connections in the page follow
+  `os_unix.c`'s per-inode rules; another tab cannot open the file at all,
+  because a sync access handle is exclusive.
+- A commit is durable when SQLite's own `xSync` (`handle.flush()`) returns.
+  Nothing is rewritten and the map is not in the Wasm heap or the JS heap.
+  The journal mode is SQLite's default rollback journal, so a commit cut
+  short is rolled back on the next open.
+- A world on OPFS has a marker in its IDBFS directory, `web_opfs_id.txt`,
+  with a random 128-bit storage id; its databases are
+  `luanti-worlds/<id>/<name>` in OPFS. The marker moves with the directory, so
+  rename needs no OPFS work, and a world deleted and re-created under the same
+  name gets a new id instead of the old map. A new world gets its id when the
+  engine first creates its `map.sqlite`. `Database_SQLite3::openDatabase` asks
+  the VFS whether the file exists, since the JS filesystem cannot see it.
+- `client/web/storage.js` (a `--pre-js` after `persistence.js`) decides before
+  `callMain`: OPFS is used only if a probe worker can open a sync access
+  handle and the page has `createWritable` (the library needs it for import
+  and duplicate). Otherwise, or with `?storage=idbfs` /
+  `Module.luantiStorageOptions = {"backend": "idbfs"}`, everything stays on
+  IDBFS as before. The decision is `Module.luantiStorage.backend`; the engine
+  reports its own view in `Module.luantiStorage.engineState`. A world whose
+  marker says OPFS refuses to open when OPFS is unavailable rather than
+  starting over empty.
+- `storage.js` also removes storage ids no marker points at (a world deleted
+  from the engine's own main menu leaves its databases behind), but only
+  after IDBFS has loaded and only when nothing in the id changed for 24 hours,
+  so a world another tab created but has not synced yet is never touched.
+- Settings, player files, `world.mt`, mod storage outside SQLite and the
+  other small files keep the IDBFS small-file sync.
+
+**Migration.** At startup `porting::emscripten_init_world_storage()` (from
+`init_common`, before any world opens) visits every world that has `*.sqlite`
+files in the JS filesystem and no marker. Each database is copied into a new
+storage id with the SQLite backup API (the source is opened read-write so a
+hot journal from an interrupted save is rolled back first), and each copy must
+pass `PRAGMA integrity_check`. Only when every copy passes is the marker
+written and are the IDBFS copies removed (one urgent small-file sync carries
+both; IDBFS writes them in one IndexedDB transaction). A world that fails
+keeps working on IDBFS and the partial copy is deleted. If the page is closed
+after the marker was written but before the old copies were removed, the next
+start removes them. Results are in `Module.luantiStorage.migrations`. The
+launcher shows "Moving <world> to faster storage… n%".
+
+**Closing the tab.** `persistence.js`'s `pagehide` / `visibilitychange` path
+also calls `luanti_request_world_save()`, an atomic flag the server checks
+every step, so a hidden page commits its changed blocks and players now
+instead of at the next `server_map_save_interval`. Commits are crash-safe on
+their own; this only narrows how much play a discarded tab can lose.
+`navigator.storage.persist()` is still requested once after the first
+successful save (`worlds.js`), and the launcher shows
+`navigator.storage.estimate()`, which counts OPFS.
+
+**Spike (2026-11-26).** `util/wasm/bench_storage_spike.py` runs one SQLite
+workload shaped like the map database (a `blocks` table of 1.5-2.5 KiB
+incompressible blobs, `synchronous = FULL`, rollback journal) from a worker
+against each store, in a fresh headless Chrome 158 profile on a 4-core
+container: populate, 30 map saves of 200 changed blocks (commit, and commit
+plus whatever makes it durable), random point reads for 3 s with the browser
+main thread idle and then busy 14 ms of every 16 ms (standing in for proxied
+WebGL), and a writer committing 2000-block transactions that is SIGKILLed with
+the whole browser (no `pagehide`) and checked after a relaunch on the same
+profile.
+
+| Store | DB size | populate s | save commit p50 / p95 ms | durable p50 / p95 ms | reads/s, main idle | reads/s, main busy | Wasm memory MiB | page memory MiB | browser killed mid-save |
+|-------|---------|-----------|---------------------------|----------------------|--------------------|--------------------|-----------------|-----------------|-------------------------|
+| IDBFS (MEMFS + `syncfs`) | 500 MiB | - | - | - | - | - | - | - | `syncfs` fails: `DataError: Failed to write blobs (InvalidBlob)` |
+| IDBFS (MEMFS + `syncfs`) | 254 MiB | 14 | 419 / 509 | 2288 / 3088 | 1981 | 226 | 64 | 740 | 2 of 2 intact |
+| WASMFS + OPFS backend | 504 MiB | 17 | 103 / 124 | 103 / 124 | 1595 | 1474 | 64 | 323 | 3 of 3 intact |
+| OPFS SQLite VFS (kept) | 504 MiB | 17 | 92 / 107 | 92 / 107 | 4863 | 4829 | 64 | 324 | 3 of 3 intact |
+
+"Page memory" is `performance.measureUserAgentSpecificMemory()`, which counts
+the shared Wasm memory once per worker; about 320 MiB is that baseline. The
+IDBFS row's extra ~420 MiB is the database held in a MEMFS typed array (with
+growth slack), on the JS heap rather than the Wasm heap. A full
+`PRAGMA integrity_check` of the 504 MiB file takes 14 s on either OPFS store,
+so migrating a world that size takes about 30 s once.
+
+The VFS was kept: it is the fastest on reads (the server's emerge thread does
+little else), unaffected by the main thread, and it moves only the hot files.
+WASMFS would have meant moving every `FS.*` caller (`persistence.js`,
+`packages.js`, `worlds.js`, `runtime_media.js`, the tests) to the WASMFS API
+and giving up IDBFS, with no gain for the map. IDBFS cannot store a world of
+the size this was for at all in Chrome here.
+
+`util/wasm/test_storage_browser.py` covers the production pieces
+(`persistence.js`, `storage.js`, the VFS) in Chrome: an IDBFS world opens in
+place, migrates, and after a reload reads from OPFS with every row; a world
+whose `map.sqlite` is not a database fails its check and is left untouched;
+with `?storage=idbfs` the migrated world refuses to open; and a world killed
+with the browser mid-commit three times is intact each time with no reported
+commit lost. `test_first_playable.py --from-idbfs` plays a world on IDBFS and
+checks the real engine migrates it on the next start.
+
+Not yet measured: Firefox and Safari (the container has only Chrome; the
+Firefox leg of `test_worlds_browser.py` runs `--no-play` in CI), and a world
+of hundreds of megabytes grown by play rather than synthetically.
 
 ---
 
@@ -1319,8 +1444,21 @@ and runs `emscripten_webgl_commit_frame()`.
 | 2026-11-11 | render-thread work | offscreen | same | SQLite | 4.0-4.2 | 216-237 / 440-527 / 491-663 | 138-187 | 327-330 | 41-42 |
 | 2026-11-11 | render-thread work | proxy | same | dummy | 2.9-3.2 | 289-345 / 430-501 / 520-605 | 151-200 | 329-331 | 46-49 |
 | 2026-11-11 | render-thread work | offscreen | same | dummy | 4.3-4.4 | 207-213 / 439-452 / 537-574 | 129-178 | 330-334 | 48 |
+| 2026-11-26 | OPFS world databases | proxy | SwiftShader, headless, 4 cores | SQLite on OPFS | 5.5-5.9 | 173-186 / 222-226 / 253-260 | 24-25 | 331-332 | 48.8-49.9 |
+| 2026-11-26 | same build, `?storage=idbfs` | proxy | same | SQLite on IDBFS | 13.3 | 77 / 176 / 226 | 170 | 207 | 0.27 |
 
-Ranges are over two to four runs, all with post-processing off.
+Ranges are over two to four runs, all with post-processing off. The
+2026-11-26 rows ran on a 4-core container, so compare their server column,
+not their frame times, with the 8-core rows; the IDBFS row's higher fps is
+the stalled scene (a third fewer draw calls), not a faster renderer.
+
+**Fixed 2026-11-26:** with the world databases on OPFS (see "World databases
+on OPFS"), the proxied server keeps 49-50 steps/s with SQLite, the range of
+the `dummy` rows, and `present` p95 falls from about 230 ms to 25 ms because
+the main thread no longer runs file I/O between GL batches. The analysis
+below is kept for the record; the default render mode still has to be
+re-measured on a real GPU now that the two modes are no longer mixed up with
+this stall.
 
 The first two proxy rows did not measure the scene the offscreen rows did.
 The server was starved: 0.13 globalsteps per second, with gaps of up to 19 s.
@@ -1362,9 +1500,11 @@ Changes measured in these rows besides the render mode:
   non-growable heap here, so the shim copied nothing in any run.
 
 `test_first_playable.py` passes with `--render offscreen` (2 of 2 runs). With
-`--render proxy` it fails with "dug 0 of 5", as it did before this work: the
-dig waits for the stalled server (see
-`docs/wasm-issues/06-first-playable-gate-results.md`).
+`--render proxy` it failed with "dug 0 of 5": the dig waited for the stalled
+server (see `docs/wasm-issues/06-first-playable-gate-results.md`). Since the
+OPFS world databases it passes in the default (proxy) mode, placing 8 and
+digging 5 nodes; the same build with `?storage=idbfs` still places 0 and digs
+0.
 
 The `wasm_mesh_*` knobs have not been re-benchmarked. On SwiftShader, mesh
 generation is not what limits a frame; measure them on a real GPU.

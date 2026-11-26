@@ -13,6 +13,9 @@
 #include "remoteplayer.h"
 #include "irrlicht_changes/printing.h"
 #include "server/player_sao.h"
+#ifdef __EMSCRIPTEN__
+#include "sqlite3_opfs_vfs.h"
+#endif
 
 #include <cassert>
 
@@ -121,7 +124,13 @@ void Database_SQLite3::openDatabase()
 				"save directory");
 	}
 
+#ifdef __EMSCRIPTEN__
+	// A world database may be stored in OPFS (sqlite3_opfs_vfs.h), which the
+	// JavaScript filesystem cannot see; ask the VFS that will open it.
+	bool needs_create = !sqlite_opfs::file_exists(dbp);
+#else
 	bool needs_create = !fs::PathExists(dbp);
+#endif
 
 	auto flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
 #ifdef SQLITE_OPEN_EXRESCODE

@@ -10,6 +10,8 @@
 #include "log.h"
 #include "util/numeric.h"
 #include "version.h"
+#include "filesys.h"
+#include "database/sqlite3_opfs_vfs.h"
 
 #include <string>
 
@@ -32,6 +34,7 @@ std::atomic<porting::EmscriptenPersistenceReason> pending_reason{
 	porting::EmscriptenPersistenceReason::Periodic};
 std::atomic<bool> pending_urgent{false};
 std::atomic<bool> sync_error{false};
+std::atomic<bool> world_save_requested{false};
 std::uint64_t last_ordinary_start_ms = 0;
 
 // Frame clock and pause state, shared with the page through the exports below.
@@ -218,6 +221,13 @@ EMSCRIPTEN_KEEPALIVE const char *luanti_engine_version()
 	return g_version_string;
 }
 
+// Called by client/web/persistence.js when the page is hidden. Only sets a
+// flag: the server thread does the save on its next step.
+EMSCRIPTEN_KEEPALIVE void luanti_request_world_save()
+{
+	world_save_requested.store(true, std::memory_order_release);
+}
+
 EMSCRIPTEN_KEEPALIVE void luanti_persistence_sync_completed(double generation)
 {
 	auto completed = static_cast<std::uint64_t>(generation);
@@ -298,6 +308,90 @@ void emscripten_report_status(const std::string &message, int percent,
 		}
 	}, message.c_str(), percent,
 			phase_string.empty() ? nullptr : phase_string.c_str());
+}
+
+bool emscripten_take_world_save_request()
+{
+	return world_save_requested.exchange(false, std::memory_order_acq_rel);
+}
+
+static void publish_storage_state(const char *state)
+{
+	MAIN_THREAD_EM_ASM({
+		var storage = Module["luantiStorage"];
+		if (storage)
+			storage["engineState"] = UTF8ToString($0);
+	}, state);
+}
+
+static void publish_migration(const std::string &world, const char *result,
+		const std::string &error)
+{
+	MAIN_THREAD_EM_ASM({
+		var storage = Module["luantiStorage"];
+		if (!storage)
+			return;
+		(storage["migrations"] = storage["migrations"] || []).push({
+			"world": UTF8ToString($0),
+			"result": UTF8ToString($1),
+			"error": UTF8ToString($2) || null
+		});
+	}, world.c_str(), result, error.c_str());
+}
+
+void emscripten_init_world_storage()
+{
+	// storage.js decides before callMain (it can run a probe worker; the
+	// engine cannot wait for one here) and the VFS confirms on its thread.
+	const bool wanted = MAIN_THREAD_EM_ASM_INT({
+		var storage = Module["luantiStorage"];
+		return storage && storage["backend"] === "opfs" ? 1 : 0;
+	}) != 0;
+
+	sqlite_opfs::Config config;
+	config.worlds_dir = porting::path_user + DIR_DELIM + "worlds";
+	config.enabled = wanted;
+	config.log = [](int level, const std::string &message) {
+		if (level >= 2)
+			errorstream << message << std::endl;
+		else if (level == 1)
+			warningstream << message << std::endl;
+		else
+			infostream << message << std::endl;
+	};
+	config.small_files_changed = [] {
+		emscripten_mark_persistence_dirty(EmscriptenPersistenceReason::Periodic, true);
+	};
+	const sqlite_opfs::State state = sqlite_opfs::init(config);
+	publish_storage_state(sqlite_opfs::state_name(state));
+	if (wanted && state != sqlite_opfs::State::Ready)
+		warningstream << "World storage: OPFS is " << sqlite_opfs::state_name(state)
+			<< "; new worlds are kept in IndexedDB" << std::endl;
+	if (state != sqlite_opfs::State::Ready)
+		return;
+
+	std::vector<std::string> worlds;
+	for (const fs::DirListNode &node : fs::GetDirListing(config.worlds_dir)) {
+		if (node.dir && !node.name.empty() && node.name[0] != '.')
+			worlds.push_back(node.name);
+	}
+	for (const std::string &world : worlds) {
+		std::string error;
+		const auto result = sqlite_opfs::migrate_world(
+			config.worlds_dir + DIR_DELIM + world,
+			[](const sqlite_opfs::MigrationProgress &progress) {
+				emscripten_report_status("Moving " + progress.world +
+					" to faster storage… " +
+					std::to_string(static_cast<int>(progress.fraction * 100)) +
+					"%", 2, "loading");
+			}, &error);
+		if (result == sqlite_opfs::MigrationResult::Migrated)
+			publish_migration(world, "migrated", "");
+		else if (result == sqlite_opfs::MigrationResult::Failed)
+			publish_migration(world, "failed", error);
+	}
+	// Push the removal of the old copies to IndexedDB right away.
+	emscripten_service_persistence();
 }
 
 void emscripten_mark_persistence_dirty(EmscriptenPersistenceReason reason,

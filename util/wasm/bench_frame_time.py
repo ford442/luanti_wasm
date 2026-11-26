@@ -22,12 +22,15 @@ In CI (SwiftShader, headless) the numbers are only good for spotting large
 regressions between commits, never for comparing with a real GPU.
 
 The report's "server" entry says whether the internal server kept up during
-the path. Without WASMFS every SQLite read and write is a synchronous call
-on the browser main thread, which in the proxied render mode is also busy
-running GL, so the server can stall for seconds and the camera then stays
-near its start: two runs whose server rates differ widely did not render the
-same scene. --no-map-io stores the world in the "dummy" backends (nothing is
-written) to compare rendering alone.
+the path. With the world databases on IDBFS (--query '&storage=idbfs', or a
+browser without OPFS sync access handles) every SQLite read and write is a
+synchronous call on the browser main thread, which in the proxied render mode
+is also busy running GL, so the server can stall for seconds and the camera
+then stays near its start: two runs whose server rates differ widely did not
+render the same scene. On OPFS (the default where available, see
+wasm_porting.md "World databases on OPFS") the server keeps up. --no-map-io
+stores the world in the "dummy" backends (nothing is written) to compare
+rendering alone.
 """
 
 from __future__ import annotations

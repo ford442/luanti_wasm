@@ -249,6 +249,21 @@
 	Module["noExitRuntime"] = true;
 
 	function lifecycleSync(reason) {
+		// A hidden page may be closed or discarded without another event, so
+		// ask a running server to commit its map and players now instead of
+		// at the next save interval. With world databases on OPFS
+		// (storage.js) each SQLite commit is durable by itself and a commit
+		// cut short is rolled back from its journal on the next open; this
+		// only narrows how much play can be lost. The export is a flag set in
+		// shared memory, safe to call from this thread at any time.
+		var requestSave = Module["_luanti_request_world_save"];
+		if (typeof requestSave === "function") {
+			try {
+				requestSave();
+			} catch (error) {
+				console.warn("Luanti: could not request a world save", error);
+			}
+		}
 		if (ready && !fatal)
 			queueSync({"reason": reason, "urgent": true}, false);
 	}

@@ -18,6 +18,12 @@
 // in a single top-level directory), which is what an OS "compress folder"
 // produces from a native Luanti world.
 //
+// World databases may live in OPFS rather than IDBFS (client/web/storage.js,
+// Module.luantiStorage): such a world's directory has a marker naming its
+// storage id, and every operation below moves, copies, exports or deletes
+// those files together with the rest of the world. The marker itself is never
+// exported, and never taken from an archive.
+//
 // Zip handling is done here with CompressionStream/DecompressionStream
 // ("deflate-raw") rather than libzip: it streams entry by entry (a world is
 // never held twice in memory), keeps the browser UI thread responsive, and
@@ -32,14 +38,15 @@
 	var ROOT = "/home/web_user/.luanti";
 	var WORLDS = ROOT + "/worlds";
 	var LIBRARY_FILE = "web_library.json";
+	var MARKER_FILE = "web_opfs_id.txt";
 	var THUMBNAIL_FILE = "web_thumbnail.jpg";
 	var MANIFEST_NAME = "luanti-world.json";
 	var ARCHIVE_FORMAT = 1;
 	var CHUNK = 1 << 20;
 	var MAX_CONF_BYTES = 256 * 1024;
 
-	// Caps for anything imported. The whole world lives in memory while IDBFS
-	// is the backend, so these are well below the Wasm heap limit. An embedder
+	// Caps for anything imported. A world kept on IDBFS lives in memory, so
+	// these stay well below the Wasm heap limit even with OPFS available. An embedder
 	// or test may lower them with Module.luantiWorldLimits.
 	var limits = {
 		"archiveBytes": 512 * 1024 * 1024,
@@ -311,10 +318,32 @@
 		return meta;
 	}
 
+	// ------------------------------------------------- OPFS world databases
+
+	var storage = Module["luantiStorage"] || null;
+
+	function opfsEnabled() {
+		return !!storage && storage["enabled"]();
+	}
+
+	// The world's OPFS storage id, or null if its databases are in IDBFS.
+	function storageId(path) {
+		return storage ? storage["readMarker"](path) : null;
+	}
+
+	// The world's own files: everything in its directory except the marker.
+	function worldFiles(path) {
+		return walk(path, "").filter(function(file) { return file.rel !== MARKER_FILE; });
+	}
+
+	function storageReady() {
+		return storage && storage["ready"] ? storage["ready"]() : Promise.resolve();
+	}
+
 	function describe(name) {
 		var path = WORLDS + "/" + name;
 		var conf = parseConf(readText(path + "/world.mt", MAX_CONF_BYTES));
-		var files = walk(path, "");
+		var files = worldFiles(path);
 		var size = 0;
 		var newest = 0;
 		files.forEach(function(file) {
@@ -322,6 +351,9 @@
 			if (file.rel !== THUMBNAIL_FILE && file.rel !== LIBRARY_FILE)
 				newest = Math.max(newest, file.mtime);
 		});
+		var id = storageId(path);
+		var opfs = id ? storage["sizeOf"](id) : {"bytes": 0, "files": 0};
+		size += opfs["bytes"];
 		var meta = readLibraryMeta(path);
 		return {
 			"name": name,
@@ -330,7 +362,8 @@
 			"creative": conf["creative_mode"] === "true",
 			"damage": conf["enable_damage"] === "true",
 			"size": size,
-			"files": files.length,
+			"files": files.length + opfs["files"],
+			"storage": id ? "opfs" : "idbfs",
 			"created": Number(meta["created"]) || null,
 			"lastPlayed": Number(meta["lastPlayed"]) || null,
 			"modified": newest || null,
@@ -347,6 +380,10 @@
 	}
 
 	function whenReady() {
+		return whenPersistenceReady().then(storageReady);
+	}
+
+	function whenPersistenceReady() {
 		var state = storageState();
 		if (state["fatal"])
 			return Promise.reject(LibraryError("Storage is unavailable: " + (state["error"] || "unknown error"), "storage"));
@@ -507,7 +544,7 @@
 		return this.sink.write(bytes);
 	};
 
-	// readChunk(position, length) -> Uint8Array
+	// readChunk(position, length) -> Uint8Array or a promise of one
 	ZipWriter.prototype.add = async function(name, size, readChunk, mtime) {
 		if (this.central.length >= 0xFFFF)
 			throw LibraryError("The world has too many files to export.", "too-large");
@@ -546,7 +583,7 @@
 			})();
 			try {
 				for (var position = 0; position < size; position += CHUNK) {
-					var chunk = readChunk(position, Math.min(CHUNK, size - position));
+					var chunk = await readChunk(position, Math.min(CHUNK, size - position));
 					crc = crc32(crc, chunk);
 					await input.write(chunk);
 				}
@@ -558,7 +595,7 @@
 			await pump;
 		} else {
 			for (var at = 0; at < size; at += CHUNK) {
-				var piece = readChunk(at, Math.min(CHUNK, size - at));
+				var piece = await readChunk(at, Math.min(CHUNK, size - at));
 				crc = crc32(crc, piece);
 				compressed += piece.length;
 				await this.write(piece);
@@ -949,24 +986,54 @@
 			Math.random().toString(36).slice(2, 8);
 		var progress = typeof options["onProgress"] === "function" ? options["onProgress"] : null;
 		var written = 0;
+		// Databases go straight to OPFS when it is in use, so a large map is
+		// never held in memory.
+		var opfsId = opfsEnabled() ? storage["newId"]() : null;
+		var usedOpfs = false;
 		try {
 			FS.mkdir(staging);
 			for (var i = 0; i < plan["_entries"].length; i++) {
 				var entry = plan["_entries"][i];
 				var rel = entry["path"].slice(plan["_prefix"].length);
+				// A marker in an archive would point at some other world's
+				// databases; this world gets its own id below.
+				if (rel === MARKER_FILE || rel === MARKER_FILE + ".tmp")
+					continue;
+				var counted = function(chunk) {
+					written += chunk.length;
+					if (progress)
+						progress(written, plan["uncompressedBytes"]);
+				};
+				if (opfsId && storage["isDatabaseFile"](rel)) {
+					usedOpfs = true;
+					var stream = await storage["writer"](opfsId, rel);
+					try {
+						await extractEntry(blob, entry, async function(chunk) {
+							await stream.write(chunk);
+							counted(chunk);
+						});
+						await stream.close();
+					} catch (error) {
+						stream.abort().catch(function() {});
+						throw error;
+					}
+					continue;
+				}
 				var dest = staging + "/" + rel;
 				mkdirs(dest.slice(0, dest.lastIndexOf("/")));
 				var output = FS.open(dest, "w");
 				try {
 					await extractEntry(blob, entry, function(chunk) {
 						FS.write(output, chunk, 0, chunk.length);
-						written += chunk.length;
-						if (progress)
-							progress(written, plan["uncompressedBytes"]);
+						counted(chunk);
 					});
 				} finally {
 					FS.close(output);
 				}
+			}
+			if (usedOpfs) {
+				storage["writeMarker"](staging, opfsId);
+				await storage["refresh"](opfsId);
 			}
 			var mtPath = staging + "/world.mt";
 			FS.writeFile(mtPath, setConfValue(readText(mtPath, MAX_CONF_BYTES), "world_name", name));
@@ -982,6 +1049,8 @@
 			try {
 				removeTree(staging);
 			} catch (_) {}
+			if (usedOpfs)
+				await storage["remove"](opfsId).catch(function() {});
 			throw error;
 		}
 		var result = describe(name);
@@ -997,7 +1066,15 @@
 		var path = requireWorld(name);
 		var world = describe(name);
 		var conf = parseConf(readText(path + "/world.mt", MAX_CONF_BYTES));
-		var files = walk(path, "").filter(function(file) { return file.rel !== LIBRARY_FILE; });
+		var files = worldFiles(path).filter(function(file) { return file.rel !== LIBRARY_FILE; });
+		var id = storageId(path);
+		if (id) {
+			(await storage["files"](id)).forEach(function(file) {
+				files.push({"rel": file["name"], "blob": file["file"], "size": file["size"],
+					"mtime": file["mtime"]});
+			});
+			files.sort(function(a, b) { return a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0; });
+		}
 		var content = [{"type": "game", "name": world["game"]}];
 		Object.keys(conf).sort().forEach(function(key) {
 			var match = /^load_mod_(.+)$/.exec(key);
@@ -1025,8 +1102,10 @@
 			await writer.addBytes(MANIFEST_NAME, encoder.encode(JSON.stringify(manifest, null, "\t") + "\n"));
 			for (var i = 0; i < files.length; i++) {
 				var file = files[i];
-				await writer.add("world/" + file.rel, file.size, function(position, length) {
-					var bytes = readRange(file.path, position, length);
+				await writer.add("world/" + file.rel, file.size, async function(position, length) {
+					var bytes = file.blob ?
+						new Uint8Array(await file.blob.slice(position, position + length).arrayBuffer()) :
+						readRange(file.path, position, length);
 					done += bytes.length;
 					if (progress)
 						progress(done, world["size"]);
@@ -1184,26 +1263,51 @@
 				var name = to ? validateName(to) : uniqueName(from + " copy");
 				var target = requireFree(name);
 				var staging = WORLDS + "/.copy-" + Date.now().toString(36);
-				try {
-					copyTree(source, staging);
-					var mt = staging + "/world.mt";
-					FS.writeFile(mt, setConfValue(readText(mt, MAX_CONF_BYTES), "world_name", name));
-					writeLibraryMeta(staging, {"created": Date.now(), "lastPlayed": null});
-					FS.rename(staging, target);
-				} catch (error) {
+				var sourceId = storageId(source);
+				var copyId = sourceId ? storage["newId"]() : null;
+				return (async function() {
 					try {
-						removeTree(staging);
-					} catch (_) {}
-					throw error;
-				}
-				var result = describe(name);
-				return commit("duplicate", {"world": name, "from": from}).then(function() { return result; });
+						copyTree(source, staging);
+						if (copyId) {
+							// The copy needs its own databases, not a second
+							// marker pointing at the original's.
+							await storage["copy"](sourceId, copyId);
+							storage["writeMarker"](staging, copyId);
+						}
+						var mt = staging + "/world.mt";
+						FS.writeFile(mt, setConfValue(readText(mt, MAX_CONF_BYTES), "world_name", name));
+						writeLibraryMeta(staging, {"created": Date.now(), "lastPlayed": null});
+						if (exists(target))
+							throw LibraryError("A world called " + name + " already exists.", "exists");
+						FS.rename(staging, target);
+					} catch (error) {
+						try {
+							removeTree(staging);
+						} catch (_) {}
+						if (copyId)
+							await storage["remove"](copyId).catch(function() {});
+						throw error;
+					}
+					var result = describe(name);
+					await commit("duplicate", {"world": name, "from": from});
+					return result;
+				})();
 			});
 		},
 		"remove": function(name) {
 			return whenReady().then(function() {
-				removeTree(requireWorld(name));
-				return commit("delete", {"world": name});
+				var path = requireWorld(name);
+				var id = storageId(path);
+				removeTree(path);
+				return commit("delete", {"world": name}).then(function(detail) {
+					if (!id)
+						return detail;
+					// After the directory is gone for good: a failure here only
+					// leaves an unused folder for storage.js to collect later.
+					return storage["remove"](id).catch(function(error) {
+						console.warn("Luanti: could not remove the databases of " + name, error);
+					}).then(function() { return detail; });
+				});
 			});
 		},
 		"markPlayed": function(name) {

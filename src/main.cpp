@@ -801,6 +801,10 @@ static bool init_common(const Settings &cmd_args, int argc, char *argv[])
 
 	init_log_streams(cmd_args);
 
+	// World databases on OPFS. After the logs (the migration reports through
+	// them) and before anything opens a world.
+	porting::emscripten_init_world_storage();
+
 	// Initialize random seed
 	u64 seed;
 	if (!porting::secure_rand_fill_buf(&seed, sizeof(seed))) {

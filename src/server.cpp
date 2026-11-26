@@ -1122,6 +1122,12 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		counter += dtime;
 		static thread_local const float save_interval =
 			g_settings->getFloat("server_map_save_interval");
+#ifdef __EMSCRIPTEN__
+		// The page is being hidden (it may be closed or discarded next):
+		// commit what has changed now rather than at the next interval.
+		if (porting::emscripten_take_world_save_request())
+			counter = save_interval;
+#endif
 		if (counter >= save_interval) {
 			counter = 0.0;
 			EnvAutoLock lock(this);

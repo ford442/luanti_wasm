@@ -57,6 +57,7 @@ python3 util/wasm/test_demo_tools.py          # packaging/deploy tooling, size r
 node --test util/wasm/test_startup.mjs        # SIMD + memory-ceiling probe logic
 python3 util/wasm/test_memory_probe_browser.py --browser "$(command -v google-chrome)"  # 2 GiB refused -> still starts
 python3 util/wasm/test_packages_browser.py --browser "$(command -v google-chrome)"        # streamed packages + offline
+python3 util/wasm/test_storage_browser.py --browser "$(command -v google-chrome)"         # OPFS world DBs: migration, kill mid-save
 python3 util/wasm/test_service_worker_browser.py --browser "$(command -v google-chrome)" # stale-binary regression
 npm ci && npm run proxy:install               # once: lint/typecheck tooling + proxy deps
 npm run lint && npm run typecheck             # ESLint + tsc (checkJs) over client/web and util/wasm
@@ -114,6 +115,7 @@ client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 | `src/network/socket.cpp` | Emscripten `UDPSocket` (loopback + WebSocket proxy) under `#ifdef __EMSCRIPTEN__` |
 | `src/threading/thread.cpp` | No-op `setName()` / `bindToProcessor()` for Emscripten |
 | `client/web/shell.html`, `launcher.js`, `network.js`, `persistence.js` | Page shell, launcher, proxy transport, IDBFS glue |
+| `src/database/sqlite3_opfs_vfs.cpp/h`, `client/web/storage.js` | World databases on OPFS: SQLite VFS on sync access handles (own thread), IDBFS→OPFS migration, backend choice |
 | `client/web/startup.js`, `build-info.js.in` | First `--pre-js`: SIMD check and shared-memory ceiling probe (hands the engine its `WebAssembly.Memory`); CMake generates the build-info half |
 | `client/web/theater.js` / `videotexture.js` | Showcase theater: `<video>` overlay (Tier B) / video-to-texture spike (Tier C) |
 | `.github/workflows/wasm.yml` | WASM CI: build, browser smoke, first-playable gate, Cloudflare Pages deploy |
@@ -122,6 +124,7 @@ client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 
 ### WASM Port Status (see `wasm_porting.md` — authoritative)
 - Compile, FS init, IDBFS persistence, streamed asset packages (no monolithic `luanti.data`): done
+- World databases on OPFS (SQLite VFS, IDBFS kept for small files and as fallback): done; Chrome only measured
 - Main loop: `-sPROXY_TO_PTHREAD=1` + `-sOFFSCREEN_FRAMEBUFFER=1` (not ASYNCIFY / `emscripten_set_main_loop`)
 - Networking: WebSocket proxy (`util/wasm/proxy/`, Node `ws`), not WebRTC
 - Sound (Ogg/Vorbis ports, `ENABLE_SOUND=TRUE` in preset) and input/launcher: implemented

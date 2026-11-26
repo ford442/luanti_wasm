@@ -809,7 +809,9 @@ if(BUILD_CLIENT)
 	endif()
 
 	if(EMSCRIPTEN)
-		set(WASM_PTHREAD_POOL_SIZE "10" CACHE STRING
+		# 11 = the engine's threads plus the OPFS world storage thread
+		# (database/sqlite3_opfs_vfs.cpp), which starts before the server.
+		set(WASM_PTHREAD_POOL_SIZE "11" CACHE STRING
 			"Pre-spawned pthread pool size (integer or JS expression, e.g. navigator.hardwareConcurrency)")
 		# WASM_ENABLE_LTO / WASM_ENABLE_SIMD are applied to every target in
 		# the top-level CMakeLists.txt.
@@ -903,6 +905,7 @@ if(BUILD_CLIENT)
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/startup.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/network.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/persistence.js"
+			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/storage.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/worlds.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/packages.js"
 			"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/client/web/runtime_media.js"
@@ -954,6 +957,7 @@ if(BUILD_CLIENT)
 			${CMAKE_SOURCE_DIR}/client/web/startup.js
 			${CMAKE_SOURCE_DIR}/client/web/network.js
 			${CMAKE_SOURCE_DIR}/client/web/persistence.js
+			${CMAKE_SOURCE_DIR}/client/web/storage.js
 			${CMAKE_SOURCE_DIR}/client/web/worlds.js
 			${CMAKE_SOURCE_DIR}/client/web/packages.js
 			${CMAKE_SOURCE_DIR}/client/web/runtime_media.js

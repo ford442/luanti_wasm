@@ -100,6 +100,55 @@ function memoryFS() {
 	return FS;
 }
 
+// Stand-in for Module.luantiStorage (client/web/storage.js) with OPFS on:
+// storage ids map to {name: bytes}. Same API surface worlds.js uses.
+function memoryOPFS(FS) {
+	const ids = new Map();
+	let counter = 0;
+	const MARKER = "web_opfs_id.txt";
+	const isId = value => /^[0-9a-f]{32}$/.test(value);
+	const files = id => [...(ids.get(id) || new Map())].sort().map(([name, data]) =>
+		({name, size: data.length, mtime: 1000, file: new Blob([data])}));
+	return {
+		ids,
+		ready: () => Promise.resolve(),
+		enabled: () => true,
+		isDatabaseFile: rel => /^[^/]+\.sqlite(-journal)?$/.test(rel),
+		readMarker(path) {
+			try {
+				const text = FS.readFile(path + "/" + MARKER, {encoding: "utf8"}).trim();
+				return isId(text) ? text : null;
+			} catch (_) {
+				return null;
+			}
+		},
+		writeMarker: (path, id) => FS.writeFile(path + "/" + MARKER, id + "\n"),
+		newId: () => (++counter).toString(16).padStart(32, "0"),
+		sizeOf(id) {
+			const list = files(id);
+			return {bytes: list.reduce((sum, file) => sum + file.size, 0), files: list.length};
+		},
+		files: async id => files(id),
+		refresh: async () => {},
+		async remove(id) {
+			ids.delete(id);
+		},
+		async copy(from, to) {
+			ids.set(to, new Map([...(ids.get(from) || new Map())].map(([name, data]) => [name, data.slice()])));
+		},
+		async writer(id, name) {
+			if (!ids.has(id))
+				ids.set(id, new Map());
+			const parts = [];
+			return {
+				write: async chunk => { parts.push(new Uint8Array(chunk)); },
+				close: async () => { ids.get(id).set(name, new Uint8Array(await new Blob(parts).arrayBuffer())); },
+				abort: async () => {}
+			};
+		}
+	};
+}
+
 function harness(options = {}) {
 	const FS = memoryFS();
 	for (const dir of ["/home", "/home/web_user", "/home/web_user/.luanti", "/home/web_user/.luanti/worlds"])
@@ -137,6 +186,8 @@ function harness(options = {}) {
 		},
 		_luanti_engine_version: () => 0
 	};
+	if (options.opfs)
+		Module.luantiStorage = memoryOPFS(FS);
 	const location = {href: "https://play.example/luanti.html", origin: "https://play.example"};
 	const navigator = {storage: options.storage || null};
 	const run = new Function("Module", "FS", "window", "location", "navigator", "fetch",
@@ -148,7 +199,8 @@ function harness(options = {}) {
 				this.detail = init.detail;
 			}
 		});
-	return {FS, Module, window, library: Module.luantiPersistence.library, events, syncs};
+	return {FS, Module, window, library: Module.luantiPersistence.library, events, syncs,
+		opfs: Module.luantiStorage || null};
 }
 
 const WORLDS = "/home/web_user/.luanti/worlds";
@@ -325,6 +377,56 @@ test("export then import round-trips every byte", async () => {
 	assert.equal((await library.importArchive(blob)).name, "Keep (2)");
 	await rejects(library.importArchive(blob, {name: "Keep"}), /already exists/, "exists");
 	assert.ok(![...FS.nodes.keys()].some(key => key.includes("/.import-")));
+});
+
+test("world databases on OPFS travel with export, import, duplicate and delete", async () => {
+	const {FS, library, opfs} = harness({opfs: true});
+	await library.create({name: "Big", game: "devtest"});
+	const map = new Uint8Array(2 * 1024 * 1024).map((_, i) => (i * 31) % 253);
+	const id = "ab".repeat(16);
+	opfs.ids.set(id, new Map([["map.sqlite", map], ["players.sqlite", new Uint8Array([1, 2, 3])]]));
+	opfs.writeMarker(WORLDS + "/Big", id);
+	fillWorld(FS, "Big", {"map.sqlite": undefined, "players.sqlite": undefined});
+	for (const rel of ["map.sqlite", "players.sqlite"])
+		FS.unlink(WORLDS + "/Big/" + rel);
+
+	const listed = (await library.list()).find(world => world.name === "Big");
+	assert.equal(listed.storage, "opfs");
+	assert.ok(listed.size >= map.length + 3, "size counts the OPFS files: " + listed.size);
+
+	const blob = await library.exportWorld("Big");
+	const entries = (await library._zip.readDirectory(blob)).map(entry => entry.name);
+	assert.ok(entries.includes("world/map.sqlite"), entries);
+	assert.ok(entries.includes("world/players.sqlite"), entries);
+	assert.ok(!entries.some(name => name.endsWith("web_opfs_id.txt")), "the marker is never exported");
+
+	// Import writes the databases to a fresh id, never into the JS filesystem.
+	const imported = await library.importArchive(blob, {name: "Big copy"});
+	assert.equal(imported.storage, "opfs");
+	const importedId = opfs.readMarker(WORLDS + "/Big copy");
+	assert.ok(importedId && importedId !== id);
+	assert.deepEqual(opfs.ids.get(importedId).get("map.sqlite"), map);
+	assert.ok(!FS.nodes.has(WORLDS + "/Big copy/map.sqlite"));
+
+	// A marker inside an archive is ignored: it would point at another world.
+	const forged = craftZip([
+		{name: "world/world.mt", data: WORLD_MT},
+		{name: "world/web_opfs_id.txt", data: id + "\n"},
+		{name: "world/map.sqlite", data: "forged"}
+	]);
+	await library.importArchive(forged, {name: "Forged"});
+	const forgedId = opfs.readMarker(WORLDS + "/Forged");
+	assert.notEqual(forgedId, id);
+	assert.deepEqual(opfs.ids.get(id).get("map.sqlite"), map, "the original is untouched");
+
+	// Duplicate copies the databases under a new id; delete removes them.
+	await library.duplicate("Big", "Twin");
+	const twinId = opfs.readMarker(WORLDS + "/Twin");
+	assert.ok(twinId && twinId !== id);
+	assert.deepEqual(opfs.ids.get(twinId).get("map.sqlite"), map);
+	await library.remove("Big");
+	assert.ok(!opfs.ids.has(id));
+	assert.ok(opfs.ids.has(twinId));
 });
 
 test("stored archives and empty files also round-trip", async () => {

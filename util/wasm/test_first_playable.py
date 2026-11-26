@@ -105,13 +105,39 @@ def sync_filesystem(page: Page) -> None:
 	}""")
 
 
-def digest(page: Page, path: str) -> str:
-	return page.evaluate("""async path => {
-		const bytes = FS.readFile(path);
+def read_stored(page: Page, path: str, what: str) -> str | int:
+	"""SHA-256 (what="digest") or size (what="size") of a file in the page's
+	storage. A world database of a world on OPFS (client/web/storage.js) is
+	read from OPFS, everything else from the Emscripten FS."""
+	return page.evaluate("""async ([path, what]) => {
+		const slash = path.lastIndexOf("/");
+		const name = path.slice(slash + 1);
+		const storage = Module.luantiStorage;
+		const id = storage && /\\.sqlite$/.test(name) ? storage.readMarker(path.slice(0, slash)) : null;
+		let bytes;
+		if (id) {
+			const root = await (await navigator.storage.getDirectory())
+				.getDirectoryHandle(storage.opfsRoot);
+			const file = await (await (await root.getDirectoryHandle(id))
+				.getFileHandle(name)).getFile();
+			bytes = new Uint8Array(await file.arrayBuffer());
+		} else {
+			bytes = FS.readFile(path);
+		}
+		if (what === "size")
+			return bytes.length;
 		const hash = await crypto.subtle.digest("SHA-256", bytes);
 		return Array.from(new Uint8Array(hash),
 			part => part.toString(16).padStart(2, "0")).join("");
-	}""", path)
+	}""", [path, what])
+
+
+def digest(page: Page, path: str) -> str:
+	return str(read_stored(page, path, "digest"))
+
+
+def stored_size(page: Page, path: str) -> int:
+	return int(read_stored(page, path, "size"))
 
 
 def grab_pointer(page: Page) -> None:
@@ -220,7 +246,7 @@ def dig_nodes(page: Page, console: list[str]) -> int:
 
 
 def run(page: Page, url: str, console: list[str], screenshots: Path | None,
-		require_place: bool, game: str) -> dict:
+		require_place: bool, game: str, from_idbfs: bool = False) -> dict:
 	world = f"{WORLDS}/{game}"
 	place_item = PLACE_ITEMS.get(game, "mapgen_stone")
 
@@ -229,7 +255,10 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 			page.screenshot(path=str(screenshots / f"{name}.png"))
 
 	# Steps 2-4: the page starts, hydrates, and leaves the browser usable.
-	page.goto(url, wait_until="domcontentloaded", timeout=120_000)
+	# --from-idbfs plays the first session on the old backend (every world
+	# file in IDBFS) and reloads onto OPFS, so the engine has to migrate it.
+	page.goto(url + ("&storage=idbfs" if from_idbfs else ""),
+		wait_until="domcontentloaded", timeout=120_000)
 	wait_for_launcher(page)
 	prelaunch = page.evaluate("""() => ({
 		crossOriginIsolated,
@@ -284,7 +313,12 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 		"players": digest(page, f"{world}/players.sqlite"),
 		"config": digest(page, CONFIG)
 	}
-	page.reload(wait_until="domcontentloaded", timeout=120_000)
+	if from_idbfs:
+		assert page.evaluate("Module.luantiStorage.backend") == "idbfs"
+		assert page.evaluate("p => FS.analyzePath(p).exists", f"{world}/map.sqlite")
+		page.goto(url, wait_until="domcontentloaded", timeout=120_000)
+	else:
+		page.reload(wait_until="domcontentloaded", timeout=120_000)
 	wait_for_launcher(page)
 	after = {
 		"map": digest(page, f"{world}/map.sqlite"),
@@ -295,15 +329,28 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 	page.click("#luanti-play-button")
 	wait_for_world(page, console)
 	shot("04-reloaded-world")
+	migrated = None
+	if from_idbfs and page.evaluate("Module.luantiStorage.backend") == "opfs":
+		# The engine moved the world before opening it: copied, checked with
+		# PRAGMA integrity_check, marker written, the IDBFS copies dropped.
+		migrated = page.evaluate("Module.luantiStorage.migrations")
+		assert {"world": game, "result": "migrated", "error": None} in migrated, migrated
+		assert not page.evaluate("p => FS.analyzePath(p).exists", f"{world}/map.sqlite")
+		assert page.evaluate("p => FS.analyzePath(p).exists", f"{world}/web_opfs_id.txt")
 
 	assert ticks >= 20, f"browser main thread stalled during load: {ticks} ticks"
-	assert dug >= DIG_TARGET, f"dug {dug} of {DIG_TARGET} nodes"
+	# With --from-idbfs the digging happened in the IDBFS session, which in
+	# proxy render mode is the stalled-server case this mode exists to move
+	# away from; it is reported, not gated.
+	if not from_idbfs:
+		assert dug >= DIG_TARGET, f"dug {dug} of {DIG_TARGET} nodes"
 	# Placing is a documented gate failure (#32): the engine never acts on the
 	# right mouse button in the browser client. Keep measuring it so the day it
 	# works is visible, and pass --require-place once it is fixed.
 	if require_place:
 		assert placed >= PLACE_TARGET, f"placed {placed} of {PLACE_TARGET} nodes"
 	return {"ticks": ticks, "placed": placed, "dug": dug, "world": before,
+		"migrated": migrated,
 		"render": (page.evaluate("Module.luantiWebGLInfo") or {}).get("render")}
 
 
@@ -319,6 +366,9 @@ def main() -> int:
 		help="game id to create the world in (default: %(default)s)")
 	parser.add_argument("--render", choices=("proxy", "offscreen", "auto"),
 		help="render mode (?render=); default: the build default")
+	parser.add_argument("--from-idbfs", action="store_true",
+		help="play the first session with ?storage=idbfs, then reload onto OPFS "
+			"and check the engine migrated the world")
 	parser.add_argument("--screenshot-dir")
 	parser.add_argument("--headed", action="store_true")
 	parser.add_argument("--require-place", action="store_true",
@@ -363,7 +413,7 @@ def main() -> int:
 					+ (f"&render={args.render}" if args.render else ""))
 				try:
 					result = run(page, url, console, screenshots,
-						args.require_place, args.game)
+						args.require_place, args.game, args.from_idbfs)
 				except BaseException:
 					print("console tail at failure:\n" + "\n".join(
 						line[:200] for line in console[-40:]))

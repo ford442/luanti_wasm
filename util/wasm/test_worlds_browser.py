@@ -37,7 +37,7 @@ from playwright.sync_api import Page, sync_playwright
 
 from serve import create_server
 from test_first_playable import (CONFIG, DIG_ITEMS, PLACE_ITEMS, WORLDS, digest, dig_nodes,
-	format_page_error, grab_pointer, send_chat, sync_filesystem, wait_for_launcher,
+	format_page_error, grab_pointer, send_chat, stored_size, sync_filesystem, wait_for_launcher,
 	wait_for_world)
 
 GAME = "devtest"
@@ -126,7 +126,7 @@ def run(page: Page, base: str, console: list[str], scratch: Path, engine: str,
 		page.wait_for_timeout(1500)  # let the engine's own periodic save land
 		sync_filesystem(page)
 		before = digest(page, f"{WORLDS}/Alpha/map.sqlite")
-		map_bytes = page.evaluate("p => FS.stat(p).size", f"{WORLDS}/Alpha/map.sqlite")
+		map_bytes = stored_size(page, f"{WORLDS}/Alpha/map.sqlite")
 		assert map_bytes > 64 * 1024, f"map.sqlite has only {map_bytes} bytes; no blocks were saved"
 	else:
 		page.evaluate("""p => {
@@ -147,6 +147,13 @@ def run(page: Page, base: str, console: list[str], scratch: Path, engine: str,
 	if play:
 		assert page.locator('.world-entry[data-world="Alpha"] img').count() == 1, "thumbnail shown"
 	assert digest(page, f"{WORLDS}/Alpha/map.sqlite") == before
+	backend = page.evaluate("Module.luantiStorage ? Module.luantiStorage.backend : 'idbfs'")
+	alpha = page.evaluate("Module.luantiWorlds.get('Alpha')")
+	if play and backend == "opfs":
+		# The engine created the databases, so they went to OPFS, not IDBFS.
+		assert alpha["storage"] == "opfs", alpha
+		assert not page.evaluate("p => FS.analyzePath(p).exists", f"{WORLDS}/Alpha/map.sqlite")
+	assert alpha["size"] >= map_bytes, alpha
 	# Use the Blob download path in every browser; the save picker would
 	# need a real user to answer it.
 	page.evaluate("delete window.showSaveFilePicker")

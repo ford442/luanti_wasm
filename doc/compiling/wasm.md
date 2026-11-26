@@ -171,13 +171,31 @@ python3 util/wasm/memory_import.py build-wasm/bin/luanti.wasm   # the memory the
 To see the fallback by hand, open `luanti.html?maxmem=512`: the page tries a
 512 MiB ceiling first, and `Module.luantiStartup.memory` says what was granted.
 
+World databases (`worlds/<world>/*.sqlite`) live in OPFS where the browser has
+sync access handles, through the SQLite VFS in
+`src/database/sqlite3_opfs_vfs.cpp`; worlds saved by an older build move
+there on first start after an integrity check. `?storage=idbfs` keeps the old
+backend (`Module.luantiStorage` says which one is in use). The first test
+below builds a small probe with the production `persistence.js`/`storage.js`
+and checks migration, the fallback and a browser killed mid-save; the second
+plays a world on IDBFS and checks the real engine migrates it; the third is
+the storage spike that chose this design (wasm_porting.md, "World databases
+on OPFS"):
+
+```bash
+python3 util/wasm/test_storage_browser.py --browser "$(command -v google-chrome)"
+python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)" --from-idbfs
+python3 util/wasm/bench_storage_spike.py --size-mb 500
+```
+
 Before publishing a demo, the build must pass the **First Playable Smoke Test**,
 the integration gate for the browser client. Every step has to pass on both
 **Chrome** and **Firefox** (latest stable).
 
 1. Serve with COOP/COEP headers (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`).
 2. Page loads without JS/WASM errors.
-3. IDBFS sync completes (the launcher reaches storage state `ready`, non-fatal).
+3. IDBFS sync completes (the launcher reaches storage state `ready`, non-fatal);
+   world databases are on OPFS where supported.
 4. Main menu renders and accepts input (no tab freeze).
 5. Create a new singleplayer world in the default game (`luanti_web`, the
    showcase pack; `devtest` is still selectable for engine work).

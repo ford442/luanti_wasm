@@ -93,6 +93,20 @@ struct EmscriptenInputProbe {
 };
 const EmscriptenInputProbe &emscripten_input_probe();
 
+// World databases (worlds/<world>/*.sqlite) on OPFS through the SQLite VFS in
+// database/sqlite3_opfs_vfs.h, when the page chose that backend
+// (Module.luantiStorage, client/web/storage.js). Starts the storage thread,
+// then moves worlds still stored in the JavaScript filesystem across, each
+// only after its copy passes PRAGMA integrity_check. Call once on the
+// application worker before any world is opened.
+void emscripten_init_world_storage();
+
+// Asks the server to save the map and players at its next step instead of
+// waiting for the save interval. The page asks when it is being hidden
+// (client/web/persistence.js); the call is an atomic flag, safe from any
+// thread. emscripten_take_world_save_request() reads and clears it.
+bool emscripten_take_world_save_request();
+
 // Save paths on any engine thread only record committed work. The application
 // worker calls emscripten_service_persistence() while pumping frames and the
 // service forwards eligible generations to the browser main thread.
@@ -179,6 +193,15 @@ inline void emscripten_stop_video_texture()
 
 inline bool emscripten_poll_video_texture_frame(std::string *,
 		const std::uint8_t **, int *, int *)
+{
+	return false;
+}
+
+inline void emscripten_init_world_storage()
+{
+}
+
+inline bool emscripten_take_world_save_request()
 {
 	return false;
 }
