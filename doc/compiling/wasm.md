@@ -240,15 +240,33 @@ proxy URL. It passes when the client completes the proxy handshake
 `TOCLIENT_HELLO` and `World ready; entering game loop`, the server logs the
 player joining, and a chat line typed in the browser appears in the server log.
 
-Two more scenarios run by default (`--scenario join|origin|proxy-down` picks
-one): a proxy that does not allow the page's origin, and an address nothing
-listens on. Each has to produce its own sentence in
-`Module.luantiLauncher.getState().proxy.message` and in the on-page alert, and
-the client must back off instead of redialling the proxy for every datagram.
+Four more scenarios run by default (`--scenario join|origin|proxy-down|target|midjoin`
+picks one). The launcher dials the proxy once before it starts the engine, so a
+proxy that does not allow the page's origin and an address nothing listens on
+both fail *in the launcher form* with the proxy's own sentence, and the engine
+never starts. `target` is a proxy that allows the page but not the game server:
+the engine starts, the proxy closes with `target_denied`, the launcher's alert
+and `Module.luantiLauncher.getState().proxy` carry the reason, the proxy log and
+metrics show the refusal, the player never appears on the server, and the
+transport backs off instead of redialling. `midjoin` kills the proxy after the
+handshake: the launcher reports the lost link, the page stays alive, and the
+transport reconnects when the proxy is back (the Luanti session itself cannot
+resume on a new WebSocket).
 
 The test says nothing about TLS, a remote server, or whether a proxy is safe to
 publish; the operator checklist in `util/wasm/proxy/README.md` still applies.
 CI runs it in the `wasm` workflow with a cached Release server build.
+
+The same launcher contracts run in seconds, without the WASM build, against the
+real proxy and a stand-in engine:
+
+```bash
+python3 util/wasm/test_join_launcher.py --browser "$(command -v google-chrome)"
+```
+
+The deployed proxy has its own test (`--scenario public`, a manual workflow with
+secrets, and `npm run check` from `util/wasm/proxy`); see "Deploying the public
+proxy" and "Public acceptance" in `util/wasm/proxy/README.md`.
 
 ## Frame-time benchmark
 

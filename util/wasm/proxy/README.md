@@ -66,14 +66,134 @@ the public-target mode unless an exact endpoint is explicitly allowlisted.
   client. CI only checks that the file is valid
   (`docker compose --env-file deploy/.env.example -f deploy/docker-compose.yml
   config`); it never starts the stack or asks Caddy for a certificate.
-* **Tests:** `npm test` covers the proxy process and what `client/web/network.js`
-  tells the launcher for each refusal. `python3 util/wasm/test_proxy_join.py`
-  (CI: the `wasm` workflow) joins a native `luantiserver` from the built client
-  through this proxy on 127.0.0.1. That shows the path works; it does not show
-  the proxy is safe to publish.
+* **Tests:** `npm test` covers the proxy process, the deployment checker, and what
+  `client/web/network.js` tells the launcher for each refusal (and its probe and
+  timing statistics). `python3 util/wasm/test_join_launcher.py` runs the real
+  launcher and `network.js` against this proxy in Chrome with a stand-in engine
+  (seconds, no build). `python3 util/wasm/test_proxy_join.py` (CI: the `wasm`
+  workflow) joins a native `luantiserver` from the built client through this
+  proxy on 127.0.0.1: the join, a refused origin, a dead proxy, a refused
+  target and a proxy lost mid-join. That shows the path works; it does not show
+  the proxy is safe to publish. "Public acceptance" below is the deployed version.
 * **Still needed on a public host:** operating-system egress controls, an
   abuse-response process, and a decision on whether to publish the proxy
   address at all. The proxy sees all unencrypted Luanti traffic.
+
+## Deploying the public proxy
+
+One region, close to the demo host and its players. The browser-to-proxy leg is
+the TCP leg that can stall behind a lost segment; the proxy-to-server leg is
+plain UDP between data centres, so the proxy belongs next to the players.
+`LUANTI_PROXY_ALLOWED_TARGETS` is an **allowlist, not an open relay**: nothing
+outside it is forwarded, and `check.mjs` (below) asserts that from outside.
+
+1. Point an A/AAAA record for the proxy's hostname at the host and open TCP 80
+   and 443 (and UDP 443 for Caddy's HTTP/3).
+2. `cd util/wasm/proxy/deploy && cp .env.example .env`, then set
+   * `PROXY_DOMAIN` to that hostname;
+   * `PROXY_ALLOWED_ORIGINS` to the demo's origin and nothing else (`https://demo.example.org`).
+     Never `*`: that makes the proxy a relay for every website;
+   * `PROXY_ALLOWED_TARGETS` to the consenting server's exact IPv4 `address:port`.
+     The page may use a hostname; the proxy resolves it and checks the result
+     against this list. Leave `PROXY_ALLOW_PUBLIC=0`;
+   * `PROXY_METRICS_TOKEN` to `openssl rand -hex 24`.
+3. `docker compose up -d --build`. Caddy obtains the certificate; then
+   `curl https://<PROXY_DOMAIN>/healthz` answers `{"status":"ok",...}`.
+4. From **another machine**, check the deployment from outside:
+
+   ```bash
+   cd util/wasm/proxy && npm ci
+   npm run check -- wss://proxy.example.org/ --origin https://demo.example.org
+   ```
+
+   It verifies the certificate and the upgrade (`tls`), the handshake for the
+   allowed origin (`handshake`), PING/PONG round trips (`rtt`), that an unknown
+   origin is closed with `origin: ...` (`origin`), that a datagram for
+   `192.0.2.1:30000` (a documentation address; change it with `--denied`) is
+   closed with `target_denied: ...` before any UDP leaves (`target`), and that
+   `/metrics` is not public (`metrics`). It exits 1 if any check fails, and it
+   never sends traffic to a target that *is* allowed.
+5. Publish the region in the client: set the repository variable
+   `WASM_PUBLIC_PROXY_URL` (and optionally `_LABEL`, `_ID`, `_EXPIRES`) so the
+   `wasm` workflow builds with it, or write the file yourself with
+   `util/wasm/write_launcher_config.py` (see `doc/compiling/wasm-embedding.md`,
+   "Hosted proxy regions").
+6. Do the "Still needed on a public host" items above: egress controls (allow
+   UDP only to the allowed endpoints), an abuse-response process, and a decision
+   to publish the address at all.
+
+To let players reach any server in the engine's public list instead of one
+consenting server, set `PROXY_ALLOW_PUBLIC=1` and `PROXY_SERVER_LIST_URL`
+instead of listing a target. That is a wider exposure (the proxy then
+forwards UDP to every listed server) and a decision for the operator, not the
+default.
+
+## Public acceptance
+
+`python3 util/wasm/test_proxy_join.py --scenario public` runs the **deployed**
+demo page against the **deployed** proxy and the consenting server. It is never
+part of the default `all` and has its own manual workflow,
+`.github/workflows/wasm-public-proxy.yml` (variables and secrets are listed at
+the top of that file). Locally:
+
+```bash
+LUANTI_PUBLIC_PAGE_URL=https://demo.example.org/releases/<version>/luanti.html \
+LUANTI_PUBLIC_SERVER=play.example.org:30000 \
+LUANTI_PUBLIC_SERVER_LOG_COMMAND="ssh user@host 'tail -n 300 /var/log/luanti/debug.txt'" \
+python3 util/wasm/test_proxy_join.py --scenario public --report public.json
+```
+
+| Scenario | Passes when |
+|---|---|
+| `public-join` | A fresh page joins the server over `wss://` using the launcher's hosted region (no custom URL), the engine reaches the world, and **the server's own log shows the player** (`<name> [addr] joins game`) and a chat line. It then stays joined (`LUANTI_PUBLIC_HOLD_SECONDS`, default 90) and records the join timeline, RTT and stall counters (next section) |
+| `public-denied` | Joining a target that is not on the allowlist (default `192.0.2.1:30000`) fails in the launcher with `target_denied` and the proxy's sentence; with `LUANTI_PUBLIC_PROXY_LOG_COMMAND` set, the proxy log shows the refusal too |
+| `public-origin` | A page claiming another origin is closed by the deployed proxy with code 1008 and `origin: ...`: the allowlist is not an open relay |
+
+`LUANTI_PUBLIC_SERVER_LOG_COMMAND` is a shell command that prints the
+server's recent log (an `ssh ... tail`, an authenticated `curl`). It may hold a
+token, so it belongs in a CI secret: the test never prints it, and only log
+lines naming that run's randomly named player are ever shown, with addresses
+and the server's player list blanked. Without it `public-join` refuses to run
+(`--no-server-log` skips the proof that the player is visible on the server,
+and says so in the result). The test does not widen the proxy to run: the
+refusals above are assertions.
+
+## Measuring the TCP hop
+
+A WebSocket is TCP, so a lost segment on the browser-to-proxy leg holds back
+every datagram behind it (head-of-line blocking), which UDP would not. How much
+that costs on a real path is the number that decides whether WebTransport is
+worth building later. It is not a reason to block this deploy.
+
+`Module.luantiNetwork.getTimings()` (client/web/network.js) records, relative
+to the moment the player pressed Join (the probe included):
+
+| Field | Meaning |
+|---|---|
+| `probeMs` | Dial, TLS and `PROXY OK 1` of the launcher's pre-join probe |
+| `proxyOpenMs`, `proxyReadyMs` | The engine's own WebSocket opening, and its handshake |
+| `firstSendMs`, `firstReceiveMs` | The engine's first datagram out, and the first one back from the server |
+| `firstPlayerPosMs` | The first `TOSERVER_PLAYERPOS` the engine sent: the player is in the world |
+| `rtt` | PING/PONG over the link, one sample every five seconds: `samples`, `minMs`, `meanMs`, `maxMs` |
+| `gapsOver100Ms`, `gapsOver250Ms`, `gapsOver1000Ms`, `longestGapMs` | Pauses between datagrams from the server |
+| `stalls`, `longestStallMs` | A pause of 250 ms or more that ended with three datagrams arriving within 20 ms: what a filled TCP hole looks like |
+
+The gap counters also count a server that was simply quiet, so `stalls` is the
+better signal and still a heuristic. Corroborate it on the proxy host: `ss -ti`
+for the browser's connection (in the network namespace that owns port 443) shows
+`retrans` and `rtt` for the TCP leg itself.
+
+To take one measurement: run `public-join` (the `wasm-public-proxy` workflow
+puts `timings` and `network` in its run summary and in `results.json`), note
+where the client, the proxy and the server are, and add a row.
+
+| Date | Client → proxy → server | Probe | Ready | First recv | First position | RTT min / mean / max | Stalls (gaps > 250 ms) | Notes |
+|---|---|---:|---:|---:|---:|---|---|---|
+| — | **Not yet measured.** It needs the deployed proxy and a consenting server, which this repository does not have yet | | | | | | | |
+
+The loopback runs in CI (`test_join_launcher.py`, `test_proxy_join.py`) fill the
+same fields on 127.0.0.1. They prove the instrument works; they say nothing
+about the public hop, and none of their values belong in the table.
 
 ## Close reasons
 

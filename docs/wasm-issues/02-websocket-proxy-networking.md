@@ -4,8 +4,10 @@
 
 **Milestone:** Browser Client MVP (v0.1)
 
-**Status:** Transport and self-hostable proxy implemented; public-server browser
-acceptance remains outstanding.
+**Status:** Transport, self-hostable proxy, deployment recipe, deployment checker
+and the public acceptance test are implemented. Deploying a TLS proxy and running
+that acceptance against a consenting public server remains outstanding: it needs
+a host and a server this repository does not have.
 
 ## Implemented MVP
 
@@ -31,8 +33,37 @@ acceptance remains outstanding.
 - [x] A refused connection is readable in the page: the proxy refuses with a
   tagged WebSocket close frame instead of an HTTP status, which a browser cannot
   see (`util/wasm/proxy/README.md`, "Close reasons").
-- [ ] Run the complete generated Luanti client against a deployed `wss://`
-  proxy and a public Luanti server, then record latency and play acceptance.
+- [x] The launcher shows the chosen region and checks the proxy before the engine
+  starts (`Module.luantiNetwork.probe`): a proxy that is down, refuses the page or
+  is full fails in the launcher form with the proxy's own reason. A missing or
+  expired hosted-proxy config disables the server fields and says why. Hosted
+  regions come from a build-time `launcher-config.js`
+  (`util/wasm/write_launcher_config.py`, `-DLUANTI_WEB_LAUNCHER_CONFIG`).
+- [x] Browser acceptance beyond the happy path: `test_proxy_join.py` also covers a
+  refused target (`target_denied` in the launcher, the proxy log and metrics), a
+  refused origin, a dead proxy and a proxy lost mid-join; `test_join_launcher.py`
+  runs the same contracts against the real proxy in seconds, with a stand-in
+  engine. `test_first_playable.py` asserts singleplayer opens no WebSocket.
+- [x] Fixed a redial loop found by the refused-target test: the retry delay was
+  reset by a successful handshake, and a refused target is refused *after* the
+  handshake, so the browser dialled once a second forever. It now starts over only
+  for a link that stayed up.
+- [x] Join timing and TCP-hop statistics (`Module.luantiNetwork.getTimings()`),
+  reported by the acceptance test; procedure in `util/wasm/proxy/README.md`,
+  "Measuring the TCP hop".
+- [x] `util/wasm/proxy/check.mjs` (`npm run check`) verifies a deployed proxy from
+  outside: certificate, handshake, RTT, an unknown origin refused, an off-list
+  target refused, `/metrics` not public.
+- [x] `test_proxy_join.py --scenario public` and the manual workflow
+  `.github/workflows/wasm-public-proxy.yml` join a consenting server from the
+  deployed page and require the player in the server's log. It asserts the
+  refusals; it does not widen the proxy.
+- [ ] Deploy the proxy with TLS in one region near the demo host, allowlisted to the
+  consenting server's exact endpoint, and record its URL in the repository
+  variables (`WASM_PUBLIC_PROXY_*`) and `doc/compiling/wasm-embedding.md`.
+- [ ] Run the complete generated Luanti client against that deployed `wss://`
+  proxy and a public Luanti server (`public-join`), then record the join-to-first-
+  position time and any head-of-line stalls in the proxy README's table.
 
 ## Architecture
 
@@ -157,14 +188,16 @@ echo smoke:
 
 ```bash
 python3 util/wasm/test_network_browser.py
+python3 util/wasm/test_join_launcher.py  # real launcher + proxy, stand-in engine: no WASM build
 python3 util/wasm/test_client_browser.py --build build-wasm
 python3 util/wasm/test_proxy_join.py     # needs bin/luantiserver; see doc/compiling/wasm.md
 ```
 
 Final demo acceptance still requires a TLS-deployed proxy and a consenting
-public test server. Verify direct hostname connection, walking, chat, reconnect,
-at least ten minutes of play, and compare in-game latency with the proxy RTT
-shown by the shell.
+public test server. The automated part is `test_proxy_join.py --scenario public`
+(see `util/wasm/proxy/README.md`, "Public acceptance"); direct hostname
+connection, walking, chat, reconnect and at least ten minutes of play stay a
+manual check, comparing in-game latency with the proxy RTT shown by the shell.
 
 ## Non-Goals
 

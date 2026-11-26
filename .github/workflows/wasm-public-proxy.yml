@@ -1,0 +1,127 @@
+name: wasm-public-proxy
+
+# Acceptance of the DEPLOYED multiplayer path: a fresh page on the public demo,
+# the deployed wss:// proxy, and a consenting public Luanti server. It is manual
+# on purpose: it joins a real server, and it needs a deployment and secrets that
+# this repository does not carry. The local equivalent (everything on
+# 127.0.0.1) runs in wasm.yml on every change.
+#
+# Set up once (Settings > Secrets and variables > Actions):
+#
+#   variables   WASM_PUBLIC_PAGE_URL     https URL of the deployed luanti.html
+#               WASM_PUBLIC_PROXY_URL    the proxy's wss:// URL
+#               WASM_PUBLIC_SERVER       host:port of the consenting server
+#               WASM_PUBLIC_REGION       (optional) launcher region id, default: the page's
+#               WASM_PUBLIC_DENIED_TARGET (optional) host:port that must be refused,
+#                                         default 192.0.2.1:30000
+#   secrets     WASM_PUBLIC_SERVER_LOG_COMMAND  prints the server's recent log, e.g.
+#                                         ssh -i ... user@host 'tail -n 300 /var/log/luanti/debug.txt'
+#                                         or an authenticated curl. Without it the job
+#                                         cannot prove the player is visible on the server.
+#               WASM_PUBLIC_PROXY_LOG_COMMAND   (optional) prints the proxy's recent JSON log,
+#                                         so the refusals are checked in the log too.
+#
+# The commands may hold a token; they are never echoed, and only log lines that
+# name this run's player are ever printed (addresses and the player list blanked).
+# Nothing here widens the proxy: the job asserts that an unknown origin and an
+# address outside the allowlist are REFUSED.
+
+on:
+  workflow_dispatch:
+    inputs:
+      hold_seconds:
+        description: Seconds to stay joined before measuring RTT and stalls
+        default: '90'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-public-proxy
+  cancel-in-progress: false
+
+env:
+  PLAYWRIGHT_VERSION: '1.59.0'
+
+jobs:
+  public-proxy:
+    name: Deployed proxy and public server
+    if: vars.WASM_PUBLIC_PAGE_URL != '' && vars.WASM_PUBLIC_PROXY_URL != '' && vars.WASM_PUBLIC_SERVER != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out Luanti
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: util/wasm/proxy/package-lock.json
+
+      - name: Install the proxy's dependencies
+        run: npm ci --prefix util/wasm/proxy
+
+      - name: Install Playwright
+        run: python3 -m pip install --user "playwright==$PLAYWRIGHT_VERSION"
+
+      # From outside, no browser, no game server: the certificate verifies, the
+      # allowed origin gets PROXY OK, an unknown origin and an off-list target
+      # are refused, and /metrics is not public.
+      - name: Check the deployed proxy
+        env:
+          PAGE_URL: ${{ vars.WASM_PUBLIC_PAGE_URL }}
+          PROXY_URL: ${{ vars.WASM_PUBLIC_PROXY_URL }}
+          DENIED_TARGET: ${{ vars.WASM_PUBLIC_DENIED_TARGET }}
+        run: |
+          origin=$(python3 -c 'import sys, urllib.parse as u; p = u.urlsplit(sys.argv[1]); print(f"{p.scheme}://{p.netloc}")' "$PAGE_URL")
+          node util/wasm/proxy/check.mjs "$PROXY_URL" --origin "$origin" \
+            --denied "${DENIED_TARGET:-192.0.2.1:30000}"
+
+      - name: Join the public server from the deployed page
+        env:
+          LUANTI_PUBLIC_PAGE_URL: ${{ vars.WASM_PUBLIC_PAGE_URL }}
+          LUANTI_PUBLIC_SERVER: ${{ vars.WASM_PUBLIC_SERVER }}
+          LUANTI_PUBLIC_REGION: ${{ vars.WASM_PUBLIC_REGION }}
+          LUANTI_PUBLIC_DENIED_TARGET: ${{ vars.WASM_PUBLIC_DENIED_TARGET }}
+          LUANTI_PUBLIC_HOLD_SECONDS: ${{ inputs.hold_seconds }}
+          LUANTI_PUBLIC_SERVER_LOG_COMMAND: ${{ secrets.WASM_PUBLIC_SERVER_LOG_COMMAND }}
+          LUANTI_PUBLIC_PROXY_LOG_COMMAND: ${{ secrets.WASM_PUBLIC_PROXY_LOG_COMMAND }}
+        run: |
+          python3 util/wasm/test_proxy_join.py --scenario public \
+            --browser "$(command -v google-chrome)" \
+            --screenshot-dir wasm-public-proxy \
+            --report wasm-public-proxy/results.json
+
+      - name: Summarize the measurement
+        if: always()
+        run: |
+          if [[ -f wasm-public-proxy/results.json ]]; then
+            {
+              echo '### Public proxy acceptance'
+              echo '```json'
+              python3 - <<'EOF'
+          import json
+          results = json.load(open("wasm-public-proxy/results.json"))
+          join = results.get("public-join", {})
+          summary = {
+              "scenarios": sorted(results),
+              "player_in_server_log": join.get("player_in_server_log"),
+              "timings": join.get("timings"),
+              "network": join.get("network"),
+          }
+          print(json.dumps(summary, indent=2))
+          EOF
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload screenshots and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: luanti-wasm-public-proxy-${{ github.run_id }}
+          path: wasm-public-proxy/
+          if-no-files-found: ignore
+          retention-days: 30

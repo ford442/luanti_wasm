@@ -13,6 +13,7 @@ import re
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 from build_packages import (
 	PackageError, build_all, build_package, collect_media, load_config, read_index,
@@ -22,6 +23,7 @@ import memory_import
 import size_report
 from package_demo import LAUNCHER_SCRIPTS, REQUIRED_OUTPUTS, package_demo
 from serve import create_server
+import write_launcher_config
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -376,6 +378,87 @@ class DemoToolsTest(unittest.TestCase):
 		self.assertEqual(positions, sorted(positions), "doc/compiling/wasm-embedding.md lists a different order")
 		# And the page-side contract (the only thing C++ may reach) is checked
 		# by util/wasm/check_module_contract.mjs, run by `npm run typecheck`.
+
+	def test_repository_launcher_config_names_no_proxy(self) -> None:
+		# No proxy address belongs in the client source: a deployment supplies its own.
+		text = (REPO / "client/web/launcher-config.js").read_text(encoding="utf-8")
+		code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//"))
+		self.assertIn('defaultProxy: ""', code)
+		self.assertRegex(code, r"proxies:\s*\[\s*\]")
+		self.assertNotIn("wss://", code)
+
+	def test_deployment_launcher_config_reaches_the_release_through_the_build(self) -> None:
+		# The file is a shell file the service worker verifies by size and hash,
+		# so it has to come from the build, not be rewritten after it.
+		cmake = (REPO / "src/CMakeLists.txt").read_text(encoding="utf-8")
+		self.assertIn("LUANTI_WEB_LAUNCHER_CONFIG", cmake)
+		self.assertRegex(cmake, r"copy_if_different\s+\$\{LUANTI_WEB_LAUNCHER_CONFIG\}\s+"
+			r"\$<TARGET_FILE_DIR:\$\{PROJECT_NAME\}>/launcher-config\.js")
+		self.assertNotRegex(cmake, r"\$\{CMAKE_SOURCE_DIR\}/client/web/launcher-config\.js\s*\n\s*\$\{CMAKE_SOURCE_DIR\}/client/web/theater")
+
+	@staticmethod
+	def read_generated_config(path: Path) -> dict:
+		text = path.read_text(encoding="utf-8")
+		return json.loads(text.split("window.LUANTI_WEB_CONFIG = ", 1)[1].rsplit(";", 1)[0])
+
+	def test_launcher_config_generator_writes_regions(self) -> None:
+		with tempfile.TemporaryDirectory() as directory:
+			output = Path(directory) / "nested/launcher-config.js"
+			self.assertEqual(write_launcher_config.main([
+				"--output", str(output),
+				"--proxy", "eu=Europe=wss://eu.example.org/",
+				"--proxy", "na=North America=wss://na.example.org:8443/=2027-06-30",
+				"--default", "eu"]), 0)
+			config = self.read_generated_config(output)
+			self.assertEqual(config["defaultProxy"], "wss://eu.example.org/")
+			self.assertEqual(config["serverListUrl"], write_launcher_config.DEFAULT_SERVER_LIST)
+			self.assertEqual(config["proxies"], [
+				{"id": "eu", "label": "Europe", "url": "wss://eu.example.org/"},
+				{"id": "na", "label": "North America", "url": "wss://na.example.org:8443/",
+					"expires": "2027-06-30"}])
+			self.assertTrue(output.read_text(encoding="utf-8").startswith("// Luanti\n"))
+
+	def test_launcher_config_generator_reads_the_environment(self) -> None:
+		with tempfile.TemporaryDirectory() as directory:
+			output = Path(directory) / "launcher-config.js"
+			environment = {"LUANTI_WEB_PROXY_URL": "wss://proxy.example.org/",
+				"LUANTI_WEB_PROXY_LABEL": "Europe", "LUANTI_WEB_PROXY_EXPIRES": "2027-01-01T00:00:00Z"}
+			with mock.patch.dict("os.environ", environment, clear=False):
+				self.assertEqual(write_launcher_config.main(["--output", str(output), "--from-env"]), 0)
+			config = self.read_generated_config(output)
+			self.assertEqual(config["defaultProxy"], "wss://proxy.example.org/")
+			self.assertEqual(config["proxies"], [{"id": "default", "label": "Europe",
+				"url": "wss://proxy.example.org/", "expires": "2027-01-01T00:00:00Z"}])
+			# No URL in the environment: a valid config with no hosted proxy.
+			with mock.patch.dict("os.environ", {"LUANTI_WEB_PROXY_URL": ""}, clear=False):
+				self.assertEqual(write_launcher_config.main(["--output", str(output), "--from-env"]), 0)
+			config = self.read_generated_config(output)
+			self.assertEqual((config["defaultProxy"], config["proxies"]), ("", []))
+
+	def test_launcher_config_generator_refuses_unsafe_or_malformed_input(self) -> None:
+		parse = write_launcher_config.parse_proxy
+		for spec in (
+				"eu=Europe=ws://eu.example.org/",                 # an HTTPS page cannot open ws://
+				"eu=Europe=https://eu.example.org/",
+				"eu=Europe=wss://user:secret@eu.example.org/",   # no credentials in a public file
+				"eu=Europe=wss://eu.example.org/?token=abc",
+				"eu=Europe=wss://eu.example.org/#x",
+				"EU=Europe=wss://eu.example.org/",               # id: lowercase only
+				"eu=wss://eu.example.org/",                      # missing label
+				"eu=Europe=wss://eu.example.org/=next week",     # expiry must parse
+				"eu==wss://eu.example.org/"):
+			with self.assertRaises(write_launcher_config.ConfigError, msg=spec):
+				parse(spec)
+		self.assertEqual(parse("lo=Local=ws://127.0.0.1:8080/", allow_insecure=True)["url"],
+			"ws://127.0.0.1:8080/")
+		with self.assertRaises(write_launcher_config.ConfigError):
+			write_launcher_config.render([], "eu", "")                      # default not listed
+		duplicate = [parse("eu=A=wss://a.example.org/"), parse("eu=B=wss://b.example.org/")]
+		with self.assertRaises(write_launcher_config.ConfigError):
+			write_launcher_config.render(duplicate, "", "")
+		with tempfile.TemporaryDirectory() as directory:
+			self.assertEqual(write_launcher_config.main([
+				"--output", str(Path(directory) / "x.js"), "--proxy", "bad"]), 2)
 
 	def test_service_worker_stamping(self) -> None:
 		source = (REPO / "client/web/service-worker.js").read_text()
