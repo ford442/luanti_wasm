@@ -48,6 +48,7 @@ interface LuantiLauncherUi {
 	customProxyRow: HTMLElement;
 	proxyUrl: HTMLInputElement;
 	proxyNotice: HTMLElement;
+	proxySummary: HTMLElement;
 	proxyAlert: HTMLElement;
 	proxyAlertText: HTMLElement;
 	proxyAlertReload: HTMLButtonElement;
@@ -127,6 +128,14 @@ interface LuantiLauncherLibrary {
 interface LuantiLauncherConnect {
 	/** Apply the chosen proxy to `Module.luantiNetwork`; throws a player-facing Error. */
 	validateProxy(remote: boolean): string;
+	/**
+	 * Start the join clock and dial the chosen proxy once, before the engine is
+	 * started. Resolves when a join can go ahead; rejects with a player-facing
+	 * Error carrying the proxy's own reason.
+	 */
+	preflight(): Promise<LuantiNetworkProbeResult | null>;
+	/** Why joining a server is not possible with the current choices, or "". */
+	blocker(): string;
 }
 
 /** Pointer, touch, audio and canvas-size handling (launcher-input.js). */

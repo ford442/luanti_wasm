@@ -114,16 +114,9 @@
 			percent, "assets");
 	}
 
-	ui.form.addEventListener("submit", function(event) {
-		event.preventDefault();
-		if (state.started || state.launchInFlight)
-			return;
-		input.unlockAudio();
+	/** @param {LuantiSession} session */
+	function begin(session) {
 		try {
-			if (!state.runtimeReady || typeof Module["callMain"] !== "function")
-				throw new Error("The engine is still preparing. Try again in a moment.");
-			var session = validatedSession();
-			connect.validateProxy(session.mode === "remote");
 			state.currentSession = session;
 			shell.safeStorageSet("luanti.playerName", session.name);
 			shell.safeStorageSet("luanti.language", session.language);
@@ -176,5 +169,45 @@
 		} catch (error) {
 			abortLaunch(error);
 		}
+	}
+
+	ui.form.addEventListener("submit", function(event) {
+		event.preventDefault();
+		if (state.started || state.launchInFlight)
+			return;
+		input.unlockAudio();
+		/** @type {LuantiSession} */
+		var session;
+		try {
+			if (!state.runtimeReady || typeof Module["callMain"] !== "function")
+				throw new Error("The engine is still preparing. Try again in a moment.");
+			// With no proxy the server fields are disabled and empty, so the missing
+			// proxy is the reason to give, not the missing address.
+			var blocked = state.activeMode === "remote" ? connect.blocker() : "";
+			if (blocked)
+				throw new Error(blocked);
+			session = validatedSession();
+			connect.validateProxy(session.mode === "remote");
+		} catch (error) {
+			abortLaunch(error);
+			return;
+		}
+		if (session.mode !== "remote") {
+			begin(session);
+			return;
+		}
+		// A remote join first checks that the proxy will take the page. The
+		// launcher stays on screen meanwhile; a failure ends here with the
+		// proxy's own reason (see launcher-connect.js, preflight).
+		shell.showError("");
+		state.launchInFlight = true;
+		ui.play.disabled = true;
+		ui.playLabel.textContent = "Checking proxy…";
+		connect.preflight().then(function() {
+			begin(session);
+		}, function(/** @type {any} */ error) {
+			ui.playLabel.textContent = "Join server";
+			abortLaunch(error);
+		});
 	});
 })();

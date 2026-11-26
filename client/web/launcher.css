@@ -87,6 +87,9 @@ input::placeholder { color: #728172; }
 .server-entry:hover { background: rgba(166,216,95,.08); }
 .server-entry small { color: var(--muted); white-space: nowrap; }
 .server-address { grid-column: 1 / -1; color: #829181; font-size: .7rem; }
+.proxy-summary { color: var(--muted); }
+.proxy-summary[data-state="blocked"] { padding: .55rem .7rem; border-radius: 8px; background: rgba(111, 36, 31, .45); color: var(--danger); }
+input:disabled, .text-button:disabled { opacity: .5; cursor: not-allowed; }
 .inline-status { margin-top: .6rem; color: var(--muted); font-size: .75rem; }
 .inline-status[data-state="ready"] { color: var(--leaf); }
 .form-error { margin: .75rem 0; padding: .65rem .75rem; border-radius: 8px; background: rgba(111, 36, 31, .55); color: var(--danger); font-size: .8rem; white-space: pre-wrap; }
