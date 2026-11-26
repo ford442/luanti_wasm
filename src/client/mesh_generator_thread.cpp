@@ -479,9 +479,9 @@ int MeshUpdateManager::processOneUnlocked()
 	r.p = q->p;
 	r.mesh = std::unique_ptr<MapBlockMesh>(mesh_new);
 	r.solid_sides = get_solid_sides(q->data);
-	r.ack_list = std::move(q->ack_list);
-	r.urgent = q->urgent;
 	r.map_blocks = std::move(q->map_blocks);
+	r.epoch = q->epoch;
+	r.urgent = q->urgent;
 
 	putResult(std::move(r));
 	m_queue_in.done(q->p);

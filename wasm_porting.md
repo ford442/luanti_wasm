@@ -1277,17 +1277,22 @@ WebGL1 (`?webgl=1|2` forces one version). Attributes: `powerPreference:
 high-performance`, `preserveDrawingBuffer: false`, `antialias: false` (the
 offscreen back buffer is what is rendered to). The context actually created is
 logged and exposed as `Module.luantiWebGLInfo`. `desynchronized` is not set
-(not available in the pinned Emscripten 6.0.3 attribute struct).
+(not available in the pinned Emscripten 6.0.3 attribute struct). Until
+2026-11-26 the offscreen mode reported `alpha`, `depth` and `stencil` as
+false whatever the context had: the attribute struct's `EM_BOOL`s are one
+byte in 6.0.3, and 32-bit stores at their addresses all landed on one word.
 
 On `webglcontextlost` the engine pauses presenting and the launcher shows an
-overlay, flushes IndexedDB, and offers a reload. In proxy mode
-`webglcontextrestored` then rebuilds the GL resources in place (next
-section) and the game resumes without a reload.
+overlay, flushes IndexedDB, and offers a reload. The engine then rebuilds
+its GL resources in place (next section) and the game resumes without a
+reload: in proxy mode once `webglcontextrestored` arrives, in offscreen mode
+on a new context that takes the lost one's place.
 
 ### Context restore
 
-Proxy mode only. Offscreen, nothing ever restores the context (see the end of
-"Render thread"). While the context is lost, `CIrrDeviceSDL::run()` checks
+Both render modes; they differ only in where the context comes back from.
+
+Proxy mode: while the context is lost, `CIrrDeviceSDL::run()` checks
 at the start of each frame whether the context is alive again
 (`emscripten_is_webgl_context_lost()`, or the restored event). As soon as it
 is, it runs `restoreAfterContextLoss()` on the engine thread, before anything
@@ -1295,14 +1300,34 @@ is drawn. Waiting only for the event is not enough: the event reaches the
 engine thread while `SwapWindow()` idles, after one frame has already been
 drawn on the revived context with dead objects. That produced about 180 WebGL
 `INVALID_OPERATION` warnings, after which Chrome stops reporting errors for
-the context. The rebuild has three steps:
+the context.
 
-1. Main thread (`restoreEmscriptenContextState()`): Emscripten's own state for
-   the context was created on the lost one. It re-enables the extensions
+Offscreen mode: the lost context can never be restored. The worker that owns
+it never returns to its event loop, so its `webglcontextlost` event is never
+dispatched and nothing calls the `preventDefault()` that would allow a
+restore. `SwapWindow()` sees the loss through `isContextLost()` instead.
+`restoreAfterContextLoss()` then creates a new context of the same WebGL
+version and attributes, on a new `OffscreenCanvas` of the same size, and puts
+it in the lost one's place inside the same Emscripten context record
+(`luanti_offscreen_replace_context()`). The handle the engine holds, and
+every GL call routed through it, stays valid. The first attempt waits 500 ms
+after the loss; if no context can be created yet (a GPU process that is
+still resetting), it retries every second and gives up after 30 s, which
+leaves the overlay with its reload button. One trap: without
+`-sOFFSCREENCANVAS_SUPPORT`, `emscripten_is_webgl_context_lost()` is always
+proxied to the main thread, which has no record of the worker's context and
+so always answers "lost"; offscreen mode asks the context on its own thread
+(`luanti_offscreen_context_lost()`).
+
+The rebuild that follows is the same in both modes and has three steps:
+
+1. Emscripten's own state for the context (`luanti_rebuild_emscripten_gl_state()`,
+   on the thread that owns the context: the main thread in proxy mode, the
+   engine worker in offscreen mode) was created on the lost one. It re-enables the extensions
    (`initExtensionsDone = false; GL.initExtensions()`), recreates the
-   `FULL_ES2` temporary buffers (`GL.generateTempBuffers`), and recreates the
-   `OFFSCREEN_FRAMEBUFFER` FBO, its colour and depth targets and the blit
-   program (`GL.createOffscreenFramebuffer`).
+   `FULL_ES2` temporary buffers (`GL.generateTempBuffers`), and, in proxy
+   mode, recreates the `OFFSCREEN_FRAMEBUFFER` FBO, its colour and depth
+   targets and the blit program (`GL.createOffscreenFramebuffer`).
 2. `COpenGL3DriverBase::recreateAfterContextLoss()`: a new cache handler and
    the initial GL state. Every GL name is forgotten, not deleted, and created
    again inside the same object, so the `ITexture*` pointers and material IDs
@@ -1347,9 +1372,26 @@ behaviour. `?glrestore=fail` makes every rebuild fail, which is how
 `test_webgl_context.py --scenario lose` tests that path. `--scenario restore`
 loses and restores the context, then checks for no reload, a drawn world, no
 stale-object WebGL warnings, a dig the server logs, and the saved world. On
-SwiftShader (2026-11-19) it passed: 170 → 195 colours, 2 digs. The dig is the
-flaky part in proxy mode, because the internal server starves (see "Frame-time
-baseline"); a control run with no context loss also once saw no dig.
+SwiftShader (2026-11-19, proxy mode) it passed: 170 → 195 colours, 2 digs.
+The dig is the flaky part in proxy mode, because the internal server starves
+(see "Frame-time baseline"); a control run with no context loss also once saw
+no dig. Both scenarios now run in offscreen mode too, where the engine
+replaces the context. On SwiftShader (2026-11-26, after the OPFS change):
+offscreen 121 → 139 colours, 3 digs; proxy 136 → 153 colours, 7 digs; no
+stale-object warnings in either; `--scenario lose` with `?glrestore=fail`
+keeps the overlay and its reload button in both. One proxy run of five
+logged 159 stale-object warnings before the rebuild, then recovered: the
+check at the start of a frame cannot see a restore that lands while that
+frame's GL calls are still queued on the main thread, so the rest of the
+frame runs with dead objects. Proxy frames are faster since OPFS, which
+leaves this window open more often. Closing it means not issuing GL calls at
+all while the context is lost (skipping the frame), not checking more
+often. Offscreen mode cannot hit it: the engine replaces the context itself,
+between frames. The dig step used to turn the view down with the first
+mouse movement after pointer lock, which the engine drops
+(`Game::updateCameraDirection` skips the first movement after the window
+becomes active), so it could stay looking at the horizon; it now turns once
+before digging, as `test_first_playable.py`'s placing step does.
 
 ### Render thread
 
@@ -1399,14 +1441,39 @@ worker too (`luanti_offscreen_destroy_context()`): without
 `OFFSCREENCANVAS_SUPPORT`, `emscripten_webgl_destroy_context()` always runs
 on the main thread, which has no such context.
 
-Post-processing stays off by default in both modes. Forced on, it crashes
-the proxied mode (`RuntimeError: null function` on the engine worker); in
-offscreen mode the first frames look right, but within seconds of flying the
-`bench_frame_time.py` path the terrain fades into sky colour until only the
-sky, a stray sky-coloured triangle and the HUD remain (SwiftShader,
-2026-11-11). `test_webgl_context.py`'s colour check does not catch that, as
-the sky gradient and HUD alone pass it; any change that turns post-processing
-on needs a screenshot along the benchmark path.
+Post-processing renders correctly in both modes since 2026-11-26 and is
+still off by default (`src/defaultsettings.cpp`) until its frame-time cost
+has been measured on a real GPU. Before that, forced on, the first frames
+looked right and within seconds the terrain faded into sky colour until only
+the sky, a stray sky-coloured triangle and the HUD remained, in both modes
+(SwiftShader, 2026-11-11 and again 2026-11-26). The cause was not the
+present path but the depth clears.
+`COpenGLCoreCacheHandler::invalidateCachedState()`, which `beginScene()`
+calls under Emscripten, invalidated the cached depth mask, depth test and
+cull face by flipping the cached booleans. A flipped value only forces the
+next call that sets the old value; one that sets the other value is skipped
+while GL still has the old one. The HUD ends every frame with depth writes
+off, so the next frame's `clearBuffers(ECBF_DEPTH)` (which sets the mask to
+true through the cache) cleared with the mask still off, that is, not at all:
+809 of the first 1084 depth clears in proxy mode ran masked. Post-processing's
+`3d_depthmap` texture persists between frames, so it kept the nearest depth
+of every earlier frame and new terrain failed the depth test.
+Without post-processing nothing visible came of it: offscreen, the browser
+resets the canvas's depth after each presented frame, and proxy mode kept its
+terrain along the path too (`--no-map-io`, so the camera moved), although
+586 of its first 815 depth clears also ran masked. The cache now
+puts GL in line with its cached values instead of flipping them; afterwards
+no depth clear ran masked. The documented `RuntimeError: null function` in
+proxy mode did not reproduce on the 2026-11-26 build, with post-processing
+alone or with bloom, volumetric light, auto exposure and FXAA on.
+
+`bench_frame_time.py --check-terrain N` covers this: N screenshots along the
+path, each scored by the share of the middle of the view that has texture
+detail (sky, fog and a cleared frame have almost none). On SwiftShader,
+drawn frames score 24-40 % and the broken build scored 0-3 %; the run fails
+below 10 %. CI runs it with post-processing on in both modes (non-gating).
+`test_webgl_context.py`'s colour count is not enough for this, as the sky
+gradient and HUD alone pass it.
 
 Pacing: one frame waits for the display while the worker renders the next.
 `present.js` acknowledges frames on `requestAnimationFrame` through a counter
@@ -1419,10 +1486,29 @@ acknowledges immediately; the 1 s cap on the wait is only a safety net.
 Context loss in offscreen mode: the worker never runs the `webglcontextlost`
 event, so `SwapWindow()` polls `isContextLost()` and calls
 `Module.luantiLauncher.notifyContextLost()`, which shows the same overlay as
-the DOM event. The context is never restored in this mode (nothing calls
-`preventDefault()` on the event); reloading is the recovery here, while proxy
-mode rebuilds in place (see "Context restore").
+the DOM event. The context itself is never restored in this mode (nothing
+calls `preventDefault()` on the event); the engine replaces it with a new one
+and rebuilds in place, as proxy mode does after a restore (see "Context
+restore").
 `Module.luantiLauncher.debugLoseContext()` triggers a loss in either mode.
+
+Memory: in Chrome, offscreen mode grows by about one frame (width x height x
+4 bytes) for every frame presented, and the memory is not returned while the
+engine runs: 25-50 MB/s on SwiftShader at 960x540 to 1280x720, 13.5 GB and an
+out-of-memory kill after about four and a half minutes in this container.
+Proxy mode stays flat. A minimal page reproduces it without Luanti
+(2026-11-26): a worker that renders into its own `OffscreenCanvas` and posts
+`transferToImageBitmap()` results to the page grows by the same amount per
+frame if the worker never returns to its event loop, and stays flat if it
+does, or if it closes the bitmaps itself instead of posting them. Chrome
+releases a frame consumed on another thread with a task on the thread that
+produced it, and the engine worker never runs tasks. Closing the bitmap on
+the page (`drawImage` and `close()` instead of `bitmaprenderer`) does not
+help. Whether a real GPU behaves the same has not been measured, but nothing
+in the mechanism is specific to SwiftShader. Until the hand-off no longer
+needs the worker's event loop (for example, a copy through shared memory, or
+a worker that yields, which needs JSPI or ASYNCIFY), offscreen mode cannot be
+the default, whatever its frame times.
 
 Per-frame main-thread queries are gone in both modes: canvas layout,
 visibility and pointer-lock state are published into shared memory by
@@ -1451,6 +1537,23 @@ Ranges are over two to four runs, all with post-processing off. The
 2026-11-26 rows ran on a 4-core container, so compare their server column,
 not their frame times, with the 8-core rows; the IDBFS row's higher fps is
 the stalled scene (a third fewer draw calls), not a faster renderer.
+
+Post-processing cost, same path, after the depth-clear fix (see "Render
+thread"), single runs on the same 4-core container, SwiftShader, SQLite on
+OPFS:
+
+| Render path | `enable_post_processing` | fps | frame p50 / p95 / p99 ms | present p95 ms | server steps/s |
+|-------------|--------------------------|-----|--------------------------|----------------|----------------|
+| proxy | false | 5.5 | 185 / 243 / 287 | 41 | 48.7 |
+| proxy | true | 5.2 | 198 / 253 / 287 | 102 | 47.6 |
+| offscreen | false | 7.1 | 143 / 179 / 202 | 144 | 50.6 |
+| offscreen | true | 6.6 | 152 / 192 / 224 | 156 | 50.6 |
+
+About 6-7 % at the median in either mode here; an earlier pair on `dummy`
+map I/O measured 4 % (offscreen) and 22 % (proxy), so read these as noisy.
+On SwiftShader the extra full-screen passes are CPU work competing with
+everything else; a real GPU should be cheaper, which is what decides the
+default.
 
 **Fixed 2026-11-26:** with the world databases on OPFS (see "World databases
 on OPFS"), the proxied server keeps 49-50 steps/s with SQLite, the range of
@@ -1518,8 +1621,10 @@ supplied to the one binary, not a second build), the `mimalloc` trial
 Still open: a SIMD second flavour (only if SIMD becomes the shipped build),
 shipping the second `wasm-opt` pass from a post-link step once its frame time
 is measured, the probe on a real phone (iOS Safari in particular), the
-mimalloc trial on the pinned 6.0.3 SDK, re-enabling `enable_post_processing`
-(see "Render thread"), and dynamic resolution scaling / perf overlay.
+mimalloc trial on the pinned 6.0.3 SDK, turning `enable_post_processing` on
+by default once a real GPU has measured its cost (it renders correctly since
+2026-11-26; see "Render thread"), and dynamic resolution scaling / perf
+overlay.
 
 ---
 

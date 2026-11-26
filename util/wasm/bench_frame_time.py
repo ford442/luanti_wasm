@@ -31,6 +31,14 @@ render the same scene. On OPFS (the default where available, see
 wasm_porting.md "World databases on OPFS") the server keeps up. --no-map-io
 stores the world in the "dummy" backends (nothing is written) to compare
 rendering alone.
+
+--check-terrain N takes N screenshots of the canvas spread over the path and
+fails the run if any of them has lost the terrain (scored by how much of the
+middle of the view has texture detail; sky, fog or a cleared frame has
+almost none). That is the check for "the terrain fades to sky" with
+post-processing on; a count of colours does not catch it, because the sky
+gradient and the HUD alone pass one. The screenshots cost a frame hitch each,
+so leave it off when comparing frame times.
 """
 
 from __future__ import annotations
@@ -170,6 +178,36 @@ COMPAT_STATS = ("Module.luantiWebGLCompat ? "
 
 MOD_CONF = "name = lw_bench\ndescription = Frame-time benchmark path (generated)\n"
 
+# Share of the middle of the view (20-80 % across, 12-68 % down: clear of the
+# hotbar, the wielded item and the page's toasts) whose luma changes by more
+# than 24 to the next pixel right plus the next pixel down, sampled every
+# other pixel. The path always looks at the island, so a drawn frame scores
+# well above this (24-40 % on SwiftShader) while sky, fog or a frame that
+# lost its terrain scores near 0 (0-3 %).
+TERRAIN_DETAIL_MIN = 0.10
+TERRAIN_DETAIL = """async bytes => {
+	const blob = new Blob([new Uint8Array(bytes)], {type: "image/png"});
+	const bitmap = await createImageBitmap(blob);
+	const x0 = Math.floor(bitmap.width * 0.2), y0 = Math.floor(bitmap.height * 0.12);
+	const w = Math.floor(bitmap.width * 0.6), h = Math.floor(bitmap.height * 0.56);
+	const canvas = new OffscreenCanvas(w, h);
+	const g = canvas.getContext("2d");
+	g.drawImage(bitmap, x0, y0, w, h, 0, 0, w, h);
+	const d = g.getImageData(0, 0, w, h).data;
+	const luma = i => (d[i] * 54 + d[i + 1] * 183 + d[i + 2] * 19) >> 8;
+	let samples = 0, detailed = 0;
+	for (let y = 0; y < h - 1; y += 2) {
+		for (let x = 0; x < w - 1; x += 2) {
+			const i = (y * w + x) * 4;
+			const v = luma(i);
+			samples++;
+			if (Math.abs(luma(i + 4) - v) + Math.abs(luma(i + w * 4) - v) > 24)
+				detailed++;
+		}
+	}
+	return detailed / samples;
+}"""
+
 
 def format_page_error(error: object) -> str:
 	return str(getattr(error, "stack", None) or error)
@@ -228,6 +266,14 @@ def timeline(frames: list[dict]) -> list[dict]:
 	return out
 
 
+def terrain_detail(page: Page, save: Path | None = None) -> float:
+	png = page.locator("#canvas").screenshot()
+	if save:
+		save.parent.mkdir(parents=True, exist_ok=True)
+		save.write_bytes(png)
+	return page.evaluate(TERRAIN_DETAIL, list(png))
+
+
 def git_revision(repo: Path) -> str:
 	try:
 		return subprocess.run(["git", "describe", "--always", "--dirty"],
@@ -268,6 +314,20 @@ def run(page: Page, url: str, console: list[str], args) -> dict:
 	compat_start = page.evaluate(COMPAT_STATS)
 	shown_start = page.evaluate(PRESENT_STATS)
 	t_start = time.monotonic()
+	# Spread over the path: the first a little after its start, the last a
+	# little before its end. The path follows server time, which a starved
+	# server lets fall behind, so this only places them roughly.
+	terrain = []
+	for i in range(args.check_terrain):
+		at = args.duration * (i + 0.5) / args.check_terrain
+		while (time.monotonic() - t_start < at and
+				not any("[lw_bench] path end" in line for line in console)):
+			page.wait_for_timeout(100)
+		save = (Path(args.check_terrain_dir) / f"terrain-{i + 1}.png"
+			if args.check_terrain_dir else None)
+		detail = terrain_detail(page, save)
+		terrain.append({"seconds": round(time.monotonic() - t_start, 1),
+			"detail": round(detail, 4), "ok": detail >= TERRAIN_DETAIL_MIN})
 	wait_for_marker(page, console, "[lw_bench] path end", args.duration + 60)
 	compat_end = page.evaluate(COMPAT_STATS)
 	shown_end = page.evaluate(PRESENT_STATS)
@@ -295,6 +355,8 @@ def run(page: Page, url: str, console: list[str], args) -> dict:
 		# Server globalsteps during the path. Frame times only compare when
 		# the server kept up: a starved server leaves the camera parked.
 		"server": server_progress(console, args.duration),
+		# --check-terrain: one entry per screenshot along the path.
+		"terrain": {"minDetail": TERRAIN_DETAIL_MIN, "frames": terrain} if terrain else None,
 		# Shim work during the path only (null when the shim is not loaded
 		# in the page, i.e. when GL does not run on the main thread).
 		"webglCompat": {key: compat_end[key] - compat_start[key]
@@ -333,6 +395,11 @@ def main() -> int:
 	parser.add_argument("--setting", action="append", default=[],
 		metavar="KEY=VALUE", help="minetest.conf line for this run (repeatable)")
 	parser.add_argument("--screenshot", help="save a screenshot at path end")
+	parser.add_argument("--check-terrain", type=int, default=0, metavar="N",
+		help="take N screenshots along the path and fail if any has lost the "
+		"terrain (each costs a frame hitch; default: none)")
+	parser.add_argument("--check-terrain-dir",
+		help="save the --check-terrain screenshots here")
 	parser.add_argument("--no-map-io", action="store_true",
 		help="keep the world in the dummy backends: no map, player or mod "
 		"storage file I/O, so the server cannot stall on it")
@@ -389,7 +456,7 @@ def main() -> int:
 			"warmup": args.warmup, "viewport": [args.width, args.height],
 			"gpu": args.gpu, "headed": args.headed, "query": args.query,
 			"settings": DEFAULT_SETTINGS + args.setting,
-			"noMapIo": args.no_map_io},
+			"noMapIo": args.no_map_io, "checkTerrain": args.check_terrain},
 		"pageErrors": page_errors,
 		**result,
 	}
@@ -407,6 +474,14 @@ def main() -> int:
 		f"GPU {result['gpu'].get('renderer', '?')}")
 	print(f"report: {args.output}")
 	assert not page_errors, page_errors
+	if result["terrain"]:
+		frames = result["terrain"]["frames"]
+		print("terrain along the path: " + ", ".join(
+			f"{f['seconds']} s {f['detail'] * 100:.1f} %" for f in frames) +
+			f" (needs {TERRAIN_DETAIL_MIN * 100:.0f} %)")
+		lost = [f for f in frames if not f["ok"]]
+		assert not lost, f"the terrain is missing from {len(lost)} of {len(frames)} " \
+			f"screenshots along the path: {lost}"
 	return 0
 
 

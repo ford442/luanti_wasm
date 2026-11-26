@@ -334,8 +334,9 @@ void set_default_settings()
 #ifndef __EMSCRIPTEN__
 	settings->setDefault("enable_post_processing", "true");
 #else
-	// PP render targets are not reliably presented through Emscripten's
-	// offscreen framebuffer commit path yet.
+	// Renders correctly in both render modes (checked along the benchmark
+	// path by bench_frame_time.py --check-terrain); off until its frame-time
+	// cost has been measured on a real GPU (wasm_porting.md, "Render thread").
 	settings->setDefault("enable_post_processing", "false");
 #endif
 	settings->setDefault("post_processing_texture_bits", "10");

@@ -272,11 +272,24 @@ public:
 		BlendFuncInvalid = true;
 		BlendInvalid = true;
 		ColorMaskInvalid = true;
-		CullFace = !CullFace;
 		CullFaceMode = 0;
 		DepthFunc = 0;
-		DepthMask = !DepthMask;
-		DepthTest = !DepthTest;
+		// The booleans have no "unknown" value, so put GL back in line with
+		// the cache. Flipping the cached value instead (as this used to)
+		// only forces the next call that sets the old value and skips one
+		// that sets the other: after the HUD left depth writes off, every
+		// depth clear of the next frame ran with the mask off and cleared
+		// nothing, so post-processing's depth texture kept the nearest depth
+		// of all earlier frames and the terrain failed the depth test.
+		GL.DepthMask(DepthMask ? GL_TRUE : GL_FALSE);
+		if (DepthTest)
+			GL.Enable(GL_DEPTH_TEST);
+		else
+			GL.Disable(GL_DEPTH_TEST);
+		if (CullFace)
+			GL.Enable(GL_CULL_FACE);
+		else
+			GL.Disable(GL_CULL_FACE);
 		FrameBufferID = 0xFFFFFFFFu;
 		ProgramID = 0xFFFFFFFFu;
 		ActiveTexture = 0;

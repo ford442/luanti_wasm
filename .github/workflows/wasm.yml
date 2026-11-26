@@ -271,6 +271,27 @@ jobs:
             --output wasm-bench/frame-time-offscreen.json \
             --screenshot wasm-bench/path-end-offscreen.png
 
+      # Post-processing on, along the same path, in both render modes: the
+      # terrain must still be drawn in every screenshot (it used to fade to
+      # sky colour because depth clears ran with depth writes off). Not a
+      # gate until it has run green here; the screenshots make these frame
+      # times unsuitable for comparison.
+      - name: Post-processing along the benchmark path (non-gating)
+        continue-on-error: true
+        run: |
+          status=0
+          for render in proxy offscreen; do
+            python3 util/wasm/bench_frame_time.py \
+              --browser "$(command -v google-chrome)" \
+              --query "&render=$render" \
+              --setting "enable_post_processing=true" \
+              --check-terrain 4 \
+              --check-terrain-dir "wasm-bench/pp-$render" \
+              --label "ci-swiftshader-pp-$render" \
+              --output "wasm-bench/frame-time-pp-$render.json" || status=1
+          done
+          exit "$status"
+
       - name: Upload frame-time report
         if: always()
         uses: actions/upload-artifact@v7

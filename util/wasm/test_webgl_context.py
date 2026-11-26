@@ -9,13 +9,15 @@ Scenarios (each loads the game into a world):
 * ``lose``: after the first frames, force ``WEBGL_lose_context.loseContext()``.
   The page must show the recoverable overlay, keep the engine responsive (no
   page errors, no crash), flush persistence, and the reload button must bring
-  the launcher back. In proxy mode the context is then restored with
-  ``?glrestore=fail``, so the engine's rebuild fails on purpose and the
-  overlay must stay with its reload button: the fallback for a failed restore.
-* ``restore`` (proxy mode only): lose and restore the context, and the engine
-  must rebuild its GL resources in place: the overlay goes away without a
-  reload, the world is drawn again, frames keep coming, a dig reaches the
-  server, and the world saved before the loss is still there.
+  the launcher back. The context then comes back with ``?glrestore=fail`` (in
+  proxy mode the page restores it; in offscreen mode the engine replaces it),
+  so the engine's rebuild fails on purpose and the overlay must stay with its
+  reload button: the fallback for a failed restore.
+* ``restore``: lose the context and get it back (proxy: the page restores it;
+  offscreen: the engine puts a new context in its place on its worker), and
+  the engine must rebuild its GL resources in place: the overlay goes away
+  without a reload, the world is drawn again, frames keep coming, a dig
+  reaches the server, and the world saved before the loss is still there.
 * ``webgl1``: ``?webgl=1`` forces the WebGL1 fallback; the engine must still
   reach the world and report a version-1 context.
 * ``render``: the render mode actually chosen matches ``--render``, the canvas
@@ -25,9 +27,10 @@ Scenarios (each loads the game into a world):
 
 ``--render proxy|offscreen|auto`` runs every scenario in that render mode
 (``?render=``); without it the build default is used. In offscreen mode the
-context is lost through the engine (the page cannot reach it) and is never
+context is lost through the engine (the page cannot reach it). It is never
 restored, because the worker never runs the event that would allow it; the
-``restore`` scenario is skipped there.
+engine replaces it with a new context on the same worker instead
+(``CIrrDeviceSDL::restoreAfterContextLoss()``).
 
 Run after a WASM build::
 
@@ -109,16 +112,18 @@ def scenario_lose(browser: Browser, base: str, extra: str) -> None:
 		ticks = page.evaluate("window.glTicks")
 		assert ticks >= 20, ticks
 
-		# Restore with a rebuild that fails (?glrestore=fail): the overlay
-		# must stay and keep its reload button. Only the proxied context can
-		# be restored: offscreen, the worker never runs the context-lost
-		# event whose preventDefault() would allow it.
+		# Get the context back with a rebuild that fails (?glrestore=fail):
+		# the overlay must stay and keep its reload button. Proxy: the page
+		# restores the context. Offscreen: the engine replaces it on its own.
 		if not offscreen:
 			page.evaluate("window.luantiLoseContextExt.restoreContext()")
-			page.wait_for_function(
-				"Module.luantiLauncher.getGLState().restoreFailed >= 1", timeout=30_000)
-			assert any("WebGL context restore failed" in line for line in console), console[-30:]
-			assert not page.is_disabled("#luanti-gl-lost-reload")
+		page.wait_for_function(
+			"Module.luantiLauncher.getGLState().restoreFailed >= 1", timeout=30_000)
+		assert any("WebGL context restore failed" in line for line in console), console[-30:]
+		if offscreen:
+			assert any("WebGL context replaced on the render worker" in line
+				for line in console), console[-30:]
+		assert not page.is_disabled("#luanti-gl-lost-reload")
 		assert page.is_visible("#luanti-gl-lost")
 		assert page.evaluate("Module.luantiLauncher.getGLState().recovered") == 0
 		assert not errors, {"pageErrors": errors, "console": console[-30:]}
@@ -141,18 +146,39 @@ def scenario_lose(browser: Browser, base: str, extra: str) -> None:
 
 
 def world_files(page: Page) -> dict:
-	"""What the world on disk looks like: world.mt and the two databases."""
+	"""What the world on disk looks like: world.mt and the two databases.
+
+	The databases of a world on OPFS (client/web/storage.js) are read from
+	OPFS, as test_first_playable.read_stored() does; everything else from
+	the Emscripten FS."""
 	return page.evaluate("""async world => {
-		const read = path => FS.analyzePath(path).exists ? FS.readFile(path) : null;
+		const storage = Module.luantiStorage;
+		const id = storage ? storage.readMarker(world) : null;
+		const root = id ? await (await navigator.storage.getDirectory())
+			.getDirectoryHandle(storage.opfsRoot) : null;
+		const read = async path => {
+			const name = path.slice(path.lastIndexOf("/") + 1);
+			if (root && /\\.sqlite$/.test(name)) {
+				try {
+					const file = await (await (await root.getDirectoryHandle(id))
+						.getFileHandle(name)).getFile();
+					return new Uint8Array(await file.arrayBuffer());
+				} catch (e) {
+					return null;
+				}
+			}
+			return FS.analyzePath(path).exists ? FS.readFile(path) : null;
+		};
 		const hash = async bytes => bytes ? Array.from(new Uint8Array(
 			await crypto.subtle.digest("SHA-256", bytes)),
 			b => b.toString(16).padStart(2, "0")).join("") : null;
 		const header = bytes => bytes ?
 			new TextDecoder().decode(bytes.subarray(0, 15)) : null;
-		const map = read(world + "/map.sqlite");
-		const players = read(world + "/players.sqlite");
+		const map = await read(world + "/map.sqlite");
+		const players = await read(world + "/players.sqlite");
 		return {
-			worldMt: await hash(read(world + "/world.mt")),
+			storage: id ? "opfs" : "fs",
+			worldMt: await hash(await read(world + "/world.mt")),
 			mapHeader: header(map),
 			mapSize: map ? map.length : 0,
 			playersHeader: header(players)
@@ -167,9 +193,7 @@ def scenario_restore(browser: Browser, base: str, extra: str,
 	page = open_game(browser, base, extra, console, errors, seed_config=True)
 	try:
 		info = page.evaluate("Module.luantiWebGLInfo")
-		if info.get("render") != "proxy":
-			print(f"context restore: skipped in {info.get('render')} mode")
-			return
+		offscreen = info.get("render") == "offscreen"
 		page.wait_for_timeout(4000)
 		before_colours = canvas_colours(page)
 		assert before_colours >= 8, f"canvas blank before the loss ({before_colours})"
@@ -181,9 +205,14 @@ def scenario_restore(browser: Browser, base: str, extra: str,
 
 		start = len(console)
 		assert page.evaluate("Module.luantiLauncher.debugLoseContext()")
-		page.wait_for_selector("#luanti-gl-lost", state="visible", timeout=10_000)
-		page.wait_for_timeout(1000)
-		page.evaluate("window.luantiLoseContextExt.restoreContext()")
+		page.wait_for_function(
+			"Module.luantiLauncher.getGLState().lost >= 1", timeout=10_000)
+		if not offscreen:
+			# The engine replaces an offscreen context by itself, possibly
+			# before the overlay could be seen here.
+			page.wait_for_selector("#luanti-gl-lost", state="visible", timeout=10_000)
+			page.wait_for_timeout(1000)
+			page.evaluate("window.luantiLoseContextExt.restoreContext()")
 		page.wait_for_function(
 			"Module.luantiLauncher.getGLState().recovered >= 1", timeout=60_000)
 		page.wait_for_selector("#luanti-gl-lost", state="hidden", timeout=10_000)
@@ -191,6 +220,11 @@ def scenario_restore(browser: Browser, base: str, extra: str,
 		assert state["lost"] == 1 and state["restoreFailed"] == 0, state
 		assert not any("WebGL context restore failed" in line
 			for line in console[start:]), console[-40:]
+		if offscreen:
+			assert any("WebGL context replaced on the render worker" in line
+				for line in console[start:]), console[-40:]
+		after_info = page.evaluate("Module.luantiWebGLInfo")
+		assert after_info["render"] == info["render"], (info, after_info)
 		# Rebuilt before any frame is drawn on the revived context: a frame
 		# drawn with the dead objects shows up as WebGL INVALID_OPERATION
 		# warnings (and enough of them make Chrome stop reporting errors).
@@ -212,7 +246,7 @@ def scenario_restore(browser: Browser, base: str, extra: str,
 			if any(mark in line for mark in stale_marks)]
 		stale_after = [line for line in console[recovered_at:]
 			if any(mark in line for mark in stale_marks)]
-		print(f"context restore: {before_colours} -> {after_colours} colours, no reload; "
+		print(f"context restore ({info['render']}): {before_colours} -> {after_colours} colours, no reload; "
 			f"stale-object GL warnings: {len(stale_before)} until recovered, "
 			f"{len(stale_after)} after")
 		assert not stale_before and not stale_after, (stale_before + stale_after)[:12]
@@ -232,6 +266,15 @@ def scenario_restore(browser: Browser, base: str, extra: str,
 		playable.send_chat(page, console, "/clearinv", "clears singleplayer's inventory")
 		playable.send_chat(page, console, f"/giveme {playable.PLACE_ITEMS['devtest']} 10")
 		playable.send_chat(page, console, f"/giveme {playable.DIG_ITEMS['devtest']}")
+		# The engine drops the first camera movement after the window
+		# becomes active (Game::updateCameraDirection), and dig_nodes()
+		# pitches the view down with a single movement; without these turns
+		# the player can stay looking at the horizon, out of reach of
+		# anything to dig, with or without a context loss before. The pitch
+		# clamps at straight down, so extra turns do no harm.
+		# test_first_playable.py's placing step turns before its dig too.
+		for _ in range(3):
+			playable.look(page, 0, 40)
 		dig_start = len(console)
 		dug = playable.dig_nodes(page, console)
 		# Proxy mode starves the internal server on SwiftShader (steps lag by
