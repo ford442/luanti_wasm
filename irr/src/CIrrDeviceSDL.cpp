@@ -935,10 +935,12 @@ EM_JS(void, luanti_offscreen_context_attributes, (int handle, int *major,
 	var a = ctx ? ctx.getContextAttributes() : null;
 	HEAP32[major >> 2] = (typeof WebGL2RenderingContext !== 'undefined' &&
 		ctx instanceof WebGL2RenderingContext) ? 2 : 1;
-	HEAP32[alpha >> 2] = a && a.alpha ? 1 : 0;
-	HEAP32[depth >> 2] = a && a.depth ? 1 : 0;
-	HEAP32[stencil >> 2] = a && a.stencil ? 1 : 0;
-	HEAP32[antialias >> 2] = a && a.antialias ? 1 : 0;
+	// EM_BOOL is a one-byte bool: 32-bit stores at these unaligned addresses
+	// all landed on the same word, so every flag read back as false.
+	HEAP8[alpha] = a && a.alpha ? 1 : 0;
+	HEAP8[depth] = a && a.depth ? 1 : 0;
+	HEAP8[stencil] = a && a.stencil ? 1 : 0;
+	HEAP8[antialias] = a && a.antialias ? 1 : 0;
 });
 
 // Resizing resets the drawing buffer, so only between frames.
