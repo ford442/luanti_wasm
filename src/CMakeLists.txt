@@ -950,6 +950,17 @@ if(BUILD_CLIENT)
 		endif()
 		# Emit .html shell so the build is directly servable
 		set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
+		# The launcher-config.js a deployment ships: its hosted proxy regions. The
+		# default keeps the repository's own, which has none (no proxy address
+		# belongs in the client source). A deployment writes its own with
+		# util/wasm/write_launcher_config.py and passes
+		# -DLUANTI_WEB_LAUNCHER_CONFIG=<file>, so the file is hashed into the
+		# release like every other shell file (doc/compiling/wasm-embedding.md).
+		set(LUANTI_WEB_LAUNCHER_CONFIG "${CMAKE_SOURCE_DIR}/client/web/launcher-config.js"
+			CACHE FILEPATH "launcher-config.js shipped with the web client (hosted proxy regions)")
+		if(NOT EXISTS "${LUANTI_WEB_LAUNCHER_CONFIG}")
+			message(FATAL_ERROR "LUANTI_WEB_LAUNCHER_CONFIG does not exist: ${LUANTI_WEB_LAUNCHER_CONFIG}")
+		endif()
 		# The launcher is one script per concern; shell.html loads them in this
 		# order (doc/compiling/wasm-embedding.md). The list also lives in
 		# util/wasm/{packages.json,package_demo.py,deploy_1ink.py}; the
@@ -978,7 +989,7 @@ if(BUILD_CLIENT)
 			${CMAKE_SOURCE_DIR}/client/web/shell.html
 			${WASM_LAUNCHER_SCRIPTS}
 			${CMAKE_SOURCE_DIR}/client/web/launcher.css
-			${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
+			${LUANTI_WEB_LAUNCHER_CONFIG}
 			${CMAKE_SOURCE_DIR}/client/web/theater.js
 			${CMAKE_SOURCE_DIR}/client/web/videotexture.js
 			${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
@@ -990,13 +1001,16 @@ if(BUILD_CLIENT)
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
 				${WASM_LAUNCHER_SCRIPTS}
 				${CMAKE_SOURCE_DIR}/client/web/launcher.css
-				${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
 				${CMAKE_SOURCE_DIR}/client/web/theater.js
 				${CMAKE_SOURCE_DIR}/client/web/videotexture.js
 				${CMAKE_SOURCE_DIR}/client/web/manifest.webmanifest
 				${CMAKE_SOURCE_DIR}/client/web/luanti-web.svg
 				${CMAKE_SOURCE_DIR}/client/web/.htaccess
 				$<TARGET_FILE_DIR:${PROJECT_NAME}>
+			# The deployment's proxy regions (see LUANTI_WEB_LAUNCHER_CONFIG).
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				${LUANTI_WEB_LAUNCHER_CONFIG}
+				$<TARGET_FILE_DIR:${PROJECT_NAME}>/launcher-config.js
 			# Theater clips are served from media/ at runtime rather than baked
 			# into the asset packages. The directory ships with only its README; a
 			# deployment drops real clips in beside it.

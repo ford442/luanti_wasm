@@ -89,6 +89,7 @@
 		customProxyRow: element("luanti-custom-proxy-row"),
 		proxyUrl: element("luanti-proxy-url"),
 		proxyNotice: element("luanti-proxy-notice"),
+		proxySummary: element("luanti-proxy-summary"),
 		proxyAlert: element("luanti-proxy-alert"),
 		proxyAlertText: element("luanti-proxy-alert-text"),
 		proxyAlertReload: element("luanti-proxy-alert-reload"),

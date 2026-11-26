@@ -113,11 +113,32 @@ jobs:
             util/wasm/build_libzip.sh
           fi
 
+      # The deployment's hosted proxy regions (the repository's launcher-config.js
+      # names none). Set the repository variable WASM_PUBLIC_PROXY_URL (a wss://
+      # URL, plus optionally WASM_PUBLIC_PROXY_LABEL / _ID / _EXPIRES) and the
+      # build ships a launcher-config.js with that region as its default. Without
+      # it the build is the stock one. The file is public; no secret goes in it.
+      - name: Write the launcher's proxy configuration
+        if: vars.WASM_PUBLIC_PROXY_URL != ''
+        env:
+          LUANTI_WEB_PROXY_URL: ${{ vars.WASM_PUBLIC_PROXY_URL }}
+          LUANTI_WEB_PROXY_ID: ${{ vars.WASM_PUBLIC_PROXY_ID }}
+          LUANTI_WEB_PROXY_LABEL: ${{ vars.WASM_PUBLIC_PROXY_LABEL }}
+          LUANTI_WEB_PROXY_EXPIRES: ${{ vars.WASM_PUBLIC_PROXY_EXPIRES }}
+        run: |
+          python3 util/wasm/write_launcher_config.py --from-env \
+            --output "$RUNNER_TEMP/launcher-config.js"
+          echo "LUANTI_WEB_LAUNCHER_CONFIG=$RUNNER_TEMP/launcher-config.js" >> "$GITHUB_ENV"
+
       - name: Configure Release build
         shell: bash
         run: |
           source "$EMSDK_DIR/emsdk_env.sh"
-          cmake --preset Emscripten
+          extra=()
+          if [[ -n "${LUANTI_WEB_LAUNCHER_CONFIG:-}" ]]; then
+            extra+=("-DLUANTI_WEB_LAUNCHER_CONFIG=$LUANTI_WEB_LAUNCHER_CONFIG")
+          fi
+          cmake --preset Emscripten "${extra[@]}"
 
       # The proxy join test (below) needs a native luantiserver and the proxy's
       # one dependency. The server is a Release, server-only, RUN_IN_PLACE build
@@ -134,6 +155,14 @@ jobs:
 
       - name: Install the proxy's dependencies
         run: npm ci --prefix util/wasm/proxy
+
+      # The launcher's join flow in Chrome without the engine: the real shell
+      # page, launcher scripts and network.js against the real proxy (hosted
+      # region shown, proxy probed before the engine starts, refused origin /
+      # dead proxy / refused target / proxy lost mid-session, expired or missing
+      # proxy config). Seconds, so it runs before the long build.
+      - name: Launcher join flow in Chrome (stand-in engine)
+        run: python3 util/wasm/test_join_launcher.py --browser "$(command -v google-chrome)"
 
       - name: Cache the native server
         id: native-server
@@ -215,14 +244,17 @@ jobs:
       # The browser leg of Phase 4's public-server acceptance, on 127.0.0.1:
       # the built client joins the native server through util/wasm/proxy (the
       # PROXY OK handshake, TOCLIENT_HELLO, the world, a chat line arriving in
-      # the server log), then a refused origin and a dead proxy each say so in
-      # the launcher. It is not a claim that the proxy is safe to publish
-      # (util/wasm/proxy/README.md).
+      # the server log, the join timeline), then a refused origin, a dead proxy,
+      # a refused target and a proxy lost mid-join each say so in the launcher.
+      # It is not a claim that the proxy is safe to publish
+      # (util/wasm/proxy/README.md). The deployed proxy has its own manual job:
+      # .github/workflows/wasm-public-proxy.yml.
       - name: Join a native server through the proxy in Chrome
         run: |
           python3 util/wasm/test_proxy_join.py \
             --browser "$(command -v google-chrome)" \
-            --screenshot-dir wasm-proxy-join-screenshots
+            --screenshot-dir wasm-proxy-join-screenshots \
+            --report wasm-proxy-join-screenshots/results.json
 
       - name: Upload proxy join screenshots
         if: always()

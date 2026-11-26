@@ -39,12 +39,64 @@ interface LuantiNetworkState {
 }
 
 /**
+ * What the TCP hop to the proxy cost during one join, in milliseconds after
+ * the join began (the launcher's markJoin, else the first datagram sent).
+ * Marks are null until the moment happens. See util/wasm/proxy/README.md,
+ * "Measuring the TCP hop".
+ */
+interface LuantiNetworkTimings {
+	/** Whether the join began at the launcher's markJoin (else at the first datagram). */
+	joinMarked: boolean;
+	/** How long the pre-join probe needed to reach PROXY OK (TLS included). */
+	probeMs: number | null;
+	proxyOpenMs: number | null;
+	proxyReadyMs: number | null;
+	firstSendMs: number | null;
+	firstReceiveMs: number | null;
+	/** The first TOSERVER_PLAYERPOS the engine sent: the player is in the world. */
+	firstPlayerPosMs: number | null;
+	receivedDatagrams: number;
+	gapsOver100Ms: number;
+	gapsOver250Ms: number;
+	gapsOver1000Ms: number;
+	longestGapMs: number;
+	/** A pause of 250 ms or more that ended with three datagrams within 20 ms. */
+	stalls: number;
+	longestStallMs: number;
+	/** PING/PONG round trips over the proxy link, sampled every five seconds. */
+	rtt: { samples: number; minMs: number | null; maxMs: number | null; meanMs: number | null };
+}
+
+/** What `Module.luantiNetwork.probe` learned from dialling a proxy once. */
+interface LuantiNetworkProbeResult {
+	/** The proxy accepted this page's origin and protocol version 1. */
+	ok: boolean;
+	url: string;
+	/** A sentence for the player; empty when `ok`. */
+	message: string;
+	/** The proxy's close tag (origin, global_limit, ...), "timeout" or "protocol", or null. */
+	reason: string | null;
+	closeCode: number | null;
+	handshakeMs: number | null;
+	rttMs: number | null;
+}
+
+/**
  * WebSocket-proxy transport (client/web/network.js, a --pre-js file).
  * Methods starting with `_` are called from C++ (src/network/socket.cpp).
  */
 interface LuantiNetwork {
 	setProxyUrl(value: string): unknown;
 	getState(): LuantiNetworkState;
+	/** Start the clock for a join; the launcher calls it when the player presses Join. */
+	markJoin(): void;
+	getTimings(): LuantiNetworkTimings;
+	/**
+	 * Dial the proxy once, send no datagram, and report whether a join can work:
+	 * certificate, origin, protocol. The game server is checked later, by the
+	 * proxy, on the first datagram.
+	 */
+	probe(value: string, timeoutMs?: number): Promise<LuantiNetworkProbeResult>;
 	_createSocket(handle: number, port: number): unknown;
 	_destroySocket(handle: number): unknown;
 	/** `address` is the dotted-quad IPv4 string (socket.cpp passes UTF8ToString). */
@@ -412,7 +464,12 @@ interface LuantiModule {
 interface LuantiWebConfig {
 	serverListUrl: string;
 	defaultProxy: string;
-	proxies: Array<{ id: string; label: string; url: string }>;
+	/**
+	 * Hosted proxy regions. `expires` (an ISO date or timestamp) is the deployment
+	 * owner's own end date for a proxy: from then on the launcher stops offering
+	 * it, instead of letting a join hang against a proxy nobody maintains.
+	 */
+	proxies: Array<{ id: string; label: string; url: string; expires?: string }>;
 }
 
 declare var Module: LuantiModule;

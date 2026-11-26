@@ -66,7 +66,7 @@ the authority on flags.
 
 ### Remaining Work
 
-- The proxy is hardened for public exposure (connection caps, shared rate limit, Origin and port/server-list allowlists, health and metrics, Docker + Caddy recipe). A deployed TLS proxy and public-server multiplayer acceptance are still outstanding.
+- The proxy is hardened for public exposure (connection caps, shared rate limit, Origin and port/server-list allowlists, health and metrics, Docker + Caddy recipe), has an outside-in deployment check (`npm run check`), and the launcher probes it before starting the engine. The public acceptance test and its manual workflow exist. A deployed TLS proxy, the acceptance run against a consenting public server, and the first join-to-first-position / head-of-line measurement (`util/wasm/proxy/README.md`) are still outstanding.
 - Full world persistence acceptance across Chrome/Edge/Firefox is outstanding (the world library test runs in Firefox as a non-gating CI step).
 - Gamepad delivery is not yet verified. Touch defaults are checked by `util/wasm/test_touch_input.py`.
 - Some CI steps are non-gating until they have run green there: the WebGL context tests in both render modes, the frame-time benchmark and the allocator trial. The other numbers under "Appendix: Flag Matrix" were measured locally on Emscripten 3.1.61, not on the pinned 6.0.3.
@@ -373,10 +373,13 @@ launcher's Join server form against a native `luantiserver` through the real
 proxy: PROXY OK handshake, `TOCLIENT_HELLO`, the world, and a chat line typed in
 the browser arriving in the server log; a refused origin and a dead proxy each
 produce their own launcher message (`Module.luantiLauncher.getState().proxy`).
-The `wasm` workflow runs it. It does not cover TLS, a remote host, the
+The `wasm` workflow runs it. It also covers a refused target, a proxy lost
+mid-join and the join timeline; `util/wasm/test_join_launcher.py` runs the same
+launcher contracts without the build. It does not cover TLS, a remote host, the
 ten-minute soak above, or whether a proxy is safe to publish, so the
 "Public-server browser play acceptance" box below stays open until a deployed
-run is recorded.
+run is recorded. That run is `test_proxy_join.py --scenario public` (manual
+workflow `wasm-public-proxy.yml`, recipe in `util/wasm/proxy/README.md`).
 
 Two defects were found by writing it. A browser cannot read the HTTP status of a
 refused WebSocket upgrade (close code 1006, no reason), so the proxy now refuses
@@ -385,6 +388,10 @@ an origin or a full table with a tagged close frame instead of a 403/429/503
 127.x destination as in-process, so a server on the player's own machine (the
 proxy's documented default target, `127.0.0.1:30000`) was dropped instead of
 sent to the proxy; only ports an in-process socket has held are in-process now.
+A third came from the refused-target scenario: the transport reset its retry
+delay on a successful handshake, but a proxy refuses a target after the
+handshake, so the page redialled once a second without end
+(`client/web/network.js`, `STABLE_LINK_MS`).
 
 ### Phase 5: Sound
 

@@ -17,6 +17,11 @@ This drives the generated client through checklist steps 2-7 of the
      are placed and dug in it
   7. the tab is reloaded and the same world (and minetest.conf) come back
 
+Singleplayer also stays inside the page: the internal server and its client talk
+over an in-process loopback, so no WebSocket is opened at any point, reloads
+included, and the multiplayer proxy transport stays disabled
+(src/network/socket.cpp, client/web/network.js).
+
 Step 1 is provided by util/wasm/serve.py. Step 8 (a setting written by the
 engine's own settings UI) stays in the manual gate; this script only proves
 that a minetest.conf on the persistent filesystem survives a reload and is
@@ -276,6 +281,10 @@ def run(page: Page, url: str, console: list[str], screenshots: Path | None,
 	placed = place_nodes(page, console)
 	dug = dig_nodes(page, console)
 	shot("03-interaction")
+	# Singleplayer never touches the proxy transport (main() also checks that
+	# the page opened no WebSocket at all).
+	network = page.evaluate("Module.luantiNetwork.getState()")
+	assert network["state"] == "disabled" and network["sentPackets"] == 0, network
 
 	# Step 7: the same world comes back after a hard reload.
 	sync_filesystem(page)
@@ -339,6 +348,7 @@ def main() -> int:
 
 	console: list[str] = []
 	page_errors: list[str] = []
+	websockets: list[str] = []
 	with create_server(output, "127.0.0.1", 0, quiet=True) as server:
 		thread = threading.Thread(target=server.serve_forever, daemon=True)
 		thread.start()
@@ -358,6 +368,8 @@ def main() -> int:
 				page.on("console", lambda message: console.append(message.text))
 				page.on("pageerror", lambda error: page_errors.append(
 					format_page_error(error)))
+				# Fires for every WebSocket the page opens, across reloads.
+				page.on("websocket", lambda socket: websockets.append(socket.url))
 				url = (f"http://127.0.0.1:{server.server_address[1]}/luanti.html"
 					f"?game={args.game}&view=60"
 					+ (f"&render={args.render}" if args.render else ""))
@@ -375,6 +387,7 @@ def main() -> int:
 			server.shutdown()
 
 	assert not page_errors, {"pageErrors": page_errors, "console": console[-30:]}
+	assert not websockets, f"singleplayer opened WebSocket(s): {websockets}"
 	print(f"first playable smoke passed on {args.engine} "
 		f"in {args.game} ({result.get('render', '?')} render): {result}")
 	if not result["placed"]:

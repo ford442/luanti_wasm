@@ -73,12 +73,55 @@ window.LUANTI_WEB_CONFIG = {
 };
 ```
 
-This file is public: do not put credentials in it. The launcher starts with
-singleplayer-only networking when no hosted proxy is configured. Direct
-connect and the public server list then explain that remote play needs a WSS
-proxy rather than failing later in the engine. The repository ships with
-`defaultProxy: ""` and no `proxies`; a deployment sets them when it deploys,
-and no proxy address belongs in the client source.
+This file is public: do not put credentials in it. The repository ships with
+`defaultProxy: ""` and no `proxies`, and no proxy address belongs in the client
+source. A deployment supplies its own file **at build time**, because the
+service worker verifies every shell file against the release manifest and a
+file rewritten afterwards would fail it:
+
+```bash
+python3 util/wasm/write_launcher_config.py --output build-config/launcher-config.js \
+    --proxy eu=Europe=wss://proxy.example.org/=2027-06-30 --default eu
+cmake --preset Emscripten -DLUANTI_WEB_LAUNCHER_CONFIG=$PWD/build-config/launcher-config.js
+```
+
+The generator refuses `ws://` (an HTTPS page cannot open it) and URLs with
+credentials, a query or a fragment. In CI, set the repository variable
+`WASM_PUBLIC_PROXY_URL` (plus optionally `WASM_PUBLIC_PROXY_LABEL`,
+`WASM_PUBLIC_PROXY_ID`, `WASM_PUBLIC_PROXY_EXPIRES`) and the `wasm` workflow
+builds with that region as its default.
+
+`expires` (an ISO date or timestamp) is the owner's own end date for a region:
+from then on the launcher stops offering it, and a date that does not parse
+counts as passed. A default or remembered proxy that has expired is dropped
+rather than shown as a "custom" URL.
+
+**What the Join server panel does with that configuration**
+
+* It shows the chosen region and its host (`Proxy: Europe · proxy.example.org`),
+  and the privacy notice when that proxy is not on the player's machine.
+* With **no usable region** (none configured, or every one expired) the address,
+  port and server-browser fields are disabled and the panel says why. The player
+  can still choose *Custom / self-hosted*, or play singleplayer. Pressing Join
+  gives the same reason instead of an address error.
+* **Join checks the proxy first.** Before the engine starts, the launcher dials
+  the proxy once (`Module.luantiNetwork.probe`): certificate, origin and protocol
+  version, with no datagram sent to any game server. A proxy that is down, expired,
+  full, or does not allow this page fails *in the launcher form* with the proxy's
+  own sentence, and the player can pick another region. The game server is checked
+  later, by the proxy, on the first datagram: a target outside its allowlist
+  arrives as `target_denied`, shown in the in-game alert with the proxy's reason.
+* After a refusal the transport retries with a growing delay (1 s, 2 s, 4 s ...
+  up to 30 s). The delay starts over only for a link that stayed up for ten
+  seconds, so a refused target is not redialled once a second.
+
+### Public demo proxy
+
+No proxy is deployed from this repository yet, so no address is recorded here.
+When one is, its region, URL and expiry go in the `WASM_PUBLIC_PROXY_*`
+repository variables (and a row here); the deployment recipe, the outside-in
+check (`npm run check`) and the public acceptance job are in
+`util/wasm/proxy/README.md`.
 
 A proxy that is not on the player's own machine (not `localhost`, `127.x` or
 `::1`) can read the game: Luanti's protocol is unencrypted, so the proxy sees
@@ -86,7 +129,8 @@ gameplay and chat in the clear. The **Join server** panel says so whenever the
 selected proxy is not loopback.
 
 When the proxy refuses a join or cannot be reached, the launcher reports why
-instead of a generic connection error. `Module.luantiLauncher.getState().proxy`
+instead of a generic connection error (in the launcher form before the engine
+starts, in the in-game alert after). `Module.luantiLauncher.getState().proxy`
 holds `{state, url, message, reason, closeCode}`: `message` is the sentence
 shown to the player (for example that the proxy does not allow this page's
 origin, is full, will not forward to that server, or could not be reached),
@@ -108,7 +152,7 @@ talks to one object and nothing else.
 | Script | Owns | Talks to |
 | --- | --- | --- |
 | `launcher.js` | Shared state and element lookups (`window.luantiShell`), the loading panel, status line, runtime log, the Local / Join server tabs, the in-game toolbar, and `Module.luantiLauncher` | the engine (`reportEngineStatus`, `setPaused`, ...) |
-| `launcher-connect.js` | Multiplayer proxy picker, its privacy notice, the public server list | `Module.luantiNetwork` |
+| `launcher-connect.js` | Multiplayer proxy picker, hosted regions and their `expires`, its privacy notice, the server fields' availability, the pre-join proxy check, the public server list | `Module.luantiNetwork` |
 | `launcher-library.js` | World list and menu, New / Rename / Delete / Import dialogs, export, `?world=` offers, world thumbnails | `Module.luantiWorlds` |
 | `launcher-input.js` | Pointer-lock resume panel, audio unlock, canvas size before the engine owns it, the touch/pointer probe | `Module.luantiInput`, `audio_unlock.js` |
 | `launcher-glloss.js` | WebGL context-loss overlay; adds `getGLState` and `notifyContext*` to `Module.luantiLauncher` | `Module.luantiPersistence` |
