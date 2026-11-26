@@ -158,7 +158,7 @@ client/shaders/         – GLSL shaders (must be valid GLES2/WebGL)
 - `src/threading/thread.cpp:123` — `FIXME: what if this fails, or if already locked by same thread?` in the lock-acquisition path.
 - `util/wasm/deploy_1ink.py` uploads `build-wasm/bin` to test.1ink.us via storage.noahcohn.com (token via `DEPLOY_TOKEN`); CI deploys separately to Cloudflare Pages.
 - Build output (`build-*/`) and `node_modules/` are git-ignored and must never be committed; the deployable client is produced by CI (`util/wasm/package_demo.py`).
-- Upstream merges land on `master` periodically ("Merge upstream/master into the WASM fork"); keep WASM changes guarded so merges stay clean.
+- `main` is the WASM client and the base for pull requests. `master` mirrors `luanti-org/luanti` `master` and is never a PR base. Upstream syncs merge `upstream/master` into a branch off `main` (`wasm_porting.md`, "Upstream base"). Keep WASM changes guarded so merges stay clean.
 
 ## Do Not Modify Manually
 - `minetest.conf.example` and `settings_translation_file.cpp` — regenerated pre-release.
