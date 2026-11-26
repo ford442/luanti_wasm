@@ -84,6 +84,10 @@ void ModApiHttp::push_http_fetch_result(lua_State *L, HTTPFetchResult &res, bool
 	setboolfield(L, -1, "completed", completed);
 	setintfield(L, -1, "code", res.response_code);
 	setstringfield(L, -1, "data", res.data);
+	if (!res.error.empty())
+		setstringfield(L, -1, "error", res.error);
+
+	assert(res.succeeded == res.error.empty());
 }
 
 // http_api.fetch_sync(HTTPRequest definition)
@@ -204,12 +208,11 @@ void ModApiHttp::Initialize(lua_State *L, int top)
 {
 #if USE_CURL
 
-	bool isMainmenu = false;
-#if CHECK_CLIENT_BUILD()
-	isMainmenu = ModApiBase::getGuiEngine(L) != nullptr;
-#endif
+	auto *base = getScriptApiBase(L);
 
-	if (isMainmenu) {
+	bool direct = base->getType() == ScriptingType::MainMenu || base->getType() == ScriptingType::CLI;
+
+	if (direct) {
 		API_FCT(get_http_api);
 	} else {
 		API_FCT(request_http_api);

@@ -236,7 +236,7 @@ void getNodeTile(MapNode mn, const v3s16 &p, const v3s16 &dir, MeshMakeData *dat
 		   {{0,R0},  {4,R2}, {1,R1}, {2,R2},  {0,R0},  {3,R2}, {0,R3}, {5,R2}}
 	};
 	getNodeTileN(mn, p, dir_to_tile[facedir][dir_i].tile, data, tile);
-	tile.rotation = tile.world_aligned ? TileRotation::None : dir_to_tile[facedir][dir_i].rotation;
+	tile.rotation = dir_to_tile[facedir][dir_i].rotation;
 }
 
 /*
@@ -514,7 +514,7 @@ MapBlockMesh::MapBlockMesh(Client *client, MeshMakeData *data):
 			// Generate animation data
 			if (p.layer.material_flags & MATERIAL_FLAG_ANIMATION) {
 				// Add to MapBlockMesh in order to animate these tiles
-				m_animation_info.emplace(std::make_pair(layer, i), AnimationInfo(p.layer));
+				m_animation_info.emplace_back(std::make_pair(layer, i), AnimationInfo(p.layer));
 			}
 
 			// Create material

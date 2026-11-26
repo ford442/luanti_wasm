@@ -42,20 +42,16 @@ local function test_dynamic_media(cb, player)
 		return cb()
 	end
 
-	-- Check that the client acknowledges media transfers
-	local path = core.get_worldpath() .. "/test_media.obj"
-	local f = io.open(path, "w")
-	f:write("# contents don't matter\n")
-	f:close()
-
+	-- Check that the client acknowledges media transfers correctly
 	local call_ok = false
 	local ok = core.dynamic_add_media({
-		filepath = path,
+		filename = "test_media.obj",
+		filedata = "# dummy data " .. tostring(math.random()) .. "\n",
 		to_player = player:get_player_name(),
 		client_cache = false,
 	}, function(name)
 		if not call_ok then
-			return cb("impossible condition")
+			return cb("called too early")
 		end
 		cb()
 	end)
@@ -113,6 +109,32 @@ local function test_hashing()
 	assert(core.sha256(input) == "b206899bc103669c8e7b36de29d73f95b46795b508aa87d612b2ce84bfb29df2")
 end
 unittests.register("test_hashing", test_hashing)
+
+local function test_password_hash()
+	local password = "hunter2"
+	local user = "Cthon98"
+
+	local hash = core.get_password_hash(user, password)
+	local hash_no_pass = core.get_password_hash(user, "")
+	assert(hash)
+	assert(type(hash_no_pass) == "string" and hash_no_pass ~= "")
+	assert(hash_no_pass ~= hash)
+
+	assert(core.check_password_entry(user, hash, password) == true)
+	assert(core.check_password_entry(user, hash, "") == false)
+	assert(core.check_password_entry(user, hash_no_pass, password) == false)
+	assert(core.check_password_entry(user, hash_no_pass, "") == true)
+
+	assert(pcall(core.get_password_hash, "", password) == false)
+	assert(pcall(core.get_password_hash, "", 2) == false)
+	assert(pcall(core.get_password_hash, user, 2) == false)
+	assert(pcall(core.get_password_hash, 98, 2) == false)
+	assert(pcall(core.get_password_hash, 98, password) == false)
+	assert(pcall(core.get_password_hash, user) == false)
+	assert(pcall(core.get_password_hash) == false)
+end
+
+unittests.register("test_password_hash", test_password_hash)
 
 local function test_compress()
 	-- This text should be compressible, to make sure the results are... normal
@@ -417,3 +439,16 @@ local function test_str_pack_unpack()
 	assert(a == 42.3 and b == -384)
 end
 unittests.register("test_str_pack_unpack", test_str_pack_unpack)
+
+local function test_translated_string()
+	local get = core.get_translated_string
+	local S = core.get_translator("unittests")
+	-- normal test
+	assert(get("pl", "cat says " .. S("meow")) == "cat says miau")
+	-- must strip translation markup
+	assert(get("pl", S("test")) == "test")
+	-- must leave other strings/markup alone
+	assert(get("pl", "at the soup store") == "at the soup store")
+	assert(get("pl", core.colorize("red", "test")) == core.colorize("red", "test"))
+end
+unittests.register("test_translated_string", test_translated_string)

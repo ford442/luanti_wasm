@@ -68,7 +68,6 @@
 #include <IAnimatedMesh.h>
 #include <IFileSystem.h>
 #include <IReadFile.h>
-#include <IMeshCache.h>
 #include <json/json.h>
 
 #include <iostream>
@@ -184,7 +183,7 @@ Client::Client(
 
 		ModVFS tmp_mod_vfs;
 		// FIXME: only read files that are relevant to sscsm, and compute sha2 digests
-		tmp_mod_vfs.scanModIntoMemory("*client_builtin*", getBuiltinLuaPath());
+		tmp_mod_vfs.scanModIntoMemory("*client_builtin*", ScriptApiBase::getBuiltinLuaPath());
 
 		for (auto &p : tmp_mod_vfs.m_vfs) {
 			event1->files.emplace_back(p.first, std::move(p.second));
@@ -256,7 +255,7 @@ void Client::loadMods()
 	m_script->setEnv(&m_env);
 
 	// Load builtin
-	m_mod_vfs->scanModIntoMemory(BUILTIN_MOD_NAME, getBuiltinLuaPath());
+	m_mod_vfs->scanModIntoMemory(BUILTIN_MOD_NAME, ScriptApiBase::getBuiltinLuaPath());
 	m_script->loadModFromMemory(BUILTIN_MOD_NAME);
 	m_script->checkSetByBuiltin();
 
@@ -317,12 +316,6 @@ void Client::loadMods()
 		m_script->on_minimap_ready(m_minimap.get());
 }
 
-const std::string &Client::getBuiltinLuaPath()
-{
-	static const std::string builtin_dir = porting::path_share + DIR_DELIM + "builtin";
-	return builtin_dir;
-}
-
 const std::string &Client::getClientModsLuaPath()
 {
 	static const std::string clientmods_dir = porting::path_share + DIR_DELIM + "clientmods";
@@ -331,8 +324,8 @@ const std::string &Client::getClientModsLuaPath()
 
 const std::vector<ModSpec>& Client::getMods() const
 {
-	static std::vector<ModSpec> client_modspec_temp;
-	return client_modspec_temp;
+	const static std::vector<ModSpec> empty;
+	return empty;
 }
 
 const ModSpec* Client::getModSpec(const std::string &modname) const
@@ -373,7 +366,7 @@ Client::~Client()
 
 	m_mesh_update_manager->stop();
 	m_mesh_update_manager->wait();
-	m_mesh_update_manager->clearAllQueues(true);
+	m_mesh_update_manager->clearAllQueues();
 
 	// Delete detached inventories
 	for (auto &it : m_detached_inventories)
@@ -436,7 +429,11 @@ void Client::step(float dtime)
 	if (dtime > DTIME_LIMIT)
 		dtime = DTIME_LIMIT;
 
-	m_animation_time = fmodf(m_animation_time + dtime, 60.0f);
+	{
+		constexpr float ANIMATION_TIME_CYCLE = 16 * 60;
+		m_animation_time = fmodf(m_animation_time + dtime, ANIMATION_TIME_CYCLE);
+		m_animation_dtime = dtime;
+	}
 
 	ReceiveAll();
 
@@ -519,33 +516,22 @@ void Client::step(float dtime)
 			mapblock_limit, &deleted_blocks);
 
 		// Send info to server
-
-		auto i = deleted_blocks.begin();
-		std::vector<v3s16> sendlist;
-		for(;;) {
-			if(sendlist.size() == 255 || i == deleted_blocks.end()) {
-				if(sendlist.empty())
-					break;
-				/*
-					[0] u16 command
-					[2] u8 count
-					[3] v3s16 pos_0
-					[3+6] v3s16 pos_1
-					...
-				*/
-
-				sendDeletedBlocks(sendlist);
-
-				if(i == deleted_blocks.end())
-					break;
-
-				sendlist.clear();
+		while (!deleted_blocks.empty()) {
+			std::vector<v3s16> sendlist;
+			while (!deleted_blocks.empty() && sendlist.size() < 255) {
+				sendlist.push_back(deleted_blocks.back());
+				deleted_blocks.pop_back();
 			}
-
-			sendlist.push_back(*i);
-			++i;
+			sendDeletedBlocks(sendlist);
 		}
 	}
+
+	/*
+		Notify server about received blocks
+	*/
+	if (!m_got_blocks.empty())
+		sendGotBlocks(m_got_blocks);
+	m_got_blocks.clear();
 
 	/*
 		Send pending messages on out chat queue
@@ -632,8 +618,11 @@ void Client::step(float dtime)
 		if (app_thread_items > 0)
 			m_mesh_update_manager->processOnThisThread(app_thread_items);
 #endif
+		// This can cause pending mesh updates to lose their validity, so do it
+		// before processing them.
+		updateStaticLighting(player->getLighting().static_);
+
 		int num_processed_meshes = 0;
-		std::vector<v3s16> blocks_to_ack;
 		bool force_update_shadows = false;
 		MeshUpdateResult r;
 		while (m_mesh_update_manager->getNextResult(r))
@@ -689,22 +678,7 @@ void Client::step(float dtime)
 				}
 			}
 
-			for (auto p : r.ack_list) {
-				if (blocks_to_ack.size() == 255) {
-					sendGotBlocks(blocks_to_ack);
-					blocks_to_ack.clear();
-				}
-
-				blocks_to_ack.emplace_back(p);
-			}
-
-			for (auto block : r.map_blocks)
-				if (block)
-					block->refDrop();
-		}
-		if (blocks_to_ack.size() > 0) {
-				// Acknowledge block(s)
-				sendGotBlocks(blocks_to_ack);
+			r.dropBlocks();
 		}
 
 		if (num_processed_meshes > 0)
@@ -714,7 +688,7 @@ void Client::step(float dtime)
 			auto shadow = RenderingEngine::get_shadow_renderer();
 			if (shadow)
 				shadow->setForceUpdateShadowMap();
-		};
+		}
 	}
 
 	/*
@@ -835,6 +809,31 @@ void Client::step(float dtime)
 	}
 }
 
+bool Client::updateStaticLighting(const StaticLighting &future)
+{
+	auto &current = m_committed_static_light;
+
+	if (current == future)
+		return false;
+	current = future;
+	infostream << "Static lighting params changed" << std::endl;
+
+	float gamma = g_settings->getFloat("display_gamma");
+	if (current.light_curve_set) {
+		set_light_table(current.light_curve, gamma);
+	} else {
+		set_light_curve(gamma);
+	}
+
+	// Force a re-mesh of all blocks
+	ClientMap &map = m_env.getClientMap();
+	std::vector<v3s16> to_update;
+	map.getBlocksWithMeshes(to_update);
+	m_mesh_update_manager->forceRegenerate(&map, to_update);
+
+	return true;
+}
+
 bool Client::loadMedia(const std::string &data, const std::string &filename,
 	bool from_media_push)
 {
@@ -910,6 +909,8 @@ bool Client::loadMedia(const std::string &data, const std::string &filename,
 			return false;
 		TRACESTREAM(<< "Client: Loading translation: "
 				<< "\"" << filename << "\"" << std::endl);
+
+		g_client_translations->setTargetLanguage(gettext_get_lang_code());
 		g_client_translations->loadTranslation(filename, data);
 		return true;
 	}
@@ -1268,15 +1269,14 @@ void Client::startAuth(AuthMechanism chosen_auth_mechanism)
 	}
 }
 
-void Client::sendDeletedBlocks(std::vector<v3s16> &blocks)
+void Client::sendDeletedBlocks(const std::vector<v3s16> &blocks)
 {
 	NetworkPacket pkt(TOSERVER_DELETEDBLOCKS, 1 + sizeof(v3s16) * blocks.size());
 
-	pkt << (u8) blocks.size();
-
-	for (const v3s16 &block : blocks) {
+	assert(blocks.size() <= U8_MAX);
+	pkt << static_cast<u8>(blocks.size());
+	for (const v3s16 &block : blocks)
 		pkt << block;
-	}
 
 	Send(&pkt);
 }
@@ -1284,7 +1284,9 @@ void Client::sendDeletedBlocks(std::vector<v3s16> &blocks)
 void Client::sendGotBlocks(const std::vector<v3s16> &blocks)
 {
 	NetworkPacket pkt(TOSERVER_GOTBLOCKS, 1 + 6 * blocks.size());
-	pkt << (u8) blocks.size();
+
+	assert(blocks.size() <= U8_MAX);
+	pkt << static_cast<u8>(blocks.size());
 	for (const v3s16 &block : blocks)
 		pkt << block;
 
@@ -1546,8 +1548,8 @@ void Client::removeNode(v3s16 p)
 	catch(InvalidPositionException &e) {
 	}
 
-	for (const auto &modified_block : modified_blocks) {
-		addUpdateMeshTaskWithEdge(modified_block.first, false, true);
+	for (const auto &it : modified_blocks) {
+		addUpdateMeshTaskWithEdge(it.first, true);
 	}
 }
 
@@ -1608,8 +1610,8 @@ void Client::addNode(v3s16 p, MapNode n, bool remove_metadata)
 	catch(InvalidPositionException &e) {
 	}
 
-	for (const auto &modified_block : modified_blocks) {
-		addUpdateMeshTaskWithEdge(modified_block.first, false, true);
+	for (const auto &it : modified_blocks) {
+		addUpdateMeshTaskWithEdge(it.first, true);
 	}
 }
 
@@ -1742,12 +1744,12 @@ void Client::setCrack(int level, v3s16 pos)
 	if(old_crack_level >= 0 && (level < 0 || pos != old_crack_pos))
 	{
 		// remove old crack
-		addUpdateMeshTaskForNode(old_crack_pos, false, true);
+		addUpdateMeshTaskForNode(old_crack_pos, true);
 	}
 	if(level >= 0 && (old_crack_level < 0 || pos != old_crack_pos))
 	{
 		// add new crack
-		addUpdateMeshTaskForNode(pos, false, true);
+		addUpdateMeshTaskForNode(pos, true);
 	}
 }
 
@@ -1806,7 +1808,7 @@ void Client::typeChatMessage(const std::wstring &message)
 	sendChatMessage(message);
 }
 
-void Client::addUpdateMeshTask(v3s16 p, bool ack_to_server, bool urgent)
+void Client::addUpdateMeshTask(v3s16 p, bool urgent)
 {
 	// Check if the block exists to begin with. In the case when a non-existing
 	// neighbor is automatically added, it may not. In that case we don't want
@@ -1815,28 +1817,28 @@ void Client::addUpdateMeshTask(v3s16 p, bool ack_to_server, bool urgent)
 	if (b == NULL)
 		return;
 
-	m_mesh_update_manager->updateBlock(&m_env.getMap(), p, ack_to_server, urgent);
+	m_mesh_update_manager->updateBlock(&m_env.getMap(), p, urgent);
 }
 
-void Client::addUpdateMeshTaskWithEdge(v3s16 blockpos, bool ack_to_server, bool urgent)
+void Client::addUpdateMeshTaskWithEdge(v3s16 blockpos, bool urgent)
 {
-	m_mesh_update_manager->updateBlock(&m_env.getMap(), blockpos, ack_to_server, urgent, true);
+	m_mesh_update_manager->updateBlock(&m_env.getMap(), blockpos, urgent, true);
 }
 
-void Client::addUpdateMeshTaskForNode(v3s16 nodepos, bool ack_to_server, bool urgent)
+void Client::addUpdateMeshTaskForNode(v3s16 nodepos, bool urgent)
 {
 	infostream << "Client::addUpdateMeshTaskForNode(): " << nodepos << std::endl;
 
 	v3s16 blockpos = getNodeBlockPos(nodepos);
 	v3s16 blockpos_relative = blockpos * MAP_BLOCKSIZE;
-	m_mesh_update_manager->updateBlock(&m_env.getMap(), blockpos, ack_to_server, urgent, false);
+	m_mesh_update_manager->updateBlock(&m_env.getMap(), blockpos, urgent, false);
 	// Leading edge
 	if (nodepos.X == blockpos_relative.X)
-		addUpdateMeshTask(blockpos + v3s16(-1, 0, 0), false, urgent);
+		addUpdateMeshTask(blockpos + v3s16(-1, 0, 0), urgent);
 	if (nodepos.Y == blockpos_relative.Y)
-		addUpdateMeshTask(blockpos + v3s16(0, -1, 0), false, urgent);
+		addUpdateMeshTask(blockpos + v3s16(0, -1, 0), urgent);
 	if (nodepos.Z == blockpos_relative.Z)
-		addUpdateMeshTask(blockpos + v3s16(0, 0, -1), false, urgent);
+		addUpdateMeshTask(blockpos + v3s16(0, 0, -1), urgent);
 }
 
 ClientEvent *Client::getClientEvent()
@@ -1916,19 +1918,16 @@ void Client::afterContentReceived()
 	// content from previous sessions.
 	guiScalingCacheClear();
 
-	// Rebuild inherited images and recreate textures
 	infostream<<"- Rebuilding images and textures"<<std::endl;
 	m_rendering_engine->draw_load_screen(wstrgettext("Loading textures..."),
 			guienv, m_tsrc, 0, 66);
 	m_tsrc->rebuildImagesAndTextures();
 
-	// Rebuild shaders
 	infostream<<"- Rebuilding shaders"<<std::endl;
 	m_rendering_engine->draw_load_screen(wstrgettext("Rebuilding shaders..."),
 			guienv, m_tsrc, 0, 68);
 	m_shsrc->rebuildShaders();
 
-	// Update node aliases
 	infostream<<"- Updating node aliases"<<std::endl;
 	m_rendering_engine->draw_load_screen(wstrgettext("Initializing nodes..."),
 			guienv, m_tsrc, 0, 70);
@@ -1942,8 +1941,7 @@ void Client::afterContentReceived()
 	m_nodedef->setNodeRegistrationStatus(true);
 	m_nodedef->runNodeResolveCallbacks();
 
-	// Update node textures and assign shaders to each tile
-	infostream<<"- Updating node textures"<<std::endl;
+	infostream<<"- Updating node visuals"<<std::endl;
 	TextureUpdateArgs tu_args;
 	tu_args.last_time_ms = porting::getTimeMs();
 	tu_args.text_base = wstrgettext("Initializing nodes");
@@ -1953,7 +1951,9 @@ void Client::afterContentReceived()
 	// minimap_color, and palette - the two values we care for in SSCSM, get populated
 	m_sscsm_controller->runEvent(this, std::make_unique<SSCSMEventAfterContentReceived>());
 
-	// Start mesh update thread after setting up content definitions
+	// cf. updateStaticLighting()
+	set_light_curve(g_settings->getFloat("display_gamma"));
+
 	infostream<<"- Starting mesh update thread"<<std::endl;
 	m_mesh_update_manager->start();
 
@@ -2043,8 +2043,8 @@ void Client::pushToEventQueue(ClientEvent *event)
 }
 
 // IGameDef interface
-// Under envlock
-IItemDefManager* Client::getItemDefManager()
+
+const IItemDefManager* Client::getItemDefManager() const
 {
 	return m_itemdef;
 }
@@ -2052,10 +2052,9 @@ const NodeDefManager* Client::getNodeDefManager()
 {
 	return m_nodedef;
 }
-ICraftDefManager* Client::getCraftDefManager()
+const ICraftDefManager* Client::getCraftDefManager() const
 {
-	return NULL;
-	//return m_craftdef;
+	return nullptr;
 }
 ITextureSource* Client::getTextureSource()
 {
@@ -2132,8 +2131,10 @@ scene::IAnimatedMesh *Client::getMesh(const std::string &filename, bool *is_shar
 
 	// Try getting it from cache explicitly
 	auto *sm = m_rendering_engine->get_scene_manager();
-	auto *mesh = sm->getMeshCache()->getMeshByName(filename.c_str());
-	if (mesh) {
+	const auto &mesh_cache = sm->getMeshCache();
+	auto cache_it = mesh_cache.find(filename);
+	if (cache_it != mesh_cache.end()) {
+		auto *mesh = cache_it->second.get();
 		mesh->grab();
 		return mesh;
 	}
@@ -2144,7 +2145,7 @@ scene::IAnimatedMesh *Client::getMesh(const std::string &filename, bool *is_shar
 			data.c_str(), data.size(), filename.c_str());
 	FATAL_ERROR_IF(!rfile, "Could not create/open RAM file");
 
-	mesh = sm->getMesh(rfile);
+	auto *mesh = sm->getMesh(rfile);
 	rfile->drop();
 	if (!mesh)
 		return nullptr;

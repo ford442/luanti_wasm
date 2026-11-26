@@ -2440,7 +2440,7 @@ Groups
 
 In a number of places, there is a group table. Groups define the
 properties of a thing (item, node, armor of entity, tool capabilities)
-in such a way that the engine and other mods can can interact with
+in such a way that the engine and other mods can interact with
 the thing without actually knowing what the thing is.
 
 Usage
@@ -2597,7 +2597,8 @@ to games.
       - (14)                                           -- constant tolerance
     ```
   Negative damage values are discarded as no damage.
-* `falling_node`: if there is no walkable block under the node it will fall
+* `falling_node`: if there is no walkable node under the node it will fall.
+  It also falls if the node below is `buildable_to`.
 * `float`: the node will not fall through liquids (`liquidtype ~= "none"`)
      * A liquid source with `groups = {falling_node = 1, float = 1}`
        will fall through flowing liquids.
@@ -2677,7 +2678,7 @@ faster digging time.
 The `level` group is used to limit the toughness of nodes an item capable
 of digging can dig and to scale the digging times / damage to a greater extent.
 
-**Please do understand this**, otherwise you cannot use the system to it's
+**Please do understand this**, otherwise you cannot use the system to its
 full potential.
 
 Items define their properties by a list of parameters for groups. They
@@ -2820,7 +2821,7 @@ Table of resulting tool uses:
 * At `crumbly==0`, the node is not diggable.
 * At `crumbly==3`, the level difference digging time divider kicks in and makes
   easy nodes to be quickly breakable.
-* At `level > 2`, the node is not diggable, because it's `level > maxlevel`
+* At `level > 2`, the node is not diggable, because its `level > maxlevel`
 
 
 
@@ -2937,7 +2938,8 @@ Item Metadata
 -------------
 
 Item stacks can store metadata too. See [`ItemStackMetaRef`](#itemstackmetaref)
-Note: They are not able to store the character `"\1"`, be very careful when storing binary data in them
+**Note:** The following characters cannot be stored and are stripped from
+the input: `\1`, `\2`, `\3`. Consider encoding binary data, e.g. using base64.
 
 Item metadata only contains a key-value store.
 
@@ -3115,8 +3117,9 @@ Elements
 
 ### `size[<W>,<H>,<fixed_size>]`
 
-* Define the size of the menu in inventory slots
-* `fixed_size`: `true`/`false` (optional)
+* Define the size of the formspec in inventory slots
+* `fixed_size`: `true`/`false` (optional). If `true`, the formspec is not
+  scaled to fit the window. Ignored if the `touch_gui` setting is enabled.
 * deprecated: `invsize[<W>,<H>;]`
 
 ### `position[<X>,<Y>]`
@@ -3281,12 +3284,14 @@ Elements
 * It has to be declared *after* the element that is bound to
 * `bgcolor` tooltip background color as `ColorString` (optional)
 * `fontcolor` tooltip font color as `ColorString` (optional)
+* `bgcolor` and `fontcolor` must be given together.
 
 ### `tooltip[<X>,<Y>;<W>,<H>;<tooltip_text>;<bgcolor>;<fontcolor>]`
 
 * Adds tooltip for an area. Other tooltips will take priority when present.
 * `bgcolor` tooltip background color as `ColorString` (optional)
 * `fontcolor` tooltip font color as `ColorString` (optional)
+* `bgcolor` and `fontcolor` must be given together.
 
 ### `hypertip[<gui_element_name>;<staticPos>;<width>;<name>;<text>]`
 
@@ -3406,6 +3411,7 @@ Elements
 * With the old coordinate system, fields are a set height, but will be vertically
   centered on `H`. With the new coordinate system, `H` will modify the height.
 * `name` is the name of the field as returned in fields to `on_receive_fields`
+    * If the name is empty, only `label` is shown, in place of the field.
 * `label`, if not blank, will be text printed on the top left above the field
 * `default` is the default value of the field
     * `default` may contain variable references such as `${text}` which
@@ -3513,7 +3519,7 @@ Elements
 * `noclip=true` means the image button doesn't need to be within specified
   formsize.
 * `drawborder`: draw button border or not
-* `pressed texture name` is the filename of an image on pressed state
+* `pressed texture name` (optional) is the filename of an image on pressed state
 
 ### `item_image_button[<X>,<Y>;<W>,<H>;<item name>;<name>;<label>]`
 
@@ -3540,8 +3546,8 @@ Elements
 ### `textlist[<X>,<Y>;<W>,<H>;<name>;<listelem 1>,<listelem 2>,...,<listelem n>]`
 
 * Scrollable item list showing arbitrary text elements
-* `name` fieldname sent to server on double-click value is current selected
-  element.
+* `name` fieldname sent to server on row select or double-click, value is
+  the current selected element.
 * `listelements` can be prepended by #color in hexadecimal format RRGGBB
   (only).
     * if you want a listelement to start with "#" write "##".
@@ -3549,8 +3555,8 @@ Elements
 ### `textlist[<X>,<Y>;<W>,<H>;<name>;<listelem 1>,<listelem 2>,...,<listelem n>;<selected idx>;<transparent>]`
 
 * Scrollable itemlist showing arbitrary text elements
-* `name` fieldname sent to server on double-click value is current selected
-  element.
+* `name` fieldname sent to server on row select or double-click, value is
+  the current selected element.
 * `listelements` can be prepended by #RRGGBB (only) in hexadecimal format
     * if you want a listelement to start with "#" write "##"
 * Index to be selected within textlist
@@ -3567,6 +3573,7 @@ Elements
 * `current_tab`: index of selected tab 1...
 * `transparent` (optional): if true, tabs are semi-transparent
 * `draw_border` (optional): if true, draw a thin line at tab base
+* `transparent` and `draw_border` must be given together.
 
 ### `tabheader[<X>,<Y>;<H>;<name>;<caption 1>,<caption 2>,...,<caption n>;<current_tab>;<transparent>;<draw_border>]`
 
@@ -3640,7 +3647,7 @@ Elements
 
 * Show a checkbox
 * `name` fieldname data is transferred to Lua
-* `label` to be shown left of checkbox
+* `label` to be shown right of the checkbox
 * `selected` (optional): `true`/`false`
 * **Note**: If the new coordinate system is enabled, checkboxes are
   positioned from the center of the checkbox, not the top.
@@ -3873,6 +3880,7 @@ Some types may inherit styles from parent types.
 * checkbox
 * dropdown
 * field
+* hypertext
 * image
 * image_button
 * item_image_button
@@ -3904,8 +3912,8 @@ Some types may inherit styles from parent types.
           top and bottom,left and right.
         * Four values (e.g. `blue,#A0F,green,#FFFA`): top-left/top and rotates clockwise.
         * These work similarly to CSS borders.
-    * colors - `ColorString`. Sets the color(s) of the box corners. Default `black`.
-    * bordercolors - `ColorString`. Sets the color(s) of the borders. Default `black`.
+    * colors - `ColorString`. Sets the color(s) of the box corners. Default transparent.
+    * bordercolors - `ColorString`. Sets the color(s) of the borders. Default transparent.
     * borderwidths - Integer. Sets the width(s) of the borders in pixels. If the width is
       negative, the border will extend inside the box, whereas positive extends outside
       the box. A width of zero results in no border; this is default.
@@ -3985,6 +3993,8 @@ Some types may inherit styles from parent types.
     * noclip - boolean, set to true to allow the element to exceed formspec bounds.
     * size - 2d vector, sets the size of inventory slots in coordinates.
     * spacing - 2d vector, sets the space between inventory slots in coordinates.
+* hypertext
+    * sound - a sound to be played when an action is triggered.
 * image_button (additional properties)
     * fgimg - standard image. Defaults to none.
     * fgimg_hovered - image when hovered. Defaults to fgimg when not provided.
@@ -4005,6 +4015,7 @@ Some types may inherit styles from parent types.
                      See background9[] documentation for more details.
 * tabheader
     * noclip - boolean, set to true to allow the element to exceed formspec bounds.
+      Default true.
     * sound - a sound to be played when a different tab is selected.
     * textcolor - color. Default white.
 * table, textlist
@@ -4478,17 +4489,23 @@ vectors are written like this: `(x, y, z)`:
     * Returns a new vector `(a, b, c)`.
     * Deprecated: `vector.new()` does the same as `vector.zero()` and
       `vector.new(v)` does the same as `vector.copy(v)`
+* `vector.unpack(v)`:
+    * Returns `v.x, v.y, v.z`.
 * `vector.sort(v1, v2)`:
     * Returns in order minp, maxp vectors of the cuboid defined by `v1`, `v2`.
-* `vector.angle(v1, v2)`:
-    * Returns the angle between `v1` and `v2` in radians.
 * `vector.cross(v1, v2)`:
-    * Returns the cross product of `v1` and `v2`.
+    * Returns the cross product `v1` x `v2`.
+    * Signedness: `+X` x `+Y` is `+Z`, **not** `-Z`.
+* `vector.angle(v1, v2)`:
+    * Returns the unsigned angle between `v1` and `v2` in radians.
+    * The result is in the range `[0, pi]`.
+    * See also `Rotation.axis_angle`.
 * `vector.offset(v, x, y, z)`:
     * Returns the sum of the vectors `v` and `(x, y, z)`.
 * `vector.random_in_area(min, max)`:
     * Returns a random integer position in area formed by `min` and `max`
     * `min` and `max` are inclusive.
+    * Raises an error if `min > max` on any axis.
     * You can use `vector.sort` if you have two vectors and don't know which are the minimum and the maximum.
 
 Operators
@@ -4502,6 +4519,10 @@ Rotation-related functions
 For the following functions `a` is an angle in radians and `r` is a rotation
 vector (`{x = <pitch>, y = <yaw>, z = <roll>}`) where pitch, yaw and roll are
 angles in radians.
+
+Use of these functions is **discouraged** because they use
+deprecated rotation conventions.
+Prefer to use `Rotation` objects when possible.
 
 * `vector.rotate(v, r)`:
     * Applies the rotation `r` to `v` and returns the result.
@@ -4530,6 +4551,222 @@ For example:
 * `core.hash_node_position` (Only works on node positions.)
 * `core.dir_to_wallmounted` (Involves wallmounted param2 values.)
 
+Rotations
+=========
+
+Luanti provides a proper helper class for working with 3D rotations.
+Using vectors of Euler angles instead is discouraged as it is error-prone.
+This class was added in Luanti 5.19.0.
+
+The arithmetic precision of rotation computations may change (improve) in the future.
+In the current implementation, rotations are internally represented as quaternions
+of 32-bit floats (*less* precision than the Lua number type).
+
+Rotations use **left-handed** conventions.
+For example a quarter turn (+pi/2) around the Y-axis will map +Z to +X.
+
+Constructors
+------------
+
+* `Rotation.identity()`: Constructs a no-op rotation.
+* `Rotation.quaternion(x, y, z, w)`:
+  Constructs a rotation from a quaternion (which need not be normalized).
+* `Rotation.axis_angle(axis, angle)`:
+  Constructs a rotation around the given axis by the given angle.
+  * `axis` is a nonzero vector, which need not be normalized.
+  * `angle` is in radians.
+  * Example: `Rotation.axis_angle(vector.new(1, 0, 1), math.pi/2)`
+    is a quarter-turn around the bisector between the X and Z axes.
+  * Let `v1`, `v2` be nonzero vectors. Then it holds that
+    `Rotation.axis_angle(v1:cross(v2), v1:angle(v2)):apply(v1):normalize()`
+    is (approximately) `v2:normalize()`.
+    A shorthand for this is provided as `Rotation.maps_to(v1, v2)`.
+  * There are shorthands for rotations around the cardinal axes:
+    * `Rotation.x(pitch)`
+    * `Rotation.y(yaw)`
+    * `Rotation.z(roll)`
+* `Rotation.euler_xyz(pitch, yaw, roll)`
+  * All angles in radians.
+  * Uses X-Y-Z rotation order, equivalent to
+    `Rotation.compose(Rotation.z(roll), Rotation.y(yaw), Rotation.x(pitch))`.
+  * Consistent with the Euler angles that can be used for bones or attachments.
+* `Rotation.euler_zxy(pitch, yaw, roll)`
+  * Same as `euler_xyz`, but uses Z-X-Y rotation order.
+  * This is consistent with the Euler angles that can be used for entities.
+    You can do `Rotation.euler_zxy((-rotation):unpack())`
+    to convert an entity rotation vector (note the handedness conversion).
+* `Rotation.maps_to(dir_from, dir_to)`:
+  Construct a rotation that maps `dir_from` to `dir_to`.
+  * `dir_from` and `dir_to` are nonzero direction vectors.
+  * The given rotation only rotates in the plane spanned by the two vectors,
+    taking a shortest path. If `dir_from` and `dir_to` are parallel,
+    any plane containing the spanned line may be chosen.
+    Otherwise, the returned rotation is uniquely defined.
+* `Rotation.compose(...)`: Returns the composition of the given rotations.
+  * `Rotation.compose()` is equivalent to `Rotation.identity()`.
+  * `Rotation.compose(rot)` copies the rotation.
+  * `Rotation.compose(...)` for at least two rotations composes the given rotations
+    in right-to-left order. This means that `Rotation.compose(second, first):apply(v)`
+    is equivalent to `second:apply(first:apply(v))`:
+    The composed rotation first applies `first`, then `second` to a vector.
+
+Conversions
+-----------
+
+Corresponding to the constructors, rotations can be converted
+to different representations.
+Note that this conversion is not guaranteed to produce the same values you put in.
+It is only guaranteed that the values produce an approximately equivalent rotation
+when passed to the corresponding constructor.
+
+* `x, y, z, w = rot:to_quaternion()`
+  * Returns the normalized quaternion representation.
+* `axis, angle = rot:to_axis_angle()`
+  * `axis` is a normalized vector that can point in any direction.
+  * `angle` is the rotation about this axis as an angle in radians.
+* `pitch, yaw, roll = rot:to_euler_xyz()`
+  * Angles are all in radians.
+  * `pitch`, `yaw`, `roll`: Rotation around the X-, Y-, and Z-axis respectively.
+  * Inverse of `Rotation.euler_xyz`.
+* `pitch, yaw, roll = rot:to_euler_zxy()`
+  * Same as `to_euler_xyz`, except uses Z-X-Y rotation order.
+  * To obtain a right-handed rotation in Z-X-Y order used for entities,
+    you can do `-vector.new(rot:to_euler_zxy())`.
+
+Rotations can also be converted to matrices using `Matrix4.rotation(rot)`.
+
+Methods
+-------
+
+* `rot:compose(...)`: Shorthand for `Rotation.compose(rot, ...)`.
+* `rot:apply(vec)`: Returns the result of applying the rotation to the given vector.
+* `rot:invert()`: Returns the inverse rotation.
+* `from:slerp(to, time)`: Returns an interpolated rotation.
+  * Uses shortest path spherical linear interpolation.
+  * `time = 0` is all `from`, `time = 1` is all `to`.
+* `rot:angle_to(other)`: Returns the absolute angle between two rotations.
+  * Useful to measure similarity.
+
+Rotations implement `__tostring`. The format is only intended for human-readability,
+not serialization, and may thus change in the future.
+
+
+Matrices
+========
+
+Luanti uses 4x4 matrices to represent linear transformations of 3D vectors.
+For this, 3D vectors are embedded into 4D space, typically using
+[homogenous coordinates](https://en.wikipedia.org/wiki/Homogeneous_coordinates)
+(for positions) or by adding a fourth component of zero (for directions).
+This class was added in Luanti 5.19.0.
+
+The matrices use column-major conventions.
+Vectors are treated as column vectors.
+This means the first column is the image of the vector (1, 0, 0, 0),
+the second column is the image of (0, 1, 0, 0), and so on.
+Thus the translation is in the last column.
+
+The arithmetic precision of matrix computations may change (improve) in the future.
+Matrices currently use 32-bit floats (*less* precision than the Lua number type).
+
+Matrices are very suitable for constructing, composing and applying
+linear 4D transformations (which are equivalent to 3D projective transformations
+when using homogenous coordinates).
+
+Matrices should be avoided for exact storage of TRS (translation, rotation, scale)
+transformations if the properties need to be handled separately:
+Decomposition into rotation and scale will be expensive and inexact.
+You should instead store the translation, rotation and scale.
+
+Constructors
+------------
+
+* `Matrix4.new(r1c1, r1c2, ..., r4c4)`:
+  Constructs a matrix from the given 16 numbers in row-major order.
+* `Matrix4.identity()`: Constructs an identity matrix.
+* `Matrix4.full(number)`: Constructs a matrix where all entries are the given number.
+* `Matrix4.translation(vec)`: Constructs a matrix that translates vectors by the given vector.
+* `Matrix4.rotation(rot)`: Constructs a matrix that applies the given `Rotation` to vectors.
+* `Matrix4.scale(s)`: Constructs a matrix that applies the given
+  component-wise scaling factors to vectors.
+  `s` can be a vector or a number.
+* `Matrix4.trs([t], [r], [s])`: Shorthand for
+  `Matrix4.compose(Matrix4.translation(t), Matrix4.rotation(r), Matrix4.scale(s))`.
+  All parameters are optional and default to identity transforms.
+* `Matrix4.reflection(normal)`: Constructs a matrix that reflects vectors
+  at the plane with the given plane normal vector (which need not be normalized).
+* `Matrix4.compose(...)`: Returns the composition of the given matrices.
+  * `Matrix4.compose()` is equivalent to `Matrix4.identity()`.
+  * `Matrix4.compose(mat)` copies the matrix.
+  * `Matrix4.compose(...)` for at least two matrices composes the given matrices
+    in right-to-left order. This means that `Matrix4.compose(second, first):transform_4d(x, y, z, w)`
+    is equivalent to `second:transform_4d(first:transform_4d(x, y, z, w))`:
+    The composed matrix first applies `first`, then `second` to a vector.
+
+Container utilities:
+
+For all of the below methods, `row` and `col`umn indices range from `1` to `4`.
+
+* `mat:get(row, col)`: Returns the number in the given row and column.
+* `mat:set(row, col, number)`: Set the entry in the given row and column to the given number.
+* `x, y, z, w = mat:get_row(row)`: Get the 4 numbers in the given row.
+* `mat:set_row(row, x, y, z, w)`: Set the 4 numbers in the given row.
+* `x, y, z, w = mat:get_col(col)`: Get the 4 numbers in the given column.
+* `mat:set_col(col, x, y, z, w)`: Set the 4 numbers in the given column.
+* `mat:copy()`: Returns a new matrix containing the same numbers.
+* `r1c1, r1c2, ..., r4c4 = mat:unpack()`:
+  Get the 16 numbers in the matrix in row-major order.
+  `Matrix4.new(mat:unpack())` is thus equivalent to `mat:copy()`.
+
+Linear algebra:
+
+* Vector transformations:
+  * `x, y, z, w = mat:transform_4d(x, y, z, w)`: Apply the matrix to a 4d vector.
+  * `mat:transform_pos(pos)`:
+    * Apply the matrix to a vector representing a position.
+    * Applies the transformation as if w = 1 and discards the resulting w component.
+  * `mat:transform_dir(dir)`:
+    * Apply the matrix to a vector representing a direction.
+    * Ignores the fourth row and column; does not apply the translation (w = 0).
+* `mat:compose(...)`: Shorthand for `Matrix4.compose(mat, ...)`.
+* `mat:determinant()`: Returns the determinant.
+* `mat:invert()`: Returns a newly created inverse, or `nil` if the matrix is (close to being) singular.
+* `mat:transpose()`: Returns a transposed copy of the matrix.
+* `mat:equals(other, [tolerance = 0])`:
+  Returns whether all components differ in absolute value at most by the given tolerance.
+  * `m1 == m2`: Returns whether `m1` and `m2` are identical (`tolerance = 0`).
+* `mat:is_affine_transform([tolerance = 0])`:
+  Whether the matrix is an affine transformation in 3d space,
+  meaning it is a 3d linear transformation plus a translation.
+  (This is the case if the last row is approximately 0, 0, 0, 1.)
+
+For working with affine transforms, the following methods are available:
+
+* `mat:get_translation()`: Returns the translation as a vector.
+* `mat:set_translation(vec)`: Sets (overwrites) the translation in the last column.
+
+For TRS transforms specifically,
+let `mat = Matrix4.compose(Matrix4.translation(t), Matrix4.rotation(r), Matrix4.scale(s))`.
+Then we can decompose `mat` further. Note that `mat` must not shear or reflect.
+
+* `rotation, scale = mat:get_rotation_scale()`:
+  Extracts a `Rotation` equivalent to `r`,
+  along with the corresponding component-wise scaling factors as a vector.
+
+Operators
+---------
+
+Similar to vectors, matrices define some element-wise arithmetic operators:
+
+* `m1 + m2`: Returns the sum of both matrices.
+* `m1 - m2`: Shorthand for `m1 + (-m2)`.
+* `-m`: Returns the additive inverse.
+* `m * s` or `s * m`: Returns the matrix `m` scaled by the scalar `s`.
+  * Note: *All* entries are scaled, including the last column:
+    The matrix may not be an affine transform afterwards.
+
+Matrices also define a `__tostring` metamethod.
+This is only intended for human readability and not for serialization.
 
 
 
@@ -4576,6 +4813,8 @@ vectors are written like this: `(x, y)`:
 
 * `vector2.new(x, y)`:
     * Returns a new vector `(x, y)`.
+* `vector2.unpack(v)`:
+    * Returns `v.x, v.y`.
 * `vector2.from_angle(angle)`:
     * Returns a new unit vector from an angle.
     * `angle` is the angle in radians from the positive x-axis (counterclockwise).
@@ -4609,6 +4848,7 @@ Helper functions
 
 * `dump2(obj, name, dumped)`: returns a string which makes `obj`
   human-readable, handles reference loops.
+    * Writes one `name[key] = value` line per value.
     * `obj`: arbitrary variable
     * `name`: string, default: `"_"`
     * `dumped`: table, default: `{}`
@@ -4626,6 +4866,8 @@ Helper functions
     * If the absolute value of `x` is within the `tolerance` or `x` is NaN,
       `0` is returned.
 * `math.factorial(x)`: returns the factorial of integer `x` (range: [ulua])
+    * Raises an error if `x` is negative or not an integer.
+    * Returns `math.huge` if `x` is 171 or larger.
 * `math.round(x)`: Returns `x` rounded to the nearest integer.
     * At a multiple of 0.5, rounds away from zero.
 * `math.isfinite(x)`: Returns `true` if `x` is neither an infinity nor a NaN,
@@ -4652,8 +4894,11 @@ Helper functions
     * Note that the returned lines may be longer than the limit since it only
       splits at word borders.
     * `limit`: maximum amount of characters in one line
+        * Characters are counted in bytes.
     * `as_table`: boolean, if set to true, a table of lines instead of a string
       is returned, default: `false`
+    * If the string is longer than `limit`, existing newlines and repeated
+      spaces are replaced by single spaces.
 * `core.pos_to_string(pos, decimal_places)`: returns string `"(X,Y,Z)"`
     * `pos`: table {x=X, y=Y, z=Z}
     * Converts the position `pos` to a human-readable, printable string
@@ -4661,10 +4906,13 @@ Helper functions
       the position are rounded to the given decimal place.
 * `core.string_to_pos(string)`: returns a position or `nil`
     * Same but in reverse.
+    * The parentheses inside the string are optional, the values may be
+      separated by commas or spaces.
     * If the string can't be parsed to a position, nothing is returned.
 * `core.string_to_area("(X1, Y1, Z1) (X2, Y2, Z2)", relative_to)`:
     * returns two positions
     * Converts a string representing an area box into two positions
+    * Returns `nil` if the string can't be parsed to an area.
     * X1, Y1, ... Z2 are coordinates
     * `relative_to`: Optional. If set to a position, each coordinate
       can use the tilde notation for relative positions
@@ -4673,15 +4921,16 @@ Helper functions
       * `"~<number>"`: Relative coordinate plus `<number>`
     * Example: `core.string_to_area("(1,2,3) (~5,~-5,~)", {x=10,y=10,z=10})`
       returns `{x=1,y=2,z=3}, {x=15,y=5,z=10}`
-* `core.formspec_escape(string)`: returns a string
-    * escapes the characters "[", "]", "\", "," and ";", which cannot be used
-      in formspecs.
 * `core.is_yes(arg)`
     * returns true if passed 'y', 'yes', 'true' or a number that isn't zero.
+    * `arg` is converted to a string first, case and surrounding whitespace
+      are ignored.
 * `core.is_nan(arg)`
     * returns true when the passed number represents NaN.
 * `core.get_us_time()`
-    * returns time with microsecond precision. May not return wall time.
+    * returns time in microseconds since an unspecified starting point
+      (usually not wall time)
+    * only useful for measuring elapsed time
 * `table.copy(table)`: returns a table
     * returns a deep copy of `table`
     * strips metatables, but this may change in the future
@@ -4692,7 +4941,7 @@ Helper functions
 * `table.indexof(list, val)`: returns the smallest numerical index containing
       the value `val` in the table `list`. Non-numerical indices are ignored.
       If `val` could not be found, `-1` is returned. `list` must not have
-      negative indices.
+      negative indices. The search stops at the first `nil` value.
 * `table.keyof(table, val)`: returns the key containing
       the value `val` in the table `table`. If multiple keys contain `val`,
       it is unspecified which key will be returned.
@@ -4700,6 +4949,7 @@ Helper functions
 * `table.insert_all(table, other_table)`:
     * Appends all values in `other_table` to `table` - uses `#table + 1` to
       find new indices.
+    * Returns `table`.
 * `table.key_value_swap(t)`: returns a table with keys and values swapped
     * If multiple keys in `t` map to the same value, it is unspecified which
       value maps to that key.
@@ -4713,17 +4963,20 @@ Helper functions
 * `core.pointed_thing_to_face_pos(placer, pointed_thing)`: returns a
   position.
     * returns the exact position on the surface of a pointed node
+    * `placer`: ObjectRef of a player
+    * `pointed_thing`: must be of type `"node"`
 * `core.get_tool_wear_after_use(uses, initial_wear)`
     * Simulates a tool being used once and returns the added wear,
       such that, if only this function is used to calculate wear,
       the tool will break exactly after `uses` times of uses
     * `uses`: Amount of times the tool can be used
+        * If `0`, the tool has infinite uses and `0` is returned.
     * `initial_wear`: The initial wear the tool starts with (default: 0)
 * `core.get_dig_params(groups, tool_capabilities, wear)`:
     Simulates an item that digs a node.
     Returns a table with the following fields:
     * `diggable`: `true` if node can be dug, `false` otherwise.
-    * `time`: Time it would take to dig the node.
+    * `time`: Time in seconds it would take to dig the node.
     * `wear`: How much wear would be added to the tool (ignored for non-tools).
     `time` and `wear` are meaningless if node's not diggable
     Parameters:
@@ -4738,7 +4991,8 @@ Helper functions
     Parameters:
     * `groups`: Damage groups of the object
     * `tool_capabilities`: Tool capabilities table of the item
-    * `time_from_last_punch`: time in seconds since last punch action (can be `nil`)
+    * `time_from_last_punch`: time in seconds since last punch action.
+      If `nil`, full damage is assumed.
     * `wear`: Amount of wear the item starts with (default: 0)
 
 
@@ -4751,8 +5005,8 @@ translation files.
 Translating a string
 --------------------
 
-Two functions are provided to translate strings: `core.translate` and
-`core.get_translator`.
+Three functions are provided to translate strings: `core.translate`,
+`core.translate_n` and `core.get_translator`.
 
 * `core.get_translator(textdomain)` is a simple wrapper around
   `core.translate` and `core.translate_n`.
@@ -4781,7 +5035,7 @@ Two functions are provided to translate strings: `core.translate` and
   Arguments are literal strings -- they will not be translated.
 
 * `core.translate_n(textdomain, str, str_plural, n, ...)` translates the
-  string `str` with the given `textdomain` for disambiguaion. The value of
+  string `str` with the given `textdomain` for disambiguation. The value of
   `n`, which must be a nonnegative integer, is used to decide whether to use
   the singular or the plural version of the string. Depending on the locale of
   the client, the choice between singular and plural might be more complicated,
@@ -4805,7 +5059,7 @@ end)
 core.register_chatcommand("playtime", {
     func = function(name)
         local last_login = core.get_auth_handler().get_auth(name).last_login
-        local playtime = math.floor((last_login-os.time())/60)
+        local playtime = math.floor((os.time()-last_login)/60)
         return true, PS(
             "You have been playing for @1 minute.",
             "You have been playing for @1 minutes.",
@@ -4933,6 +5187,33 @@ msgid "Hello world!"
 msgstr "Bonjour le monde!"
 ```
 
+Monolingual Translations (Non-English Source Locale)
+----------------------------------------------------
+
+By default, Luanti assumes that the source strings in mods are written in English.
+Starting from version 5.18.0, mod developers can specify any source language for
+their mod by writing the original source strings in that language.
+
+To declare the source language, you must add a `X-Source-Language` field
+to the **English** translation file (specifying the source language in files
+for other locales will be ignored).
+
+For `.po` and `.mo` files, the source language is specified in the header entry:
+```po
+msgid ""
+msgstr ""
+"X-Source-Language: de\n"
+```
+
+For the old `.tr` format, add a comment immediately after the `textdomain` declaration:
+```text
+# textdomain: mymod
+# X-Source-Language: de
+```
+
+**Note:** Starting from version 5.18.0, the English translation is provided [server] and
+used [client] as a fallback if no specific translation is available for the current language.
+
 Escapes
 -------
 
@@ -5049,6 +5330,10 @@ Noise Parameters
 ----------------
 
 Noise Parameters are commonly called `NoiseParams`.
+
+`spread` is required. The other fields are optional and default to
+`offset = 0`, `scale = 1`, `seed = 12345`, `octaves = 3`,
+`persistence = 0.6` and `lacunarity = 2.0`.
 
 ### `offset`
 
@@ -6155,7 +6440,8 @@ Utilities
     * Can read or write to this directory at any time.
     * It's possible that multiple Luanti instances are running at the same
       time, which may lead to corruption if you are not careful.
-* `core.is_singleplayer()`
+* `core.is_singleplayer()`: returns `true` if the server is running in
+  singleplayer mode, `false` otherwise.
 * `core.features`: Table containing *server-side* API feature flags
 
   ```lua
@@ -6414,11 +6700,11 @@ Utilities
       Otherwise, the directory will only be removed if it is empty.
     * Returns true on success, false on failure.
 * `core.cpdir(source, destination)`: returns success.
-    * Copies a directory specified by `path` to `destination`
+    * Copies a directory specified by `source` to `destination`
     * Any files in `destination` will be overwritten if they already exist.
     * Returns true on success, false on failure.
 * `core.mvdir(source, destination)`: returns success.
-    * Moves a directory specified by `path` to `destination`.
+    * Moves a directory specified by `source` to `destination`.
     * If the `destination` is a non-empty directory, then the move will fail.
     * Returns true on success, false on failure.
 * `core.get_dir_list(path, [is_dir])`: returns list of entry names
@@ -6524,12 +6810,18 @@ Call these functions only at load time!
       `name` from `core.registered_items` and from the associated item table
       according to its nature (e.g. `core.registered_nodes`)
 * `core.register_entity(name, entity definition)`
+    * See [Entity definition](#entity-definition).
 * `core.register_abm(abm definition)`
+    * See [ABM (ActiveBlockModifier) definition](#abm-activeblockmodifier-definition).
 * `core.register_lbm(lbm definition)`
+    * See [LBM (LoadingBlockModifier) definition](#lbm-loadingblockmodifier-definition).
 * `core.register_alias(alias, original_name)`
     * Also use this to set the 'mapgen aliases' needed in a game for the core
       mapgens. See [Mapgen aliases](#mapgen-aliases) section above.
+    * Does nothing if an item named `alias` is already registered.
 * `core.register_alias_force(alias, original_name)`
+    * Same as `core.register_alias`, but an already registered item named
+      `alias` is unregistered first.
 * `core.register_ore(ore definition)`
     * Returns an integer object handle uniquely identifying the registered
       ore on success.
@@ -6860,7 +7152,10 @@ Authentication
 * `core.privs_to_string(privs[, delim])`:
     * Returns the string representation of `privs`
     * `delim`: String to delimit privs. Defaults to `","`.
-* `core.get_player_privs(name) -> {priv1=true,...}`
+* `core.get_player_privs(name)`:
+    * Returns the privileges of player `name` as `{ priv1 = true, ... }`
+    * The player does not need to be online.
+    * Returns an empty table if the player does not exist.
 * `core.check_player_privs(player_or_name, ...)`:
   returns `bool, missing_privs`
     * A quickhand for checking privileges.
@@ -6875,13 +7170,28 @@ Authentication
       engine as returned as part of a `get_auth()` call on the auth handler.
     * Only use this function for making it possible to log in via password from
       external protocols such as IRC, other uses are frowned upon.
-* `core.get_password_hash(name, raw_password)`
+* `core.get_password_hash(name, password)`
     * Convert a name-password pair to a password hash that Luanti can use.
-    * The returned value alone is not a good basis for password checks based
-      on comparing the password hash in the database with the password hash
-      from the function, with an externally provided password, as the hash
-      in the db might use the new SRP verifier format.
-    * For this purpose, use `core.check_password_entry` instead.
+    * Player name *cannot* be empty, and both arguments *must* be strings.
+    * The returned value may not be the same for multiple invocations with the same name and password.
+    * The returned value therefore *cannot* be used for password checks based
+      on a direct string comparison, use `core.check_password_entry` instead.
+    * If you used this function as a hash you can replace it with `core.sha1`:
+    ```lua
+        -- Lua equivalent of the legacy core.get_password_hash algorithm
+        local function legacy_get_password_hash(name, password)
+            -- convert to strings
+            name = tostring(name)
+            password = tostring(password)
+            -- remove anything after the first null character
+            name = name:match("^[^%z]*")
+            password = password:match("^[^%z]*")
+            if password == "" then
+                return ""
+            end
+            return core.encode_base64(core.sha1(name..password, true))
+        end
+    ```
 * `core.get_player_ip(name)`: returns an IP address string for the player
   `name`.
     * The player needs to be online for this to be successful.
@@ -7002,6 +7312,7 @@ Environment access
         * `itemstack = ItemStack(node.name)`
         * `placer = placer`
         * `pointed_thing = { type = "node", above = pos, under = vector.offset(pos, 0, -1, 0) }`
+    * Returns `true` if successful, `false` on failure
 * `core.dig_node(pos[, digger])`
     * Dig node with the same effects that a player would cause
     * `digger`: The ObjectRef that digs the node (optional)
@@ -7009,6 +7320,7 @@ Environment access
 * `core.punch_node(pos[, puncher])`
     * Punch node with the same effects that a player would cause
     * `puncher`: The ObjectRef that punches the node (optional)
+    * Returns `true` if successful, `false` on failure
 * `core.spawn_falling_node(pos)`
     * Change node into falling node
     * Returns `true` and the ObjectRef of the spawned entity if successful, `false` on failure
@@ -7051,7 +7363,9 @@ Environment access
     * returns an iterator of valid objects
 * `core.set_timeofday(val)`: set time of day
     * `val` is a number between `0` and `1`; `0` for midnight, `0.5` for midday
+    * raises an error if `val` is outside that range
 * `core.get_timeofday()`: get time of day
+    * returns a number between `0` and `1`; `0` for midnight, `0.5` for midday
 * `core.get_gametime()`: returns the time, in seconds, since the world was
   created. An integer in range [u32]. The time is not available (`nil`)
   before the first server step.
@@ -7082,13 +7396,19 @@ Environment access
 * `core.get_value_noise(noiseparams)`
     * Return world-specific value noise.
     * The actual seed used is the noiseparams seed plus the world seed.
-    * **Important**: Requires the mapgen environment to be initalized, do not use at load time.
+    * **Important**: Requires the mapgen environment to be initialized, do not use at load time.
 * `core.get_value_noise(seeddiff, octaves, persistence, spread)`
     * Deprecated: use `core.get_value_noise(noiseparams)` instead.
 * `core.get_perlin(noiseparams)`
     * Deprecated: renamed to `core.get_value_noise` in version 5.12.0.
 * `core.get_perlin(seeddiff, octaves, persistence, spread)`
     * Deprecated: renamed to `core.get_value_noise` in version 5.12.0.
+* `core.get_value_noise_map(noiseparams, size)`
+    * Return world-specific value noise map. See [`ValueNoiseMap`](#valuenoisemap).
+    * The actual seed used is the noiseparams seed plus the world seed.
+    * **Important**: Requires the mapgen environment to be initialized, do not use at load time.
+* `core.get_perlin_map(noiseparams, size)`
+    * Deprecated: renamed to `core.get_value_noise_map` in version 5.12.0.
 * `core.get_voxel_manip([pos1, pos2])`
     * Return voxel manipulator object.
     * Loads the manipulator from the map if positions are passed.
@@ -7246,6 +7566,7 @@ Environment access
           nil if the parameter was absent).
 * `core.delete_area(pos1, pos2)`
     * delete all mapblocks in the area from pos1 to pos2, inclusive
+    * returns `true` if all mapblocks were deleted, `false` otherwise
 * `core.line_of_sight(pos1, pos2)`: returns `boolean, pos`
     * Checks if there is anything other than air between pos1 and pos2.
     * Returns false if something is blocking the sight.
@@ -7263,7 +7584,6 @@ Environment access
       nodes and objects. Uses the same format as the `pointabilities` property
       of item definitions. Default is `nil`.
 * `core.find_path(pos1, pos2, searchdistance, max_jump, max_drop, algorithm)`
-    * returns table containing path that can be walked on
     * returns a table of 3D points representing a path from `pos1` to `pos2` or
       `nil` on failure.
     * Reasons for failure:
@@ -7364,12 +7684,11 @@ You can find mod channels communication scheme in `doc/mod_channels.png`.
 Inventory
 ---------
 
-`core.get_inventory(location)`: returns an `InvRef`
-
-* `location` = e.g.
-    * `{type="player", name="celeron55"}`
-    * `{type="node", pos={x=, y=, z=}}`
-    * `{type="detached", name="creative"}`
+* `core.get_inventory(location)`: returns an `InvRef`
+    * `location` = e.g.
+        * `{type="player", name="celeron55"}`
+        * `{type="node", pos={x=, y=, z=}}`
+        * `{type="detached", name="creative"}`
 * `core.create_detached_inventory(name, callbacks, [player_name])`: returns
   an `InvRef`.
     * `callbacks`: See [Detached inventory callbacks](#detached-inventory-callbacks)
@@ -7426,8 +7745,8 @@ Formspec functions
       `core.close_formspec(playername, "")`.
       **USE THIS ONLY WHEN ABSOLUTELY NECESSARY!**
 * `core.formspec_escape(string)`: returns a string
-    * escapes the characters "[", "]", "\", "," and ";", which cannot be used
-      in formspecs.
+    * escapes the characters "[", "]", "\", ",", ";" and "$", which cannot be
+      used in formspecs.
 * `core.hypertext_escape(string)`: returns a string
     * escapes the characters "\", "<", and ">" to show text in a hypertext element.
     * not safe for use with tag attributes.
@@ -7465,6 +7784,10 @@ Item handling
 
 * `core.inventorycube(img1, img2, img3)`
     * Returns a string for making an image of a cube (useful as an item image)
+    * `img1`, `img2`, `img3`: textures for the top, left and right side
+    * If not present, `img2` and `img3` default to `img1`
+    * The returned string is an `[inventorycube` texture modifier with the
+      `^` in the given texture names replaced by `&`.
 * `core.get_pointed_thing_position(pointed_thing, above)`
     * Returns the position of a `pointed_thing` or `nil` if the `pointed_thing`
       does not refer to a node or entity.
@@ -7492,8 +7815,11 @@ Item handling
       "back" of a node.
 * `core.dir_to_yaw(dir)`
     * Convert a vector into a yaw (angle)
+    * Yaw is in radians, counter-clockwise from the +z direction.
+    * The y component of `dir` is ignored.
 * `core.yaw_to_dir(yaw)`
     * Convert yaw (angle) to a vector
+    * Returns a horizontal vector of length 1.
 * `core.is_colored_paramtype(ptype)`
     * Returns a boolean. Returns `true` if the given `paramtype2` contains
       color information (`color`, `colorwallmounted`, `colorfacedir`, etc.).
@@ -7602,11 +7928,17 @@ Rollback
 * `core.rollback_get_node_actions(pos, range, seconds, limit)`:
   returns `{{actor, pos, time, oldnode, newnode}, ...}`
     * Find who has done something to a node, or near a node
+    * `range`: maximum distance from `pos` on each axis, in nodes
+    * `seconds`: how far back in time to search
+    * `limit`: maximum number of actions returned, newest first
     * `actor`: `"player:<name>"`, also `"liquid"`.
+    * Returns `nil` if the `enable_rollback_recording` setting is disabled.
 * `core.rollback_revert_actions_by(actor, seconds)`: returns
   `boolean, log_messages`.
     * Revert latest actions of someone
     * `actor`: `"player:<name>"`, also `"liquid"`.
+    * `seconds`: how far back in time to revert
+    * Returns `false` if the `enable_rollback_recording` setting is disabled.
 
 Defaults for the `on_place` and `on_drop` item definition functions
 -------------------------------------------------------------------
@@ -7651,7 +7983,7 @@ Defaults for the `on_place` and `on_drop` item definition functions
       function wrapper for `core.do_item_eat`.
     * `hp_change`, `replace_with_item`: See `core.do_item_eat`
     * Note: the interpretation of `hp_change` and `replace_with_item` may
-      may be overridden by the `core.register_on_eat` callbacks.
+      be overridden by the `core.register_on_item_eat` callbacks.
       For the exact behavior, see `core.do_item_eat`
 
 Defaults for the `on_punch` and `on_dig` node definition callbacks
@@ -7968,9 +8300,11 @@ core.ipc_get("test:foo") -- returns an empty table
 Bans
 ----
 
-* `core.get_ban_list()`: returns a list of all bans formatted as string
-* `core.get_ban_description(ip_or_name)`: returns list of bans matching
-  IP address or name formatted as string
+* `core.get_ban_list()`: returns all bans as a single string
+    * Format: `"<ip>|<name>, <ip>|<name>, ..."`
+* `core.get_ban_description(ip_or_name)`: returns the bans matching
+  IP address or name as a single string
+    * Same format as `core.get_ban_list`.
 * `core.ban_player(name)`: ban the IP of a currently connected player
     * Returns boolean indicating success
 * `core.unban_player_or_ip(ip_or_name)`: remove ban record matching
@@ -8004,10 +8338,10 @@ Particles
       minsize, maxsize,
       collisiondetection, texture, playername)`
 
-* `core.delete_particlespawner(id, player)`
+* `core.delete_particlespawner(id[, playername])`
     * Delete `ParticleSpawner` with `id` (return value from
       `core.add_particlespawner`).
-    * If playername is specified, only deletes on the player's client,
+    * If `playername` is specified, only deletes on the player's client,
       otherwise on all clients.
 
 Schematics
@@ -8062,7 +8396,7 @@ Schematics
         * place_center_y
         * place_center_z
 
-* `core.place_schematic_on_vmanip(vmanip, pos, schematic, rotation, replacement, force_placement, flags)`:
+* `core.place_schematic_on_vmanip(vmanip, pos, schematic, rotation, replacements, force_placement, flags)`:
     * This function is analogous to core.place_schematic, but places a
       schematic onto the specified VoxelManip object `vmanip` instead of the
       map.
@@ -8100,7 +8434,7 @@ Schematics
         * `write_yslice_prob`: string value:
             * `none`: no `write_yslice_prob` table is inserted,
             * `low`: only probabilities that are not 254 or 255 are written in
-              the `write_ylisce_prob` table,
+              the `write_yslice_prob` table,
             * `all`: write all probabilities to the `write_yslice_prob` table.
             * The default for this option is `all`.
             * Any invalid value will be interpreted as `all`.
@@ -8399,6 +8733,8 @@ Misc.
 
 * `core.global_exists(name)`
     * Checks if a global variable has been set, without triggering a warning.
+    * `name`: string, name of the global variable
+    * Returns a boolean.
 
 * `core.register_portable_metatable(name, mt)`:
     * Register a metatable that should be preserved when Lua data is transferred
@@ -8553,8 +8889,8 @@ use the provided load and write functions for this.
     * Returns all areas as table, indexed by the area ID.
     * Table values: see `get_area`.
 * `get_areas_in_area(corner1, corner2, accept_overlap, include_corners, include_data)`
-    * Returns all areas that contain all nodes inside the area specified by`
-      `corner1 and `corner2` (inclusive).
+    * Returns all areas that contain all nodes inside the area specified by
+      `corner1` and `corner2` (inclusive).
     * `accept_overlap`: if `true`, areas are returned that have nodes in
       common (intersect) with the specified area.
     * Returns the same values as `get_areas_for_pos`.
@@ -8618,11 +8954,16 @@ An `InvRef` is a reference to an inventory.
     * Setting `size` to 0 deletes a list
     * returns `false` on error (e.g. invalid `listname` or `size`)
 * `get_width(listname)`: get width of a list
+    * returns `0` if the list doesn't exist
 * `set_width(listname, width)`: set width of list; currently used for crafting
     * integer in range: [0, 32767]
     * returns `false` on error (e.g. invalid `listname` or `width`)
 * `get_stack(listname, i)`: get a copy of stack index `i` in list
+    * returns an empty `ItemStack` if the list doesn't exist or `i` is out
+      of range
 * `set_stack(listname, i, stack)`: copy `stack` to index `i` in list
+    * returns `false` if the list doesn't exist or `i` is out of range,
+      `true` otherwise
 * `get_list(listname)`: returns full list (list of `ItemStack`s)
                         or `nil` if list doesn't exist (size 0)
 * `set_list(listname, list)`: set full list (size will not change)
@@ -8690,15 +9031,16 @@ An `ItemStack` is a stack of items.
 
 * `is_empty()`: returns `true` if stack is empty.
 * `get_name()`: returns item name (e.g. `"default:stone"`).
-* `set_name(item_name)`: returns a boolean indicating whether the item was
-  cleared.
+* `set_name(item_name)`: sets the item name
+    * returns `false` if the stack was cleared, `true` otherwise
 * `get_count()`: Returns amount of items on the stack.
 * `set_count(count)`: Sets amount of items in the stack.
-    * returns a boolean indicating whether the item was cleared
+    * returns `false` if the stack was cleared, `true` otherwise
+    * the stack is cleared if `count` is `0`
     * `count`: integer [u16]
 * `get_wear()`: returns tool wear (integer in range [0, 65535]), `0` for non-tools.
 * `set_wear(wear)`: set tool wear
-    * returns boolean indicating whether item was cleared
+    * returns `false` if the stack was cleared, `true` otherwise
     * `wear`: integer [u16]
 * `get_meta()`: returns ItemStackMetaRef. See section for more details
 * `get_metadata()`: **Deprecated.** Returns metadata (a string attached to an item stack).
@@ -8725,11 +9067,13 @@ An `ItemStack` is a stack of items.
     * `item` can also be an itemstring or table.
 * `to_string()`: returns the stack in itemstring form.
 * `to_table()`: returns the stack in Lua table form.
+    * returns `nil` if the stack is empty
 * `get_stack_max()`: returns the maximum size of the stack (depends on the
   item).
 * `get_free_space()`: returns `get_stack_max() - get_count()`.
 * `is_known()`: returns `true` if the item name refers to a defined item type.
 * `get_definition()`: returns the item definition table.
+    * returns the definition of the `unknown` item if the item is not registered
 * `get_tool_capabilities()`: returns the digging properties of the item,
   or those of the hand if none are defined for this item type
 * `add_wear(amount)`
@@ -8895,7 +9239,7 @@ An interface to use mod channels on client and server
     * Ensure you set mod_channel to nil after that to free Lua resources.
 * `is_writeable()`: returns true if channel is writeable and mod can send over
   it.
-* `send_all(message)`: Send `message` though the mod channel.
+* `send_all(message)`: Send `message` through the mod channel.
     * If mod channel is not writeable or invalid, message will be dropped.
     * Message size is limited to 65535 characters by protocol.
 
@@ -9103,6 +9447,9 @@ child will follow movement and rotation of that bone.
     * **Note:** Unlike `get_bone_position`, the returned rotation is in radians, not degrees.
 * `get_bone_overrides()`: returns all bone overrides as table `{[bonename] = override, ...}`
 * `set_properties(object property table)`
+    * Sets the given properties, fields not specified in the given table are
+      left unchanged.
+    * See [Object properties](#object-properties).
 * `get_properties()`: returns a table of all object properties
 * `set_observers(observers)`: sets observers (players this object is sent to)
     * If `observers` is `nil`, the object's observers are "unmanaged":
@@ -9205,7 +9552,7 @@ You **must not** mix names and track numbers to refer to the same animation.
          clamped on the client to first and last frame in the corresponding track.
       * `start_frame`, where to start playing the animation, defaults to `min_frame` if `speed >= 0`, `max_frame` otherwise.
       * `speed = 1.0`, animation speed in frames per second.
-        (Recall that glTF frames are typically just timetamps in seconds.)
+        (Recall that glTF frames are typically just timestamps in seconds.)
         A negative speed plays the animation backwards.
         A speed of `0.0` can be used to pause an animation.
       * `loop = true`, boolean, whether the animation repeats after completion.
@@ -9243,9 +9590,11 @@ You **must not** mix names and track numbers to refer to the same animation.
     * Sets the acceleration
     * `acc` is a vector
 * `get_acceleration()`: returns the acceleration, a vector
-* `set_rotation(rot)`
+* `set_rotation(rot[, interpolate])`
     * `rot` is a vector (radians). X is pitch (elevation), Y is yaw (heading)
       and Z is roll (bank).
+    * `interpolate` (optional boolean) controls whether this rotation change is interpolated
+      by the client. `false` applies the rotation immediately. Default `true`.
     * Sets the **right-handed Z-X-Y** rotation:
       First roll (Z) is applied, then pitch (X); yaw (Y) is applied last.
     * Does not reset rotation incurred through `automatic_rotate`.
@@ -9436,13 +9785,17 @@ You **must not** mix names and track numbers to refer to the same animation.
 
 * `get_physics_override()`: returns the table given to `set_physics_override`
 * `hud_add(hud definition)`: add a HUD element described by HUD def,
-   returns integer ID on success
+   returns integer ID on success, `nil` on failure
 * `hud_remove(id)`: remove the HUD element of the specified ID
+    * returns `true` on success, `nil` if there is no such element
 * `hud_change(id, stat, value)`: change a value of a previously added HUD
   element.
     * `stat` supports the same keys as in the hud definition table except for
       `"type"` (or the deprecated `"hud_elem_type"`).
+    * returns `true` on success, `false` if `stat` or `value` is invalid,
+      `nil` if there is no such element
 * `hud_get(id)`: gets the HUD element definition structure of the specified ID
+    * returns `nil` if there is no such element
 * `hud_get_all()`:
     * Returns a table in the form `{ [id] = HUD definition, [id] = ... }`.
     * A mod should keep track of its introduced IDs and only use this to access foreign elements.
@@ -9734,7 +10087,7 @@ You **must not** mix names and track numbers to refer to the same animation.
           The default is a zero vector and disables the override.
           Note: the vector points "outwards" so that `(0, 1, 0)` is equivalent to
           the sun at midday shining straight down.
-      * `exposure` is a table that controls automatic exposure.
+      * `exposure` is a table that controls automatic exposure
         The basic exposure factor equation is `e = 2^exposure_correction / clamp(luminance, 2^luminance_min, 2^luminance_max)`
         * This has no effect on clients who have the "Automatic Exposure" effect disabled.
         * `luminance_min` set the lower luminance boundary to use in the calculation (default: `-3.0`)
@@ -9758,13 +10111,23 @@ You **must not** mix names and track numbers to refer to the same animation.
           spreads from the bright objects.
           * Recommended range: from 0.1 to 8.0, default: 1.0
         * The behavior of values outside the recommended range is unspecified.
-      * `volumetric_light`: is a table that controls volumetric light (a.k.a. "godrays")
+      * `volumetric_light` is a table that controls volumetric light (a.k.a. "godrays")
         * This has no effect on clients who have the "Volumetric Lighting" or "Bloom" effects disabled.
         * `strength`: sets the strength of the volumetric light effect from 0 (off, default) to 1 (strongest).
             * `0.2` is a reasonable standard value.
             * Currently, bloom `intensity` and `strength_factor` affect volumetric
               lighting `strength` and vice versa. This behavior is to be changed
               in the future, do not rely on it.
+      * `static` is a table that controls static world lighting
+        * (added in 5.18.0, no client setting requirements)
+        * Note that changing these parameters is an expensive operation for the client.
+        * `light_curve`: LUT that converts light values (0-15) to brightness (0-255)
+          * table containing 16 numbers or an empty table to reset to the default
+          * The values should be monotonically increasing and the last value should
+            be 255. Otherwise there might be lighting bugs.
+        * `ao_gamma`: Strength of node ambient-occlusion shading. Lower is darker, Higher is lighter.
+          * Recommended range: from 0.25 to 3.0, default: 1.8
+          * A value of 0.0 will disable this shading entirely.
 
 * `get_lighting()`: returns the current state of lighting for the player.
     * Result is a table with the same fields as `light_definition` in `set_lighting`.
@@ -9916,7 +10279,7 @@ means that no defaults will be returned for mod settings.
 
 ### Methods
 
-* `get(key)`: returns a value
+* `get(key)`: returns a string
     * Returns `nil` if `key` is not found.
 * `get_bool(key, [default])`: returns a boolean
     * `default` is the value returned if `key` is not found.
@@ -9988,7 +10351,7 @@ It can be created via `ValueNoise()` or `core.get_value_noise()`.
 For `core.get_value_noise()`, the actual seed used is the noiseparams seed
 plus the world seed, to create world-specific noise.
 
-**Important**: These require the mapgen environment to be initalized, do not use at load time.
+**Important**: These require the mapgen environment to be initialized, do not use at load time.
 
 * `ValueNoise(noiseparams)`
 * `ValueNoise(seed, octaves, persistence, spread)` (deprecated)
@@ -10026,7 +10389,7 @@ For each of the functions with an optional `buffer` parameter: If `buffer` is
 not nil, this table will be used to store the result instead of creating a new
 table.
 
-**Important**: These require the mapgen environment to be initalized, do not use at load time.
+**Important**: These require the mapgen environment to be initialized, do not use at load time.
 
 ### Methods
 
@@ -10036,7 +10399,7 @@ table.
   3D array of 3D noise with values starting at `pos={x=,y=,z=}`.
 * `get_2d_map_flat(pos, buffer)`: returns a flat `<size.x * size.y>` element
   array of 2D noise with values starting at `pos={x=,y=}`
-* `get_3d_map_flat(pos, buffer)`: Same as `get2dMap_flat`, but 3D noise
+* `get_3d_map_flat(pos, buffer)`: Same as `get_2d_map_flat`, but 3D noise
 * `calc_2d_map(pos)`: Calculates the 2d noise map starting at `pos`. The result
   is stored internally.
 * `calc_3d_map(pos)`: Calculates the 3d noise map starting at `pos`. The result
@@ -10080,6 +10443,8 @@ Player properties need to be saved manually.
     -- For Lua entities, the maximum is not enforced.
     -- For players, this defaults to `core.PLAYER_MAX_HP_DEFAULT` (20).
     -- For Lua entities, the default is 10.
+    -- Must not be 0 for Lua entities.
+    -- If set below the current HP, the HP is reduced to it.
     -- Integer [u16].
 
     breath_max = 0,
@@ -10123,6 +10488,7 @@ Player properties need to be saved manually.
     -- Can be overridden by the `pointabilities` of the held item.
 
     visual = "",
+    -- Defaults to "sprite" for entities, "upright_sprite" for players.
     -- "cube" is a node-sized cube.
     -- "sprite" is a flat texture always facing the player.
     -- "upright_sprite" is a vertical flat texture.
@@ -10323,7 +10689,7 @@ ABM (ActiveBlockModifier) definition
 
 Used by `core.register_abm`.
 
-An active block modifier (ABM) is used to define a function that is continously
+An active block modifier (ABM) is used to define a function that is continuously
 and randomly called for specific nodes (defined by `nodenames` and other conditions)
 in active mapblocks.
 
@@ -10349,11 +10715,11 @@ in active mapblocks.
     -- `group:groupname` can also be used here.
 
     interval = 10.0,
-    -- Operation interval in seconds
+    -- Operation interval in seconds (default: 10.0)
 
     chance = 50,
     -- Probability of triggering `action` per-node per-interval is 1.0 / chance
-    -- integer [u32] (value 0 is treated as 1)
+    -- integer [u32] (value 0 is treated as 1, default: 50)
 
     min_y = -32768,
     max_y = 32767,
@@ -10366,6 +10732,7 @@ in active mapblocks.
     -- temporarily reduced when returning to an area to simulate time lost
     -- by the area being unattended. Note that the `chance` value can often
     -- be reduced to 1.
+    -- Default: true
 
     action = function(pos, node, active_object_count, active_object_count_wider),
     -- Function triggered for each qualifying node.
@@ -10461,6 +10828,8 @@ Tile definition
       or kept aligned with its surroundings. "user" means that client
       setting will be used, similar to `glasslike_framed_optional`.
       Note: supported by solid nodes and nodeboxes only.
+      Before version 5.19.0, overlay tiles inherited align style from main tiles
+      and their own `align_style` was ignored.
     * scale is used to make texture span several (exactly `scale`) nodes,
       instead of just one, in each direction. Works for world-aligned
       textures only.
@@ -10687,7 +11056,7 @@ Used by `core.register_node`, `core.register_craftitem`, and
 
         eat = <SimpleSoundSpec>,
         -- Played when item is eaten with `core.do_item_eat` - unless
-        -- prevented by a `core.register_on_eat` callback.
+        -- prevented by a `core.register_on_item_eat` callback.
 
         punch_use = <SimpleSoundSpec>,
         -- When item is used with the 'punch/dig' key pointing at a node or entity
@@ -11367,7 +11736,7 @@ A typical shaped recipe:
 {
     output = "example:stone_pickaxe",
     -- A 3x3 recipe which needs 3 stone in the 1st row,
-    -- and 1 stick in the horizontal middle in each of the 2nd and 3nd row.
+    -- and 1 stick in the horizontal middle in each of the 2nd and 3rd row.
     -- The 4 remaining slots have to be empty.
     recipe = {
         {"example:stone", "example:stone", "example:stone"}, -- row 1
@@ -11501,7 +11870,7 @@ you want `additional_wear` to be negative.
 
 The formula used to calculate the resulting wear is:
 
-    65536 * (1 - ( (1 - tool_1_wear) + (1 - tool_2_wear) + additional_wear))
+    65536 * (1 - ( (1 - tool_1_wear) + (1 - tool_2_wear) - additional_wear))
 
 The result is rounded and can't be lower than 0. If the result is 65536 or higher,
 no crafting is possible.
@@ -11620,11 +11989,11 @@ See [Ores] section above for essential information.
     -- Ore has a 1 out of clust_scarcity chance of spawning in a node.
     -- If the desired average distance between ores is 'd', set this to
     -- d * d * d.
-    -- Integer in range [u32]
+    -- Integer in range [u32], must be greater than 0
 
     clust_num_ores = 8,
     -- Amount of ores in a cluster.
-    -- Integer in range: [0, 32767]
+    -- Integer in range: [1, 32767]
 
     clust_size = 3,
     -- Size of the bounding box of the cluster.
@@ -11819,6 +12188,12 @@ See [Decoration types](#decoration-types). Used by `core.register_decoration`.
 
 ```lua
 {
+    name = "",
+    -- If set, core.registered_decorations[that_name] will return this
+    -- definition, and core.get_decoration_id(that_name) its ID.
+    -- If the name is already used by another decoration, the registration
+    -- is ignored and core.register_decoration returns nil.
+
     deco_type = "simple",
     -- Type. "simple", "schematic" or "lsystem" supported
 
@@ -12161,7 +12536,9 @@ Used by `ObjectRef:hud_add`. Returned by `ObjectRef:hud_get`.
     -- In case both are specified `type` will be used.
 
     position = {x=0.5, y=0.5}, -- two numbers
-    -- Top left corner position of element
+    -- Screen position, as a fraction of the screen size.
+    -- Where the element is drawn relative to it depends
+    -- on `alignment` and `offset`
 
     name = "<name>", -- string
 
@@ -12748,7 +13125,7 @@ Used by `HTTPApiTable.fetch` and `HTTPApiTable.fetch_async`.
     -- Not allowed for GET or HEAD method and `data` must be a table.
 
     quiet = boolean,
-    -- Optional, if true then error messages are suppressed on failure.
+    -- Optional, if true then error logging is suppressed on failure.
     -- Default is false.
 
     post_data = "Raw POST request data string" OR {field1 = "data1", field2 = "data2"},
@@ -12766,19 +13143,25 @@ Passed to `HTTPApiTable.fetch` callback. Returned by
 {
     completed = true,
     -- If true, the request has finished (either succeeded, failed or timed
-    -- out)
+    -- out).
 
     succeeded = true,
-    -- If true, the request was successful
+    -- If true, the request was successful.
+    -- Note that requests that returned an error status are still considered
+    -- "successful", so you should check `code` too.
 
     timeout = false,
-    -- If true, the request timed out
+    -- If true, the request timed out.
 
     code = 200,
-    -- HTTP status code
+    -- HTTP status code (0 if not known)
 
     data = "",
     -- Response body
+
+    error = "",
+    -- Error message. This field is only present if `not succeeded`.
+    -- (since Luanti 5.19.0)
 }
 ```
 

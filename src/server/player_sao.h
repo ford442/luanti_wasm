@@ -1,7 +1,7 @@
 // Luanti
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
-// Copyright (C) 2013-2020 Minetest core developers & community
+// Copyright (C) 2013-2020 Luanti core developers & community
 
 #pragma once
 
@@ -131,7 +131,7 @@ public:
 
 	void disconnected();
 
-	void setPlayer(RemotePlayer *player) { m_player = player; }
+	void unsetPlayer() { m_player = nullptr; }
 	RemotePlayer *getPlayer() { return m_player; }
 	session_t getPeerID() const;
 

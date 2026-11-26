@@ -12,7 +12,7 @@
 #include "util/numeric.h"
 #include "client/tile.h"
 #include "voxel.h"
-#include <map>
+#include <vector>
 
 namespace video {
 	class IVideoDriver;
@@ -46,6 +46,7 @@ struct MeshMakeData
 
 	// relative to blockpos
 	v3s16 m_crack_pos_relative = v3s16(-1337,-1337,-1337);
+	float m_ao_gamma_inv = 0.0f;
 	bool m_generate_minimap = false;
 	bool m_smooth_lighting = false;
 	bool m_enable_water_reflections = false;
@@ -299,7 +300,7 @@ private:
 
 	// Animation info: texture animation
 	// Maps mesh and mesh buffer indices to TileSpecs
-	std::map<MeshIndex, AnimationInfo> m_animation_info;
+	std::vector<std::pair<MeshIndex, AnimationInfo>> m_animation_info;
 
 	// list of all semitransparent triangles in the mapblock
 	std::vector<MeshTriangle> m_transparent_triangles;

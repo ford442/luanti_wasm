@@ -328,9 +328,9 @@ public:
 	// IGameDef interface
 	bool isClient() override { return false; }
 	// Under envlock
-	IItemDefManager* getItemDefManager() override;
+	const IItemDefManager* getItemDefManager() const override;
 	const NodeDefManager* getNodeDefManager() override;
-	ICraftDefManager* getCraftDefManager() override;
+	const ICraftDefManager* getCraftDefManager() const override;
 	u16 allocateUnknownNodeId(const std::string &name) override;
 	IRollbackManager *getRollbackManager() override { return m_rollback; }
 	EmergeManager *getEmergeManager() { return m_emerge.get(); }
@@ -344,7 +344,6 @@ public:
 	const std::vector<ModSpec> &getMods() const override;
 	const ModSpec* getModSpec(const std::string &modname) const override;
 	const SubgameSpec* getGameSpec() const override { return &m_gamespec; }
-	static std::string getBuiltinLuaPath();
 	std::string getWorldPath() const override { return m_path_world; }
 	std::string getModDataPath() const override { return m_path_mod_data; }
 	ModIPCStore *getModIPCStore() override { return &m_ipcstore; }
@@ -428,7 +427,10 @@ public:
 			std::vector<MinimapMode> &modes,
 			size_t wanted_mode);
 
-	void sendDetachedInventories(session_t peer_id, bool incremental);
+	// Send detached inventories to one player (for init)
+	void sendDetachedInventories(session_t peer_id);
+	// Send detached inventory updates to everyone
+	void sendDetachedInventories();
 
 	bool joinModChannel(const std::string &channel) override;
 	bool leaveModChannel(const std::string &channel) override;
@@ -583,6 +585,8 @@ private:
 
 	void sendMetadataChanged(const std::unordered_set<v3s16> &positions,
 			float far_d_nodes = 100);
+	void sendMetadataChanged(const RemoteClient *client,
+			const NodeMetadataList &meta_updates_list);
 
 	// Environment and Connection must be locked when called
 	// `cache` may only be very short lived! (invalidation not handled)
@@ -591,6 +595,16 @@ private:
 
 	// Sends blocks to clients (locks env and con on its own)
 	void SendBlocks(float dtime);
+
+	/**
+	 * Sends node changes to undo client-side predicted node changes
+	 *
+	 * \param prediction_success If true, assume that the client has made a
+	 *   correct prediction and send the fixup only if an outdated mapblock
+	 *   is currently "on wire", which can erroneously override the prediction
+	 */
+	void fixupNodePrediction(session_t peer_id, InteractAction action,
+			const PointedThing &pointed, bool prediction_success);
 
 	bool addMediaFile(const std::string &filename, const std::string &filepath,
 			std::string *filedata = nullptr, std::string *digest = nullptr);

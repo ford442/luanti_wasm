@@ -6,7 +6,6 @@
 #include <atomic>
 #include <optional>
 #include <irrlicht.h>
-#include "IMeshCache.h"
 #include "fontengine.h"
 #include "client.h"
 #include "clouds.h"
@@ -28,6 +27,7 @@
 #include "irrlicht_changes/static_text.h"
 #include "irr_ptr.h"
 #include "util/string.h"
+#include "IAnimatedMesh.h"
 
 RenderingEngine *RenderingEngine::s_singleton = nullptr;
 
@@ -303,8 +303,7 @@ void RenderingEngine::setResizable(bool resize)
 
 void RenderingEngine::cleanupMeshCache()
 {
-	auto mesh_cache = m_device->getSceneManager()->getMeshCache();
-	mesh_cache->clear();
+	m_device->getSceneManager()->getMeshCache().clear();
 }
 
 bool RenderingEngine::setupTopLevelWindow()
@@ -510,7 +509,7 @@ void RenderingEngine::autosaveScreensizeAndCo(
 		return;
 
 	// Note: If the screensize or similar hasn't changed (i.e. it's the same as
-	// the setting was when minetest started, as given by the initial_* parameters),
+	// the setting was when luanti started, as given by the initial_* parameters),
 	// we do not want to save the thing. This allows users to also manually change
 	// the settings.
 
