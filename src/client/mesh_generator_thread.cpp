@@ -89,6 +89,7 @@ namespace {
 MeshUpdateQueue::MeshUpdateQueue(Client *client):
 	m_client(client)
 {
+	assert(m_client);
 	m_cache_smooth_lighting = g_settings->getBool("smooth_lighting");
 	m_cache_enable_water_reflections = g_settings->getBool("enable_water_reflections");
 	m_cache_enable_waving_water = g_settings->getBool("enable_waving_water");
@@ -96,11 +97,10 @@ MeshUpdateQueue::MeshUpdateQueue(Client *client):
 
 MeshUpdateQueue::~MeshUpdateQueue()
 {
-	clear(true);
+	clear();
 }
 
-bool MeshUpdateQueue::addBlock(Map *map, v3s16 p, bool ack_block_to_server,
-	bool urgent, bool from_neighbor)
+bool MeshUpdateQueue::addBlock(Map *map, v3s16 p, bool urgent, bool from_neighbor)
 {
 	// If block that causes update does not exist, skip.
 	if (!map->getBlockNoCreateNoEx(p))
@@ -126,8 +126,6 @@ bool MeshUpdateQueue::addBlock(Map *map, v3s16 p, bool ack_block_to_server,
 	*/
 	for (QueuedMeshUpdate *q : m_queue) {
 		if (q->p == mesh_position) {
-			if (ack_block_to_server)
-				q->ack_list.push_back(p);
 			q->crack_level = m_client->getCrackLevel();
 			q->crack_pos = m_client->getCrackPos();
 			q->urgent |= urgent;
@@ -141,8 +139,6 @@ bool MeshUpdateQueue::addBlock(Map *map, v3s16 p, bool ack_block_to_server,
 	*/
 	UnqueuedMeshUpdate q{new QueuedMeshUpdate()};
 	q->p = mesh_position;
-	if (ack_block_to_server)
-		q->ack_list.push_back(p);
 	q->crack_level = m_client->getCrackLevel();
 	q->crack_pos = m_client->getCrackPos();
 	q->urgent = urgent;
@@ -154,7 +150,6 @@ bool MeshUpdateQueue::addBlock(Map *map, v3s16 p, bool ack_block_to_server,
 		Note: this can be extended with more precise checks in the future
 	*/
 	if (from_neighbor && q->checkSkip(mesh_grid.cell_size)) {
-		assert(!ack_block_to_server);
 		m_urgents.erase(mesh_position);
 		g_profiler->add("MeshUpdateQueue: updates skipped", 1);
 		return true;
@@ -164,6 +159,38 @@ bool MeshUpdateQueue::addBlock(Map *map, v3s16 p, bool ack_block_to_server,
 	m_queue.push_back(q.release());
 
 	return true;
+}
+
+void MeshUpdateQueue::reAddBlock(MeshUpdateResult &r)
+{
+	const MeshGrid mesh_grid = m_client->getMeshGrid();
+
+	const v3s16 mesh_position = mesh_grid.getMeshPos(r.p);
+
+	MutexAutoLock lock(m_mutex);
+
+	if (r.urgent)
+		m_urgents.insert(mesh_position);
+
+	// Update if exists in queue
+	for (QueuedMeshUpdate *q : m_queue) {
+		if (q->p == mesh_position) {
+			q->urgent |= r.urgent;
+			// Do not retrieve blocks again, but make sure to drop our old ones
+			r.dropBlocks();
+			return;
+		}
+	}
+
+	// Queue a new update
+	UnqueuedMeshUpdate q{new QueuedMeshUpdate()};
+	q->p = mesh_position;
+	q->crack_level = m_client->getCrackLevel();
+	q->crack_pos = m_client->getCrackPos();
+	q->urgent = r.urgent;
+	q->map_blocks = std::move(r.map_blocks);
+
+	m_queue.push_back(q.release());
 }
 
 // Returned pointer must be deleted
@@ -179,7 +206,7 @@ QueuedMeshUpdate *MeshUpdateQueue::pop()
 			QueuedMeshUpdate *q = *i;
 			if (must_be_urgent && m_urgents.count(q->p) == 0)
 				continue;
-			// Make sure no two threads are processing the same mapblock, as that causes racing conditions
+			// Make sure no two threads are processing the same mapblock, as that causes race conditions
 			if (m_inflight_blocks.find(q->p) != m_inflight_blocks.end())
 				continue;
 			m_queue.erase(i);
@@ -188,6 +215,11 @@ QueuedMeshUpdate *MeshUpdateQueue::pop()
 			result = q;
 			break;
 		}
+
+		// When it leaves the queue, it becomes too late to update it, so the
+		// epoch counts at this point.
+		if (result)
+			result->epoch = m_epoch;
 	}
 
 	if (result)
@@ -202,23 +234,16 @@ void MeshUpdateQueue::done(v3s16 pos)
 	m_inflight_blocks.erase(pos);
 }
 
-void MeshUpdateQueue::clear(bool finish)
+void MeshUpdateQueue::clear()
 {
 	MutexAutoLock lock(m_mutex);
-	decltype(m_queue) new_queue;
 	for (auto *it : m_queue) {
-		// If we're in an active game session clearing updates that the
-		// server expects us to ack will cause problems.
-		if (it->ack_list.empty() || finish) {
-			m_urgents.erase(it->p);
-			m_inflight_blocks.erase(it->p);
-			it->dropBlocks();
-			delete it;
-		} else {
-			new_queue.push_back(it);
-		}
+		m_urgents.erase(it->p);
+		m_inflight_blocks.erase(it->p);
+		it->dropBlocks();
+		delete it;
 	}
-	m_queue = std::move(new_queue);
+	m_queue.clear();
 }
 
 void MeshUpdateQueue::fillDataFromMapBlocks(QueuedMeshUpdate *q)
@@ -237,10 +262,27 @@ void MeshUpdateQueue::fillDataFromMapBlocks(QueuedMeshUpdate *q)
 	}
 
 	data->setCrack(q->crack_level, q->crack_pos);
+
+	float ao_gamma = m_client->getCommittedStaticLighting().ao_gamma;
+	data->m_ao_gamma_inv = ao_gamma == 0.0f ? 0.0f : (1.0f / ao_gamma);
+
 	data->m_generate_minimap = !!m_client->getMinimap();
 	data->m_smooth_lighting = m_cache_smooth_lighting;
 	data->m_enable_water_reflections = m_cache_enable_water_reflections;
 	data->m_enable_waving_water = m_cache_enable_waving_water;
+}
+
+/*
+	MeshUpdateResult
+*/
+
+void MeshUpdateResult::dropBlocks()
+{
+	for (auto *block : map_blocks) {
+		if (block)
+			block->refDrop();
+	}
+	map_blocks.clear();
 }
 
 /*
@@ -267,9 +309,9 @@ void MeshUpdateWorkerThread::doUpdate()
 		r.p = q->p;
 		r.mesh = std::unique_ptr<MapBlockMesh>(mesh_new);
 		r.solid_sides = get_solid_sides(q->data);
-		r.ack_list = std::move(q->ack_list);
-		r.urgent = q->urgent;
 		r.map_blocks = std::move(q->map_blocks);
+		r.epoch = q->epoch;
+		r.urgent = q->urgent;
 
 		m_manager->putResult(std::move(r));
 		m_queue_in->done(q->p);
@@ -313,13 +355,12 @@ MeshUpdateManager::MeshUpdateManager(Client *client):
 		m_workers.push_back(std::make_unique<MeshUpdateWorkerThread>(client, &m_queue_in, this));
 }
 
-void MeshUpdateManager::updateBlock(Map *map, v3s16 p, bool ack_block_to_server,
-		bool urgent, bool update_neighbors)
+void MeshUpdateManager::updateBlock(Map *map, v3s16 p, bool urgent, bool update_neighbors)
 {
 	static thread_local const bool many_neighbors =
 			g_settings->getBool("smooth_lighting")
 			&& !g_settings->getFlag("performance_tradeoffs");
-	if (!m_queue_in.addBlock(map, p, ack_block_to_server, urgent, false)) {
+	if (!m_queue_in.addBlock(map, p, urgent, false)) {
 		warningstream << "Update requested for non-existent block at "
 				<< p << std::endl;
 		return;
@@ -327,10 +368,10 @@ void MeshUpdateManager::updateBlock(Map *map, v3s16 p, bool ack_block_to_server,
 	if (update_neighbors) {
 		if (many_neighbors) {
 			for (v3s16 dp : g_26dirs)
-				m_queue_in.addBlock(map, p + dp, false, urgent, true);
+				m_queue_in.addBlock(map, p + dp, urgent, true);
 		} else {
 			for (v3s16 dp : g_6dirs)
-				m_queue_in.addBlock(map, p + dp, false, urgent, true);
+				m_queue_in.addBlock(map, p + dp, urgent, true);
 		}
 	}
 	deferUpdate();
@@ -346,39 +387,47 @@ void MeshUpdateManager::putResult(MeshUpdateResult &&result)
 
 bool MeshUpdateManager::getNextResult(MeshUpdateResult &r)
 {
-	if (!m_queue_out_urgent.empty()) {
+	if (!m_queue_out_urgent.empty())
 		r = m_queue_out_urgent.pop_frontNoEx();
-		return true;
-	}
-
-	if (!m_queue_out.empty()) {
+	else if (!m_queue_out.empty())
 		r = m_queue_out.pop_frontNoEx();
-		return true;
-	}
+	else
+		return false;
 
-	return false;
+	if (r.epoch != m_epoch) {
+		// just kidding, we can't return this result. put it back into the queue.
+		verbosestream << "MeshUpdateManager: have to regenerate " << r.p
+			<< " due to epoch difference (" << r.epoch << ")" << std::endl;
+		m_queue_in.reAddBlock(r);
+		r = MeshUpdateResult(); // don't leave stale data to caller
+		return getNextResult(r);
+	}
+	return true;
 }
 
-void MeshUpdateManager::clearAllQueues(bool finish)
+void MeshUpdateManager::forceRegenerate(Map *map, const std::vector<v3s16> &pp)
 {
-	m_queue_in.clear(finish);
+	// This invalidates all previously produced results (if still pending)
+	m_queue_in.setEpoch(++m_epoch);
 
-	const auto &drop_result = [] (MeshUpdateResult &r) {
-		for (auto *block : r.map_blocks)
-			if (block)
-				block->refDrop();
-	};
-	// Same problem as in MeshUpdateQueue::clear() here: we can't just blindly
-	// throw away results that the server expects to receive an ack for.
-	const auto &do_it = [&finish, &drop_result] (ResultQueue &queue) {
+	verbosestream << "MeshUpdateManager: m_epoch=" << m_epoch << "; will queue "
+		<< pp.size() << " blocks to be updated" << std::endl;
+
+	for (v3s16 p : pp) {
+		m_queue_in.addBlock(map, p, false, false);
+	}
+	deferUpdate();
+}
+
+void MeshUpdateManager::clearAllQueues()
+{
+	m_queue_in.clear();
+
+	const auto &do_it = [] (ResultQueue &queue) {
 		auto helper = queue.iterLocked();
 		for (auto it = helper.begin(); it != helper.end(); ) {
-			if (it->ack_list.empty() || finish) {
-				drop_result(*it);
-				it = helper.erase(it);
-			} else {
-				++it;
-			}
+			it->dropBlocks();
+			it = helper.erase(it);
 		}
 	};
 	do_it(m_queue_out_urgent);
@@ -430,9 +479,9 @@ int MeshUpdateManager::processOneUnlocked()
 	r.p = q->p;
 	r.mesh = std::unique_ptr<MapBlockMesh>(mesh_new);
 	r.solid_sides = get_solid_sides(q->data);
-	r.ack_list = std::move(q->ack_list);
-	r.urgent = q->urgent;
 	r.map_blocks = std::move(q->map_blocks);
+	r.epoch = q->epoch;
+	r.urgent = q->urgent;
 
 	putResult(std::move(r));
 	m_queue_in.done(q->p);

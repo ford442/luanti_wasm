@@ -148,12 +148,7 @@ void Client::handleCommand_AuthAccept(NetworkPacket* pkt)
 					<< m_recommended_send_interval<<std::endl;
 
 	// Reply to server
-	/* TRANSLATORS: DO NOT TRANSLATE THIS LITERALLY!
-	This is a special string which needs to contain the translation's
-	language code (e.g. "de" for German). */
-	std::string lang = gettext("LANG_CODE");
-	if (lang == "LANG_CODE")
-		lang.clear();
+	std::string lang = gettext_get_lang_code();
 
 	NetworkPacket resp_pkt(TOSERVER_INIT2, sizeof(u16) + lang.size());
 	resp_pkt << lang;
@@ -307,7 +302,13 @@ void Client::handleCommand_BlockData(NetworkPacket* pkt)
 	v3s16 p;
 	*pkt >> p;
 
-	std::istringstream istr(std::string(pkt->getRemainingNoCopy()), std::ios_base::binary);
+	if (blockpos_over_max_limit(p)) {
+		warningstream << "Client: Ignoring block data at invalid position "
+				<< p << std::endl;
+		return;
+	}
+
+	my_istringstream istr(pkt->getRemainingNoCopy());
 
 	MapSector *sector;
 	MapBlock *block;
@@ -338,11 +339,15 @@ void Client::handleCommand_BlockData(NetworkPacket* pkt)
 		ServerMap::saveBlock(block, m_localdb.get());
 	}
 
-	/*
-		Add it to mesh update queue and set it to be acknowledged after update.
-	*/
-	addUpdateMeshTaskWithEdge(p, true);
+	// Add it to mesh update queue
+	addUpdateMeshTaskWithEdge(p);
 
+	// Ack it to the server
+	if (m_got_blocks.size() == U8_MAX) {
+		sendGotBlocks(m_got_blocks);
+		m_got_blocks.clear();
+	}
+	m_got_blocks.push_back(p);
 }
 
 void Client::handleCommand_Inventory(NetworkPacket* pkt)
@@ -359,7 +364,7 @@ void Client::handleCommand_Inventory(NetworkPacket* pkt)
 		datastring = pkt->getRemainingNoCopy();
 	}
 
-	std::istringstream is(datastring, std::ios_base::binary);
+	my_istringstream is(datastring);
 
 	LocalPlayer *player = m_env.getLocalPlayer();
 	assert(player != NULL);
@@ -391,15 +396,6 @@ void Client::handleCommand_TimeOfDay(NetworkPacket* pkt)
 
 void Client::handleCommand_ChatMessage(NetworkPacket *pkt)
 {
-	/*
-		u8 version
-		u8 message_type
-		u16 sendername length
-		wstring sendername
-		u16 length
-		wstring message
-	 */
-
 	ChatMessage *chatMessage = new ChatMessage();
 	u8 version, message_type;
 	*pkt >> version >> message_type;
@@ -482,7 +478,7 @@ void Client::handleCommand_ActiveObjectMessages(NetworkPacket* pkt)
 			string message
 		}
 	*/
-	std::istringstream is(std::string(pkt->getRemainingNoCopy()), std::ios_base::binary);
+	my_istringstream is(pkt->getRemainingNoCopy());
 
 	while (canRead(is)) {
 		u16 id = readU16(is);
@@ -721,10 +717,10 @@ void Client::handleCommand_Media(NetworkPacket* pkt)
 		*pkt >> name;
 		data = pkt->readLongString();
 		if (m_proto_ver >= 48) {
-			std::istringstream iss(data, std::ios::binary);
-			std::ostringstream oss(std::ios::binary);
+			my_istringstream iss(data);
+			my_ostringstream oss;
 			decompressZstd(iss, oss);
-			data = oss.str();
+			data = oss.take();
 		}
 
 		bool ok = false;
@@ -962,7 +958,7 @@ void Client::handleCommand_DetachedInventory(NetworkPacket* pkt)
 	// this used to be the length of the following string, ignore it
 	pkt->skip(2);
 
-	std::istringstream is(std::string(pkt->getRemainingNoCopy()), std::ios::binary);
+	my_istringstream is(pkt->getRemainingNoCopy());
 	inv->deSerialize(is);
 }
 
@@ -1021,7 +1017,7 @@ void Client::handleCommand_SpawnParticleBatch(NetworkPacket *pkt)
 
 void Client::handleCommand_AddParticleSpawner(NetworkPacket* pkt)
 {
-	std::istringstream is(std::string(pkt->getRemainingNoCopy()), std::ios_base::binary);
+	my_istringstream is(pkt->getRemainingNoCopy());
 
 	ParticleSpawnerParameters p;
 	u32 server_id;
@@ -1368,7 +1364,7 @@ void Client::handleCommand_HudSetSky(NetworkPacket* pkt)
 	if (m_proto_ver < 39) {
 		// Handle Protocol 38 and below servers with old set_sky,
 		// ensuring the classic look is kept.
-		std::istringstream is(std::string(pkt->getRemainingNoCopy()), std::ios_base::binary);
+		my_istringstream is(pkt->getRemainingNoCopy());
 
 		SkyboxParams skybox;
 		skybox.bgcolor = video::SColor(readARGB8(is));
@@ -1787,7 +1783,8 @@ void Client::handleCommand_ModChannelMsg(NetworkPacket *pkt)
 		return;
 	}
 
-	m_script->on_modchannel_message(channel_name, sender, channel_msg);
+	if (modsLoaded())
+		m_script->on_modchannel_message(channel_name, sender, channel_msg);
 }
 
 void Client::handleCommand_ModChannelSignal(NetworkPacket *pkt)
@@ -1856,7 +1853,7 @@ void Client::handleCommand_ModChannelSignal(NetworkPacket *pkt)
 	}
 
 	// If signal is valid, forward it to client side mods
-	if (valid_signal)
+	if (valid_signal && modsLoaded())
 		m_script->on_modchannel_signal(channel, signal);
 }
 
@@ -1890,6 +1887,7 @@ void Client::handleCommand_MinimapModes(NetworkPacket *pkt)
 void Client::handleCommand_SetLighting(NetworkPacket *pkt)
 {
 	Lighting& lighting = m_env.getLocalPlayer()->getLighting();
+	auto &s = lighting.static_;
 
 	*pkt >> lighting.shadow_intensity;
 	do {
@@ -1923,5 +1921,12 @@ void Client::handleCommand_SetLighting(NetworkPacket *pkt)
 			break;
 		// >= 5.16.0-dev
 		*pkt >> lighting.shadow_direction;
+		if (!pkt->hasRemainingBytes())
+			break;
+		// >= 5.18.0-dev
+		*pkt >> s.light_curve_set;
+		if (s.light_curve_set)
+			pkt->readRawString(reinterpret_cast<char*>(s.light_curve), sizeof(s.light_curve));
+		*pkt >> s.ao_gamma;
 	} while (0);
 }

@@ -1,6 +1,6 @@
 // Luanti
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2022 Minetest core developers & community
+// Copyright (C) 2022 Luanti core developers & community
 
 #include "test.h"
 
@@ -11,7 +11,6 @@
 #include "script/common/c_converter.h"
 #include "script/common/helper.h"
 #include "irrlicht_changes/printing.h"
-#include "server.h"
 
 namespace {
 	class MyScriptApi : virtual public ScriptApiBase {
@@ -57,7 +56,7 @@ void MyScriptApi::init()
 
 	lua_pop(L, 1);
 
-	loadMod(Server::getBuiltinLuaPath() + DIR_DELIM + "init.lua", BUILTIN_MOD_NAME);
+	loadMod(getBuiltinLuaPath() + DIR_DELIM "init.lua", BUILTIN_MOD_NAME);
 	checkSetByBuiltin();
 }
 
@@ -150,6 +149,20 @@ void TestScriptApi::testVectorRead(MyScriptApi *script)
 		v3s16 v = read_v3s16(L, -1);
 		UASSERTEQ(auto, v, it.second);
 		v = check_v3s16(L, -1);
+		UASSERTEQ(auto, v, it.second);
+		lua_pop(L, 1);
+	}
+
+	// for vector2
+	const std::pair<const char*, v2s16> pairs2[] = {
+		{"return {x=1, y=-2}",       {1, -2}},
+		{"return {x=1.1, y=0}",      {1, 0}},
+		{"return {x=1.99, y=0}",     {1, 0}}, // floor, not round
+		{"return vector2.new(6, 7)", {6, 7}},
+	};
+	for (auto &it : pairs2) {
+		run(L, it.first, 1);
+		v2s16 v = read_v2s16(L, -1);
 		UASSERTEQ(auto, v, it.second);
 		lua_pop(L, 1);
 	}

@@ -31,7 +31,7 @@ class GUIHyperText;
 class GUIScrollContainer;
 class ISoundManager;
 
-enum FormspecFieldType {
+enum FormspecFieldType : u8 {
 	f_Button,
 	f_Table,
 	f_TabHeader,
@@ -45,7 +45,7 @@ enum FormspecFieldType {
 	f_Unknown
 };
 
-enum FormspecQuitMode {
+enum FormspecQuitMode : u8 {
 	quit_mode_no,
 	quit_mode_accept,
 	quit_mode_cancel,
@@ -112,9 +112,6 @@ class GUIFormSpecMenu : public GUIModalMenu
 			flabel(label),
 			fdefault(unescape_enriched(translate_string(default_text))),
 			fid(id),
-			send(false),
-			ftype(f_Unknown),
-			is_exit(false),
 			priority(priority),
 			fcursor_icon(cursor_icon)
 		{
@@ -125,9 +122,9 @@ class GUIFormSpecMenu : public GUIModalMenu
 		std::wstring fdefault;
 		std::string url;
 		s32 fid;
-		bool send;
-		FormspecFieldType ftype;
-		bool is_exit;
+		bool send = false;
+		FormspecFieldType ftype = f_Unknown;
+		bool is_exit = false;
 		// Draw priority for formspec version < 3
 		int priority;
 		gui::ECURSOR_ICON fcursor_icon;
@@ -158,27 +155,29 @@ class GUIFormSpecMenu : public GUIModalMenu
 				const std::string &a_parent_name,
 				const std::string &a_text,
 				const core::rect<s32> &a_rect,
-				v2s32 a_stpos,
-				s32 a_width,
-				bool a_floating) :
+				std::optional<v2s32> a_stpos,
+				s32 a_width) :
 			name(a_name),
 			parent_name(a_parent_name),
 			text(a_text),
 			hover_rect(a_rect),
 			stpos(a_stpos),
-			width(a_width),
-			floating(a_floating)
+			width(a_width)
 		{
 		}
 
 		std::string name;
+		/// Optional, name of the element to attach to
 		std::string parent_name;
+		/// HyperText to draw
 		std::string text;
 		core::rect<s32> hover_rect;
-		v2s32 stpos; ///< static tooltip position
+		/// Static tooltip position (=rect_mode), or floating if unset
+		std::optional<v2s32> stpos;
 		s32 width; ///< in pixels
-		bool floating; ///< whether the position is NON-static (i.e. ignore stpos)
-		bool bound = false; ///< whether it's cached
+		/// Creation is expensive, thus keep track here.
+		irr_ptr<GUIHyperText> element;
+		bool initialized = false; ///< whether setText() was called (expensive)
 	};
 
 public:
@@ -375,8 +374,7 @@ protected:
 	std::vector<std::pair<FieldSpec, GUITable *>> m_tables;
 	std::vector<std::pair<FieldSpec, gui::IGUICheckBox *>> m_checkboxes;
 	std::map<std::string, TooltipSpec> m_tooltips;
-	std::vector<std::pair<GUIHyperText *, HyperTipSpec>> m_hypertips;
-	std::map<std::string, HyperTipSpec> m_hypertip_map;
+	std::vector<HyperTipSpec> m_hypertips; ///< all instances
 	std::vector<std::pair<gui::IGUIElement *, TooltipSpec>> m_tooltip_rects;
 	std::vector<std::pair<FieldSpec, GUIScrollBar *>> m_scrollbars;
 	std::vector<std::pair<FieldSpec, std::vector<std::string>>> m_dropdowns;
@@ -471,51 +469,50 @@ private:
 
 	void removeAll();
 
-	void parseElement(parserData* data, const std::string &element);
+	void parseElement(parserData *data, const std::string &element);
 
-	void parseSize(parserData* data, const std::string &element);
-	void parseContainer(parserData* data, const std::string &element);
-	void parseContainerEnd(parserData* data, const std::string &element);
+	void parseSize(parserData *data, const std::string &element);
+	void parseContainer(parserData *data, const std::string &element);
+	void parseContainerEnd(parserData *data, const std::string &element);
 	void parseScrollContainer(parserData *data, const std::string &element);
 	void parseScrollContainerEnd(parserData *data, const std::string &element);
-	void parseList(parserData* data, const std::string &element);
-	void parseListRing(parserData* data, const std::string &element);
-	void parseCheckbox(parserData* data, const std::string &element);
-	void parseImage(parserData* data, const std::string &element);
+	void parseList(parserData *data, const std::string &element);
+	void parseListRing(parserData *data, const std::string &element);
+	void parseCheckbox(parserData *data, const std::string &element);
+	void parseImage(parserData *data, const std::string &element);
 	void parseAnimatedImage(parserData *data, const std::string &element);
-	void parseItemImage(parserData* data, const std::string &element);
-	void parseButton(parserData* data, const std::string &element);
-	void parseBackground(parserData* data, const std::string &element);
-	void parseTableOptions(parserData* data, const std::string &element);
-	void parseTableColumns(parserData* data, const std::string &element);
-	void parseTable(parserData* data, const std::string &element);
-	void parseTextList(parserData* data, const std::string &element);
-	void parseDropDown(parserData* data, const std::string &element);
+	void parseItemImage(parserData *data, const std::string &element);
+	void parseButton(parserData *data, const std::string &element);
+	void parseBackground(parserData *data, const std::string &element);
+	void parseTableOptions(parserData *data, const std::string &element);
+	void parseTableColumns(parserData *data, const std::string &element);
+	void parseTable(parserData *data, const std::string &element);
+	void parseTextList(parserData *data, const std::string &element);
+	void parseDropDown(parserData *data, const std::string &element);
 	void parseFieldEnterAfterEdit(parserData *data, const std::string &element);
 	void parseFieldCloseOnEnter(parserData *data, const std::string &element);
-	void parsePwdField(parserData* data, const std::string &element);
-	void parseField(parserData* data, const std::string &element);
+	void parsePwdField(parserData *data, const std::string &element);
+	void parseField(parserData *data, const std::string &element);
 	void createTextField(parserData *data, FieldSpec &spec,
 		core::rect<s32> &rect, bool is_multiline);
-	void parseSimpleField(parserData* data,std::vector<std::string> &parts);
-	void parseTextArea(parserData* data,std::vector<std::string>& parts,
-			const std::string &type);
+	void parseSimpleField(parserData *data,std::vector<std::string> &parts);
+	void parseTextArea(parserData *data,std::vector<std::string> &parts);
 	void parseHyperText(parserData *data, const std::string &element);
 	void parseHyperTip(parserData *data, const std::string &element);
-	void parseLabel(parserData* data, const std::string &element);
-	void parseVertLabel(parserData* data, const std::string &element);
-	void parseImageButton(parserData* data, const std::string &element);
-	void parseItemImageButton(parserData* data, const std::string &element);
-	void parseTabHeader(parserData* data, const std::string &element);
-	void parseBox(parserData* data, const std::string &element);
-	void parseBackgroundColor(parserData* data, const std::string &element);
-	void parseListColors(parserData* data, const std::string &element);
-	void parseListImages(parserData* data, const std::string &element);
-	void parseTooltip(parserData* data, const std::string &element);
+	void parseLabel(parserData *data, const std::string &element);
+	void parseVertLabel(parserData *data, const std::string &element);
+	void parseImageButton(parserData *data, const std::string &element);
+	void parseItemImageButton(parserData *data, const std::string &element);
+	void parseTabHeader(parserData *data, const std::string &element);
+	void parseBox(parserData *data, const std::string &element);
+	void parseBackgroundColor(parserData *data, const std::string &element);
+	void parseListColors(parserData *data, const std::string &element);
+	void parseListImages(parserData *data, const std::string &element);
+	void parseTooltip(parserData *data, const std::string &element);
 	bool parseVersionDirect(const std::string &data);
-	bool parseSizeDirect(parserData* data, const std::string &element);
-	void parseRealCoordinates(parserData* data, const std::string &element);
-	void parseScrollBar(parserData* data, const std::string &element);
+	bool parseSizeDirect(parserData *data, const std::string &element);
+	void parseRealCoordinates(parserData *data, const std::string &element);
+	void parseScrollBar(parserData *data, const std::string &element);
 	void parseScrollBarOptions(parserData *data, const std::string &element);
 	bool parsePositionDirect(parserData *data, const std::string &element);
 	void parsePosition(parserData *data, const std::string &element);
@@ -537,7 +534,7 @@ private:
 
 	void showTooltip(const std::wstring &text, const video::SColor &color,
 		const video::SColor &bgcolor);
-	void showHyperTip(GUIHyperText *e, const HyperTipSpec &spec);
+	void showHyperTip(HyperTipSpec &spec);
 
 	gui::IGUIStaticText *addLabel(const EnrichedString &text, const core::rect<s32> &rect,
 		gui::IGUIElement *parent, const StyleSpec &style, bool word_wrap = true, s32 id = 0);

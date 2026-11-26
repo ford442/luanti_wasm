@@ -1656,6 +1656,8 @@ void COpenGL3DriverBase::setRenderStates2DMode(bool alpha, bool texture, bool al
 
 	COpenGL3Renderer2D *nextActiveRenderer = texture ? MaterialRenderer2DTexture : MaterialRenderer2DNoTexture;
 
+	bool mode_changed = false;
+
 	if (CurrentRenderMode != ERM_2D) {
 		// unset last 3d material
 		if (CurrentRenderMode == ERM_3D) {
@@ -1663,6 +1665,7 @@ void COpenGL3DriverBase::setRenderStates2DMode(bool alpha, bool texture, bool al
 				MaterialRenderers[LastMaterial.MaterialType].Renderer->OnUnsetMaterial();
 		}
 
+		mode_changed = true;
 		CurrentRenderMode = ERM_2D;
 	} else if (MaterialRenderer2DActive && MaterialRenderer2DActive != nextActiveRenderer) {
 		MaterialRenderer2DActive->OnUnsetMaterial();
@@ -1670,7 +1673,7 @@ void COpenGL3DriverBase::setRenderStates2DMode(bool alpha, bool texture, bool al
 
 	MaterialRenderer2DActive = nextActiveRenderer;
 
-	MaterialRenderer2DActive->OnSetMaterial(Material, LastMaterial, true, 0);
+	MaterialRenderer2DActive->OnSetMaterial(Material, LastMaterial, mode_changed, 0);
 	LastMaterial = Material;
 	CacheHandler->correctCacheMaterial(LastMaterial);
 

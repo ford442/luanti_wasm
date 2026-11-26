@@ -77,10 +77,17 @@
 #include <sstream>
 #include <csignal>
 
+// Make the exceptions we swallow more visible in debug builds
+#ifdef NDEBUG
+#define EXCEPTIONSTREAM infostream
+#else
+#define EXCEPTIONSTREAM warningstream
+#endif
+
 class ClientNotFoundException : public BaseException
 {
 public:
-	ClientNotFoundException(const char *s):
+	ClientNotFoundException(const std::string &s):
 		BaseException(s)
 	{}
 };
@@ -169,9 +176,10 @@ void *ServerThread::run()
 #endif
 
 		} catch (con::PeerNotFoundException &e) {
-			infostream<<"Server: PeerNotFoundException"<<std::endl;
+			EXCEPTIONSTREAM << "ServerThread: PeerNotFoundException" << std::endl;
 		} catch (ClientNotFoundException &e) {
-			infostream<<"Server: ClientNotFoundException"<<std::endl;
+			EXCEPTIONSTREAM << "ServerThread: ClientNotFoundException: "
+				<< e.what() << std::endl;
 		} catch (LuaError &e) {
 			m_server->setAsyncFatalError(e);
 		} catch (ModError &e) {
@@ -755,23 +763,20 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 
 		// Step environment
 		m_env->step(dtime);
-	}
 
-	static const float map_timer_and_unload_dtime = 2.92;
-	if(m_map_timer_and_unload_interval.step(dtime, map_timer_and_unload_dtime))
-	{
-		EnvAutoLock lock(this);
 		// Run Map's timers and unload unused data
-		ScopeProfiler sp(g_profiler, "Server: map timer and unload");
-		m_env->getMap().timerUpdate(map_timer_and_unload_dtime,
-			std::max(g_settings->getFloat("server_unload_unused_data_timeout"), 0.0f),
-			-1);
-	}
+		constexpr float map_timer_and_unload_dtime = 2.95f;
+		auto &map = m_env->getServerMap();
+		if (m_map_timer_and_unload_interval.step(dtime, map_timer_and_unload_dtime)) {
+			ScopeProfiler sp(g_profiler, "Server: map timer and unload");
+			map.timerUpdate(map_timer_and_unload_dtime,
+				std::max(g_settings->getFloat("server_unload_unused_data_timeout"), 0.0f),
+				-1);
+		}
 
-	/*
-		Note: Orphan MapBlock ptrs become dangling after this call.
-	*/
-	m_env->getServerMap().step();
+		// Note: Orphan MapBlock pointers become dangling after this call
+		map.step();
+	}
 
 	/*
 		Listen to the admin chat, if available
@@ -866,7 +871,6 @@ void Server::AsyncRunStep(float dtime, bool initial_step)
 		Check added and deleted active objects
 	*/
 	{
-		//infostream<<"Server: Checking added and deleted active objects"<<std::endl;
 		EnvAutoLock envlock(this);
 
 		// This guarantees that each object recomputes its cache only once per server step,
@@ -1182,24 +1186,26 @@ void Server::Receive(float min_time)
 			ProcessData(&pkt);
 			m_packet_recv_processed_counter->increment();
 		} catch (const con::InvalidIncomingDataException &e) {
-			infostream << "Server::Receive(): InvalidIncomingDataException: what()="
+			EXCEPTIONSTREAM << "Server::Receive(): InvalidIncomingDataException: "
 					<< e.what() << std::endl;
 		} catch (SerializationError &e) {
 			enrich_exception(e, pkt, true);
-			infostream << "Server::Receive(): SerializationError: what()="
+			EXCEPTIONSTREAM << "Server::Receive(): SerializationError: "
 					<< e.what() << std::endl;
 		} catch (PacketError &e) {
 			enrich_exception(e, pkt, false);
-			actionstream << "Server::Receive(): PacketError: what()="
+			actionstream << "Server::Receive(): PacketError: "
 					<< e.what() << std::endl;
 		} catch (const ClientStateError &e) {
 			errorstream << "ClientStateError: peer=" << peer_id << " what()="
 					 << e.what() << std::endl;
 			DenyAccess(peer_id, SERVER_ACCESSDENIED_UNEXPECTED_DATA);
 		} catch (con::PeerNotFoundException &e) {
-			infostream << "Server: PeerNotFoundException" << std::endl;
+			EXCEPTIONSTREAM << "Server::Receive(): PeerNotFoundException" << std::endl;
 		} catch (ClientNotFoundException &e) {
-			infostream << "Server: ClientNotFoundException" << std::endl;
+			enrich_exception(e, pkt, false);
+			EXCEPTIONSTREAM << "Server::Receive(): ClientNotFoundException: "
+				<< e.what() << std::endl;
 		}
 	}
 }
@@ -1267,8 +1273,8 @@ PlayerSAO *Server::StageTwoClientInit(session_t peer_id)
 
 	// If failed, cancel
 	if (!player) {
-		RemotePlayer *joined = m_env->getPlayer(playername.c_str());
-		if (joined && joined->getPeerId() != PEER_ID_INEXISTENT) {
+		RemotePlayer *joined = m_env->getPlayer(playername.c_str(), true);
+		if (joined) {
 			actionstream << "Server: Failed to emerge player \"" << playername
 					<< "\" (player allocated to another client)" << std::endl;
 			DenyAccess(peer_id, SERVER_ACCESSDENIED_ALREADY_CONNECTED);
@@ -1288,7 +1294,13 @@ PlayerSAO *Server::StageTwoClientInit(session_t peer_id)
 
 	/* Add object to environment */
 	PlayerSAO *playersao = sao.get();
-	m_env->addActiveObject(std::move(sao));
+	if (m_env->addActiveObject(std::move(sao)) == 0) {
+		actionstream << "Server: Can't add SAO for player \"" << playername
+			<< "\"." << std::endl;
+		DenyAccess(peer_id, SERVER_ACCESSDENIED_SERVER_FAIL);
+		m_env->removePlayer(player);
+		return nullptr;
+	}
 
 	if (playersao->isNewPlayer())
 		m_script->on_newplayer(playersao);
@@ -1304,8 +1316,9 @@ PlayerSAO *Server::StageTwoClientInit(session_t peer_id)
 	// Send inventory formspec
 	SendPlayerInventoryFormspec(peer_id);
 
-	// Send inventory
+	// Send inventories
 	SendInventory(player, false);
+	sendDetachedInventories(peer_id);
 
 	// Send HP
 	SendPlayerHP(playersao, false);
@@ -1330,6 +1343,7 @@ PlayerSAO *Server::StageTwoClientInit(session_t peer_id)
 			actionstream << name << " ";
 		actionstream << player->getName() << std::endl;
 	}
+
 	return playersao;
 }
 
@@ -1615,11 +1629,11 @@ void Server::SendInventory(RemotePlayer *player, bool incremental, bool skip_wie
 
 	NetworkPacket pkt(TOCLIENT_INVENTORY, 0, player->getPeerId());
 
-	std::ostringstream os(std::ios::binary);
+	my_ostringstream os;
 	player->inventory.serialize(os, incremental);
 	player->inventory.setModified(false);
 	player->setModified(true);
-	std::string content = os.str();
+	auto content = os.view();
 
 	if (player->protocol_version >= 52) {
 		pkt.putLongString(content);
@@ -2059,11 +2073,9 @@ void Server::SendOverrideDayNightRatio(session_t peer_id, bool do_override,
 
 void Server::SendSetLighting(session_t peer_id, const Lighting &lighting)
 {
-	NetworkPacket pkt(TOCLIENT_SET_LIGHTING,
-			4, peer_id);
+	NetworkPacket pkt(TOCLIENT_SET_LIGHTING, 70, peer_id);
 
-	pkt << lighting.shadow_intensity;
-	pkt << lighting.saturation;
+	pkt << lighting.shadow_intensity << lighting.saturation;
 
 	pkt << lighting.exposure.luminance_min
 			<< lighting.exposure.luminance_max
@@ -2077,6 +2089,12 @@ void Server::SendSetLighting(session_t peer_id, const Lighting &lighting)
 			lighting.bloom_radius;
 
 	pkt << lighting.shadow_direction;
+
+	const auto &s = lighting.static_;
+	pkt << s.light_curve_set;
+	if (s.light_curve_set)
+		pkt.putRawString(reinterpret_cast<const char*>(s.light_curve), sizeof(s.light_curve));
+	pkt << s.ao_gamma;
 
 	Send(&pkt);
 }
@@ -2513,7 +2531,6 @@ void Server::sendNodeChangePkt(NetworkPacket &pkt, v3s16 block_pos,
 void Server::sendMetadataChanged(const std::unordered_set<v3s16> &positions, float far_d_nodes)
 {
 	NodeMetadataList meta_updates_list(false);
-	std::ostringstream os(std::ios::binary);
 
 	std::vector<session_t> clients = m_clients.getClientIDs();
 	ClientInterface::AutoLock clientlock(m_clients);
@@ -2547,19 +2564,23 @@ void Server::sendMetadataChanged(const std::unordered_set<v3s16> &positions, flo
 		if (meta_updates_list.size() == 0)
 			continue;
 
-		// Send the meta changes
-		os.str("");
-		meta_updates_list.serialize(os, client->serialization_version, false, true, true);
-		std::string raw = os.str();
-		os.str("");
-		compressZlib(raw, os);
-
-		NetworkPacket pkt(TOCLIENT_NODEMETA_CHANGED, 0, i);
-		pkt.putLongString(os.str());
-		Send(&pkt);
+		sendMetadataChanged(client, meta_updates_list);
 
 		meta_updates_list.clear();
 	}
+}
+
+void Server::sendMetadataChanged(const RemoteClient *client, const NodeMetadataList &meta_updates_list)
+{
+	std::ostringstream os(std::ios::binary);
+	meta_updates_list.serialize(os, client->serialization_version, false, true, true);
+	std::string raw = os.str();
+	os.str("");
+	compressZlib(raw, os);
+
+	NetworkPacket pkt(TOCLIENT_NODEMETA_CHANGED, 0, client->peer_id);
+	pkt.putLongString(os.str());
+	Send(&pkt);
 }
 
 void Server::SendBlockNoLock(session_t peer_id, MapBlock *block, u8 ver,
@@ -2576,10 +2597,10 @@ void Server::SendBlockNoLock(session_t peer_id, MapBlock *block, u8 ver,
 
 	// Serialize the block in the right format
 	if (!sptr) {
-		std::ostringstream os(std::ios_base::binary);
+		my_ostringstream os;
 		block->serialize(os, ver, false, net_compression_level);
 		block->serializeNetworkSpecific(os);
-		s = os.str();
+		s = os.take();
 		sptr = &s;
 	}
 
@@ -2753,7 +2774,7 @@ void Server::fillMediaCache()
 	std::vector<std::string> paths;
 
 	// ordered in descending priority
-	paths.push_back(getBuiltinLuaPath() + DIR_DELIM "locale");
+	paths.push_back(ScriptApiBase::getBuiltinLuaPath() + DIR_DELIM "locale");
 	fs::GetRecursiveDirs(paths,
 		porting::path_user + DIR_DELIM "textures" DIR_DELIM "server");
 	fs::GetRecursiveDirs(paths,
@@ -2796,9 +2817,19 @@ void Server::sendMediaAnnouncement(session_t peer_id, const std::string &lang_co
 		if (info.no_announce)
 			return false;
 		if (Translations::isTranslationFileType(name)) {
-			// Only send translations matching the client's language
 			auto this_lang_code = Translations::getFileLanguage(name);
-			return !this_lang_code.empty() && this_lang_code == lang_code;
+			if (this_lang_code.empty())
+				return false;
+
+			if (this_lang_code == lang_code)
+				return true;
+
+			// Only clients 5.18 and older can correctly handle fallbacks with English language.
+			if (this_lang_code == "en") {
+				return m_clients.getProtocolVersion(peer_id) >= 54;
+			}
+
+			return false;
 		}
 		return true;
 	};
@@ -2928,9 +2959,9 @@ void Server::sendRequestedMedia(session_t peer_id,
 			// Zstd is very fast and can handle non-compressible data efficiently
 			// so we can just throw it at every file. Still we don't want to
 			// spend too much here, so we use the lowest compression level.
-			std::ostringstream oss(std::ios::binary);
+			my_ostringstream oss;
 			compressZstd(data, oss, 1);
-			data = oss.str();
+			data = oss.take();
 		}
 		bytes_compressed += data.size();
 
@@ -3042,13 +3073,13 @@ void Server::sendDetachedInventory(Inventory *inventory, const std::string &name
 		pkt << true; // Update inventory
 
 		// Serialization & NetworkPacket isn't a love story
-		std::ostringstream os(std::ios_base::binary);
+		my_ostringstream os;
 		inventory->serialize(os);
 		inventory->setModified(false);
 
-		const std::string &os_str = os.str();
-		pkt << static_cast<u16>(os_str.size()); // HACK: to keep compatibility with 5.0.0 clients
-		pkt.putRawString(os_str);
+		auto data = os.view();
+		pkt << static_cast<u16>(data.size()); // HACK: to keep compatibility with 5.0.0 clients
+		pkt.putRawString(data);
 	}
 
 	if (peer_id == PEER_ID_INEXISTENT)
@@ -3057,19 +3088,43 @@ void Server::sendDetachedInventory(Inventory *inventory, const std::string &name
 		Send(&pkt);
 }
 
-void Server::sendDetachedInventories(session_t peer_id, bool incremental)
+void Server::sendDetachedInventories(session_t peer_id)
 {
-	// Lookup player name, to filter detached inventories just after
-	std::string peer_name;
-	if (peer_id != PEER_ID_INEXISTENT) {
-		peer_name = getClient(peer_id, CS_Created)->getName();
+	if (peer_id == PEER_ID_INEXISTENT) {
+		assert(false);
+		return;
 	}
 
-	auto send_cb = [this, peer_id](const std::string &name, Inventory *inv) {
+	std::string peer_name = getClient(peer_id, CS_Created)->getName();
+
+	auto send_cb = [&] (const std::string &name, Inventory *inv, const std::string &owner) {
+		// don't send what we don't own
+		if (!owner.empty() && owner != peer_name)
+			return;
+
+		assert(inv);
 		sendDetachedInventory(inv, name, peer_id);
 	};
 
-	m_inventory_mgr->sendDetachedInventories(peer_name, incremental, send_cb);
+	m_inventory_mgr->sendDetachedInventories(peer_name, false, send_cb);
+}
+
+void Server::sendDetachedInventories()
+{
+	auto send_cb = [this] (const std::string &name, Inventory *inv, const std::string &owner) {
+		session_t peer_id = PEER_ID_INEXISTENT;
+		if (!owner.empty()) {
+			auto *player = m_env->getPlayer(owner);
+			peer_id = player ? player->getPeerId() : PEER_ID_INEXISTENT;
+			if (peer_id == PEER_ID_INEXISTENT)
+				return; // owner is not online; skip
+		}
+
+		assert(inv);
+		sendDetachedInventory(inv, name, peer_id);
+	};
+
+	m_inventory_mgr->sendDetachedInventories("", true, send_cb);
 }
 
 /*
@@ -3145,6 +3200,7 @@ void Server::acceptAuth(session_t peer_id, bool forSudoMode)
 
 void Server::DeleteClient(session_t peer_id, ClientDeletionReason reason)
 {
+	EnvAutoLock envlock(this);
 	std::wstring message;
 	{
 		/*
@@ -3208,10 +3264,8 @@ void Server::DeleteClient(session_t peer_id, ClientDeletionReason reason)
 						new ChatEventNick(CET_NICK_REMOVE, name));
 			}
 		}
-		{
-			EnvAutoLock envlock(this);
-			m_clients.DeleteClient(peer_id);
-		}
+
+		m_clients.DeleteClient(peer_id);
 	}
 
 	// Send leave chat message to all remaining clients
@@ -3368,8 +3422,9 @@ void Server::handleAdminChat(const ChatEventChat *evt)
 RemoteClient *Server::getClient(session_t peer_id, ClientState state_min)
 {
 	RemoteClient *client = getClientNoEx(peer_id,state_min);
-	if(!client)
-		throw ClientNotFoundException("Client not found");
+	if(!client) {
+		throw ClientNotFoundException("peer_id=" + itos(peer_id));
+	}
 
 	return client;
 }
@@ -4023,8 +4078,7 @@ bool Server::rollbackRevertActions(const std::list<RollbackAction> &actions,
 }
 
 // IGameDef interface
-// Under envlock
-IItemDefManager *Server::getItemDefManager()
+const IItemDefManager *Server::getItemDefManager() const
 {
 	return m_itemdef;
 }
@@ -4034,7 +4088,7 @@ const NodeDefManager *Server::getNodeDefManager()
 	return m_nodedef;
 }
 
-ICraftDefManager *Server::getCraftDefManager()
+const ICraftDefManager *Server::getCraftDefManager() const
 {
 	return m_craftdef;
 }
@@ -4067,11 +4121,6 @@ const std::vector<ModSpec> & Server::getMods() const
 const ModSpec *Server::getModSpec(const std::string &modname) const
 {
 	return m_modmgr->getModSpec(modname);
-}
-
-std::string Server::getBuiltinLuaPath()
-{
-	return porting::path_share + DIR_DELIM + "builtin";
 }
 
 void Server::setAsyncFatalError(const std::string &error)
@@ -4227,7 +4276,8 @@ std::unique_ptr<PlayerSAO> Server::emergePlayer(const char *name, session_t peer
 	/*
 		Try to get an existing player
 	*/
-	RemotePlayer *player = m_env->getPlayer(name);
+	// Also match a disconnected player that is still pending removal
+	RemotePlayer *player = m_env->getPlayer(name, true);
 
 	// If player is already connected, cancel
 	if (player) {
@@ -4405,9 +4455,12 @@ Translations *Server::getTranslationLanguage(const std::string &lang_code)
 
 	// [] will create an entry
 	auto *translations = &server_translations[lang_code];
+	translations->setTargetLanguage(lang_code);
 
 	for (const auto &i : m_media) {
-		if (Translations::getFileLanguage(i.first) == lang_code) {
+		auto file_lang = Translations::getFileLanguage(i.first);
+
+		if (file_lang == lang_code || file_lang == "en") {
 			std::string data;
 			if (fs::ReadFile(i.second.path, data, true)) {
 				translations->loadTranslation(i.first, data);

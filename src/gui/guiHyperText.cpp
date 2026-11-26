@@ -68,10 +68,11 @@ void ParsedText::Element::setStyle(StyleList &style)
 	// Build a new fontengine ?
 	this->font = g_fontengine->getFont(spec);
 
-	if (!this->font)
-		printf("No font found ! Size=%d, mode=%d, bold=%s, italic=%s\n",
-				font_size, font_mode, style["bold"].c_str(),
-				style["italic"].c_str());
+	if (!this->font) {
+		infostream << "No font found! size=" << font_size << ", mode="
+			<< font_mode << ", bold=" << style["bold"] << ", italic="
+			<< style["italic"] << std::endl;
+	}
 }
 
 void ParsedText::Paragraph::setStyle(StyleList &style)
@@ -387,15 +388,15 @@ u32 ParsedText::parseTag(const wchar_t *text, u32 cursor)
 {
 	// Tag name
 	bool end = false;
-	std::string name = "";
+	std::string name;
 	wchar_t c = text[cursor];
 
 	if (c == L'/') {
 		end = true;
 		c = text[++cursor];
-		if (c == L'\0')
-			return 0;
 	}
+	if (c == L'\0')
+		return 0;
 
 	while (c != ' ' && c != '>') {
 		name += c;
@@ -475,7 +476,6 @@ u32 ParsedText::parseTag(const wchar_t *text, u32 cursor)
 	++cursor; // Last ">"
 
 	// Tag specific processing
-	StyleList style;
 
 	if (name == "global") {
 		if (end)
@@ -486,8 +486,9 @@ u32 ParsedText::parseTag(const wchar_t *text, u32 cursor)
 		if (end) {
 			closeTag(name);
 		} else {
+			StyleList style;
 			parseStyles(attrs, style);
-			openTag(name, attrs)->style = style;
+			openTag(name, attrs)->style = std::move(style);
 		}
 		endElement();
 	} else if (name == "img" || name == "item") {
@@ -622,9 +623,16 @@ TextDrawer::TextDrawer(const wchar_t *text, Client *client,
 		gui::IGUIEnvironment *environment, ISimpleTextureSource *tsrc,
 		video::SColor default_background_color,
 		video::SColor default_color) :
-		m_text(text, default_color), m_client(client), m_tsrc(tsrc), m_guienv(environment),
+		m_client(client), m_tsrc(tsrc), m_guienv(environment),
 		m_default_background_color(default_background_color)
 {
+	setText(text, default_color);
+}
+
+void TextDrawer::setText(const wchar_t *text, video::SColor default_color)
+{
+	m_text.reset(text, default_color);
+
 	// Size all elements
 	for (auto &p : m_text.m_paragraphs) {
 		for (auto &e : p.elements) {
@@ -991,7 +999,7 @@ void TextDrawer::draw(const core::rect<s32> &clip_rect,
 				video::SColor color = el.color;
 
 				for (auto tag : el.tags)
-					if (&(*tag) == m_hovertag)
+					if (tag == m_hovertag)
 						color = el.hovercolor;
 
 				if (!el.font)
@@ -1029,7 +1037,7 @@ void TextDrawer::draw(const core::rect<s32> &clip_rect,
 
 			case ParsedText::ELEMENT_ITEM: {
 				if (m_client) {
-					IItemDefManager *idef = m_client->idef();
+					auto *idef = m_client->idef();
 					ItemStack item;
 					item.deSerialize(stringw_to_utf8(el.text), idef);
 
@@ -1075,7 +1083,6 @@ GUIHyperText::GUIHyperText(const wchar_t *text, IGUIEnvironment *environment,
 		m_default_background_color(default_background_color),
 		m_default_color(default_color)
 {
-
 	IGUISkin *skin = nullptr;
 	if (Environment)
 		skin = Environment->getSkin();
@@ -1131,10 +1138,10 @@ void GUIHyperText::checkHover(s32 X, s32 Y)
 void GUIHyperText::setStyles(const std::array<StyleSpec, StyleSpec::NUM_STATES> &styles)
 {
 	StyleSpec::State state = StyleSpec::STATE_DEFAULT;
-	StyleSpec style = StyleSpec::getStyleFromStatePropagation(styles, state);
+	m_style = StyleSpec::getStyleFromStatePropagation(styles, state);
 
-	setNotClipped(style.getBool(StyleSpec::NOCLIP, true));
-	m_drawer.applyStyleSpecToText(style);
+	setNotClipped(m_style.getBool(StyleSpec::NOCLIP, true));
+	m_drawer.applyStyleSpecToText(m_style);
 }
 
 bool GUIHyperText::OnEvent(const SEvent &event)
@@ -1251,4 +1258,10 @@ void GUIHyperText::draw()
 
 	// draw children
 	IGUIElement::draw();
+}
+
+void GUIHyperText::setText(const wchar_t *text)
+{
+	m_drawer.setText(text, m_default_color);
+	m_drawer.applyStyleSpecToText(m_style);
 }

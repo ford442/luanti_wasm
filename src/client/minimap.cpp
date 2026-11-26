@@ -320,7 +320,7 @@ void Minimap::addMode(MinimapModeDef mode)
 			precision = 1;
 		}
 		porting::mt_snprintf(label_buf, sizeof(label_buf),
-			mode.label.c_str(), zoom, precision
+			mode.label.c_str(), precision, zoom
 		);
 		mode.label = label_buf;
 	}
@@ -334,7 +334,7 @@ void Minimap::addMode(MinimapType type, u16 size, const std::string &label,
 	MinimapModeDef mode;
 	mode.type = type;
 	mode.label = label;
-	mode.map_size = size;
+	mode.map_size = std::min<u16>({size, MINIMAP_MAX_SX, MINIMAP_MAX_SY});
 	mode.texture = texture;
 	mode.scale = scale;
 	switch (type) {

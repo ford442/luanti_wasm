@@ -3,6 +3,8 @@
 // Copyright (C) 2013 celeron55, Perttu Ahola <celeron55@gmail.com>
 
 #include "scripting_server.h"
+#include "lua_api/l_rotation.h"
+#include "lua_api/l_matrix4.h"
 #include "server.h"
 #include "log.h"
 #include "settings.h"
@@ -40,7 +42,7 @@ extern "C" {
 
 ServerScripting::ServerScripting(Server* server):
 		ScriptApiBase(ScriptingType::Server),
-		ScriptApiAsync(server)
+		ScriptApiAsync()
 {
 	setGameDef(server);
 
@@ -91,7 +93,7 @@ ServerScripting::ServerScripting(Server* server):
 
 void ServerScripting::loadBuiltin()
 {
-	loadMod(Server::getBuiltinLuaPath() + DIR_DELIM "init.lua", BUILTIN_MOD_NAME);
+	loadMod(getBuiltinLuaPath() + DIR_DELIM "init.lua", BUILTIN_MOD_NAME);
 	checkSetByBuiltin();
 }
 
@@ -125,7 +127,28 @@ void ServerScripting::initAsync()
 	// not added: ModApiHttp async api can't really work together with our jobs
 	// not added: ModApiStorage is probably not thread safe(?)
 
-	asyncEngine.initialize(0);
+	asyncEngine.initialize(0, "async_game", !g_disable_mod_security);
+}
+
+void ServerScripting::reportAsyncError(const std::string &msg)
+{
+	getServer()->setAsyncFatalError(msg);
+}
+
+bool ServerScripting::onAsyncEnvSetup(ScriptApiBase *inner)
+{
+	auto *server = getServer();
+	assert(server);
+	const auto &list = server->m_async_init_files;
+	try {
+		for (auto &it : list)
+			inner->loadMod(it.second, it.first);
+	} catch (const ModError &e) {
+		errorstream << "Failed to load mod script inside async environment" << std::endl;
+		server->setAsyncFatalError(e.what());
+		return false;
+	}
+	return true;
 }
 
 void ServerScripting::InitializeModApi(lua_State *L, int top)
@@ -139,8 +162,10 @@ void ServerScripting::InitializeModApi(lua_State *L, int top)
 	LuaValueNoiseMap::Register(L);
 	LuaPseudoRandom::Register(L);
 	LuaPcgRandom::Register(L);
-	LuaRaycast::Register(L);
 	LuaSecureRandom::Register(L);
+	LuaRotation::Register(L);
+	LuaMatrix4::Register(L);
+	LuaRaycast::Register(L);
 	LuaVoxelManip::Register(L);
 	NodeMetaRef::Register(L);
 	NodeTimerRef::Register(L);
@@ -181,6 +206,8 @@ void ServerScripting::InitializeAsync(lua_State *L, int top)
 	LuaSecureRandom::Register(L);
 	LuaVoxelManip::Register(L);
 	LuaSettings::Register(L);
+	LuaRotation::Register(L);
+	LuaMatrix4::Register(L);
 
 	// globals data
 	auto *data = ModApiBase::getServer(L)->m_lua_globals_data.get();

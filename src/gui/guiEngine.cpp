@@ -283,6 +283,7 @@ Translations *GUIEngine::getContentTranslations(const std::string &path,
 
 	m_last_translations_key = key;
 	m_last_translations = {};
+	m_last_translations.setTargetLanguage(lang_code);
 
 	std::string data;
 	if (fs::ReadFile(trans_path, data)) {
@@ -296,12 +297,12 @@ Translations *GUIEngine::getContentTranslations(const std::string &path,
 bool GUIEngine::loadMainMenuScript()
 {
 	// Set main menu path (for core.get_mainmenu_path())
-	m_scriptdir = porting::path_share + DIR_DELIM + "builtin" + DIR_DELIM + "mainmenu";
+	m_scriptdir = ScriptApiBase::getBuiltinLuaPath() + DIR_DELIM "mainmenu";
 
 	// Load builtin (which will load the main menu script)
-	std::string script = porting::path_share + DIR_DELIM "builtin" + DIR_DELIM "init.lua";
+	auto script = ScriptApiBase::getBuiltinLuaPath() + DIR_DELIM "init.lua";
 	try {
-		m_script->loadScript(script);
+		m_script->loadMod(script, BUILTIN_MOD_NAME);
 		m_script->checkSetByBuiltin();
 		// Menu script loaded
 		return true;
@@ -394,7 +395,7 @@ void GUIEngine::run()
 			driver->endScene();
 		}
 
-		m_script->step();
+		m_script->stepAsync();
 
 		sound_volume_control(m_sound_manager.get(), device->isWindowActive());
 		m_sound_manager->step(dtime);
@@ -648,7 +649,7 @@ bool GUIEngine::downloadFile(const std::string &url, const std::string &target)
 		(long)g_settings->getS32("curl_file_download_timeout"));
 	bool completed = httpfetch_sync_interruptible(fetch_request, fetch_result);
 
-	if (!completed || !fetch_result.succeeded) {
+	if (!completed || !fetch_result.good()) {
 		target_file.close();
 		fs::DeleteSingleFileOrEmptyDirectory(target, true);
 		return false;

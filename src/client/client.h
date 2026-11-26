@@ -9,6 +9,7 @@
 #include "gameparams.h" // ELoginRegister
 #include "inventorymanager.h"
 #include "irrlichttypes.h"
+#include "lighting.h"
 #include "network/address.h"
 #include "network/networkprotocol.h" // multiple enums
 #include "network/peerhandler.h"
@@ -243,7 +244,6 @@ public:
 #endif
 	ITextureSource *tsrc() { return getTextureSource(); }
 	ISoundManager *sound() { return getSoundManager(); }
-	static const std::string &getBuiltinLuaPath();
 	static const std::string &getClientModsLuaPath();
 
 	const std::vector<ModSpec> &getMods() const override;
@@ -279,11 +279,6 @@ public:
 		return m_env.getPlayerNames();
 	}
 
-	float getAnimationTime() const
-	{
-		return m_animation_time;
-	}
-
 	/// @return integer ∊ [0, crack_animation_length] or -1 for invalid
 	int getCrackLevel();
 	v3s16 getCrackPos();
@@ -302,10 +297,10 @@ public:
 
 	u64 getMapSeed() const { return m_map_seed; }
 
-	void addUpdateMeshTask(v3s16 blockpos, bool ack_to_server=false, bool urgent=false);
+	void addUpdateMeshTask(v3s16 blockpos, bool urgent=false);
 	// Including blocks at appropriate edges
-	void addUpdateMeshTaskWithEdge(v3s16 blockpos, bool ack_to_server=false, bool urgent=false);
-	void addUpdateMeshTaskForNode(v3s16 nodepos, bool ack_to_server=false, bool urgent=false);
+	void addUpdateMeshTaskWithEdge(v3s16 blockpos, bool urgent=false);
+	void addUpdateMeshTaskForNode(v3s16 nodepos, bool urgent=false);
 
 	bool hasClientEvents() const { return !m_client_event_queue.empty(); }
 	// Get event from queue. If queue is empty, it triggers an assertion failure.
@@ -371,9 +366,9 @@ public:
 
 	// IGameDef interface
 	bool isClient() override { return true; }
-	IItemDefManager* getItemDefManager() override;
+	const IItemDefManager* getItemDefManager() const override;
 	const NodeDefManager* getNodeDefManager() override;
-	ICraftDefManager* getCraftDefManager() override;
+	const ICraftDefManager* getCraftDefManager() const override;
 	ITextureSource* getTextureSource();
 	virtual IWritableShaderSource* getShaderSource();
 	u16 allocateUnknownNodeId(const std::string &name) override;
@@ -388,6 +383,11 @@ public:
 	// If you want to modify it, you may need to clone it first (-> `is_shared`)
 	// (the returned pointer must be dropped)
 	scene::IAnimatedMesh *getMesh(const std::string &filename, bool *is_shared = nullptr);
+
+	/// @brief returns animation timer (seconds), will wrap eventually
+	inline float getAnimationTime() const { return m_animation_time; }
+	/// @brief returns current animation delta
+	inline float getAnimationDelta() const { return m_animation_dtime; }
 
 	ModVFS *getModVFS() { return m_mod_vfs.get(); }
 	ModStorageDatabase *getModStorageDatabase() override { return m_mod_storage_database; }
@@ -455,6 +455,11 @@ public:
 		return m_mesh_grid;
 	}
 
+	inline const StaticLighting &getCommittedStaticLighting() const
+	{
+		return m_committed_static_light;
+	}
+
 	bool inhibit_inventory_revert = false;
 
 private:
@@ -482,17 +487,18 @@ private:
 
 	void ReceiveAll();
 
-	void sendPlayerPos();
-
 	void deleteAuthData();
 	// helper method shared with clientpackethandler
 	static AuthMechanism choseAuthMech(const u32 mechs);
 
 	void sendInit(const std::string &playerName);
 	void startAuth(AuthMechanism chosen_auth_mechanism);
-	void sendDeletedBlocks(std::vector<v3s16> &blocks);
+	void sendDeletedBlocks(const std::vector<v3s16> &blocks);
 	void sendGotBlocks(const std::vector<v3s16> &blocks);
 	void sendRemovedSounds(const std::vector<s32> &soundList);
+	void sendPlayerPos();
+
+	bool updateStaticLighting(const StaticLighting &future);
 
 	bool canSendChatMessage() const;
 
@@ -518,7 +524,6 @@ private:
 	RenderingEngine *m_rendering_engine;
 	ItemVisualsManager *m_item_visuals_manager;
 
-
 	std::unique_ptr<MeshUpdateManager> m_mesh_update_manager;
 	ClientEnvironment m_env;
 	std::unique_ptr<ParticleManager> m_particle_manager;
@@ -541,20 +546,30 @@ private:
 	float m_inventory_from_server_age = 0.0f;
 	s32 m_mapblock_limit_logged = 0;
 	PacketCounter m_packetcounter;
-	// Block mesh animation parameters
-	float m_animation_time = 0.0f;
 	int m_crack_level = -1;
 	v3s16 m_crack_pos;
 	std::queue<std::wstring> m_out_chat_queue;
 	u32 m_last_chat_message_sent;
 	float m_chat_message_allowance = 5.0f;
 	std::queue<ChatMessage *> m_chat_queue;
+	/// received blocks that we still want to ack to the server
+	/// @note don't append blindly. this must be sent when it reaches 255 entries.
+	std::vector<v3s16> m_got_blocks;
+
+	float m_animation_time = 0;
+	float m_animation_dtime = 0;
 
 	// The authentication methods we can use to enter sudo mode (=change password)
 	u32 m_sudo_auth_methods;
 
 	// The seed returned by the server in TOCLIENT_AUTH_ACCEPT is stored here
 	u64 m_map_seed = 0;
+
+	// The number of blocks the client will combine for mesh generation.
+	MeshGrid m_mesh_grid;
+
+	// The static lighting currently in use
+	StaticLighting m_committed_static_light;
 
 	// Auth data
 	std::string m_playername;
@@ -629,7 +644,4 @@ private:
 	u32 m_csm_restriction_noderange = 8;
 
 	std::unique_ptr<ModChannelMgr> m_modchannel_mgr;
-
-	// The number of blocks the client will combine for mesh generation.
-	MeshGrid m_mesh_grid;
 };

@@ -17,16 +17,17 @@ class Map;
 class MapBlock;
 class MapBlockMesh;
 struct MeshMakeData;
+struct MeshUpdateResult;
 class Client;
 
 struct QueuedMeshUpdate
 {
 	v3s16 p = v3s16(-1337, -1337, -1337);
-	std::vector<v3s16> ack_list;
 	int crack_level = -1;
 	v3s16 crack_pos;
 	MeshMakeData *data = nullptr; // This is generated in MeshUpdateQueue::pop()
 	std::vector<MapBlock*> map_blocks;
+	u16 epoch = U16_MAX;
 	bool urgent = false;
 
 	QueuedMeshUpdate() = default;
@@ -58,12 +59,6 @@ struct QueuedMeshUpdate
 */
 class MeshUpdateQueue
 {
-	enum UpdateMode
-	{
-		FORCE_UPDATE,
-		SKIP_UPDATE_IF_ALREADY_CACHED,
-	};
-
 public:
 	MeshUpdateQueue(Client *client);
 
@@ -74,11 +69,21 @@ public:
 	 * update for the block p.
 	 * @param map Map
 	 * @param p block position
-	 * @param ack_to_server Should be acked to server when done?
 	 * @param urgent High-priority?
 	 * @param from_neighbor was this update only necessary due to a neighbor change?
 	 */
-	bool addBlock(Map *map, v3s16 p, bool ack_to_server, bool urgent, bool from_neighbor);
+	bool addBlock(Map *map, v3s16 p, bool urgent, bool from_neighbor);
+
+	/**
+	 * Re-queues a block that was already finished.
+	 */
+	void reAddBlock(MeshUpdateResult &r);
+
+	// Update internal epoch counter
+	void setEpoch(u16 epoch) {
+		MutexAutoLock lock(m_mutex);
+		m_epoch = epoch;
+	}
 
 	// Returned pointer must be deleted
 	// Returns NULL if queue is empty
@@ -93,14 +98,14 @@ public:
 		return m_queue.size();
 	}
 
-	/// @param finish if true, also clears updates that need to be acked to the server
-	void clear(bool finish = false);
+	void clear();
 
 private:
 	Client *m_client;
 	std::vector<QueuedMeshUpdate *> m_queue;
 	std::unordered_set<v3s16> m_urgents;
 	std::unordered_set<v3s16> m_inflight_blocks;
+	u16 m_epoch = 0;
 	std::mutex m_mutex;
 
 	// TODO: Add callback to update these when g_settings changes, and update all meshes
@@ -116,11 +121,17 @@ struct MeshUpdateResult
 	v3s16 p = v3s16(-1338, -1338, -1338);
 	std::unique_ptr<MapBlockMesh> mesh;
 	u8 solid_sides;
-	std::vector<v3s16> ack_list;
-	bool urgent = false;
 	std::vector<MapBlock*> map_blocks;
+	u16 epoch = U16_MAX;
+	bool urgent = false;
 
 	MeshUpdateResult() = default;
+
+	/**
+	 * Drop block references.
+	 * @note not done by destructor, since this is only safe on main thread
+	 */
+	void dropBlocks();
 };
 
 class MeshUpdateManager;
@@ -149,7 +160,7 @@ public:
 
 	// Caches the block at p and its neighbors (if needed) and queues a mesh
 	// update for the block at p
-	void updateBlock(Map *map, v3s16 p, bool ack_block_to_server, bool urgent,
+	void updateBlock(Map *map, v3s16 p, bool urgent,
 			bool update_neighbors = false);
 
 	void putResult(MeshUpdateResult &&r);
@@ -157,8 +168,15 @@ public:
 	/// @note caller needs to refDrop() the affected map_blocks
 	bool getNextResult(MeshUpdateResult &r);
 
-	/// @param finish if true, also clears updates that need to be acked to the server
-	void clearAllQueues(bool finish = false);
+	/**
+	 * Forces all in-progress meshes to be re-generated and adds all passed
+	 * positions to the queue.
+	 * This is used after parameters the meshgen depends on have changed.
+	 * @param pp block positions
+	 */
+	void forceRegenerate(Map *map, const std::vector<v3s16> &pp);
+
+	void clearAllQueues();
 
 	void start();
 	void stop();
@@ -178,6 +196,9 @@ private:
 
 	void deferUpdate();
 	int processOneUnlocked();
+
+	// Epoch counter: used to identify outdated mesh results
+	u16 m_epoch = 0;
 
 	MeshUpdateQueue m_queue_in;
 	ResultQueue m_queue_out;

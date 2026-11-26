@@ -120,19 +120,16 @@ void MapblockMeshGenerator::getSpecialTile(int index, TileSpec *tile_ret, bool a
 {
 	const ContentFeatures &f = *cur_node.f;
 	*tile_ret = f.visuals->special_tiles[index];
-	TileLayer *top_layer = nullptr;
 
 	for (auto &layernum : tile_ret->layers) {
 		TileLayer *layer = &layernum;
 		if (layer->empty())
 			continue;
-		top_layer = layer;
 		if (!layer->has_color)
 			layer->color = f.visuals->getColor(f, cur_node.n.param2);
+		if (apply_crack)
+			layer->material_flags |= MATERIAL_FLAG_CRACK;
 	}
-
-	if (apply_crack)
-		top_layer->material_flags |= MATERIAL_FLAG_CRACK;
 }
 
 void MapblockMeshGenerator::drawQuad(const TileSpec &tile, v3f *coords, const v3s16 &normal,
@@ -157,8 +154,7 @@ void MapblockMeshGenerator::drawQuad(const TileSpec &tile, v3f *coords, const v3
 	collector->append(tile, vertices, 4, quad_indices, 6);
 }
 
-static std::array<video::S3DVertex, 24> setupCuboidVertices(const aabb3f &box,
-		const f32 *txc, const TileSpec *tiles, int tilecount, v3s16 alignment)
+static std::array<video::S3DVertex, 24> setupCuboidVertices(const aabb3f &box, const f32 *txc)
 {
 	v3f min = box.MinEdge;
 	v3f max = box.MaxEdge;
@@ -205,61 +201,61 @@ static std::array<video::S3DVertex, 24> setupCuboidVertices(const aabb3f &box,
 		video::S3DVertex(min.X, min.Y, min.Z, 0, 0, -1, {}, txc[20], txc[23]),
 	}};
 
-	for (int face = 0; face < 6; face++) {
-		int tileindex = MYMIN(face, tilecount - 1);
-		const TileSpec &tile = tiles[tileindex];
-		for (int j = 0; j < 4; j++) {
-			video::S3DVertex &vertex = vertices[face * 4 + j];
-			v2f &tcoords = vertex.TCoords;
-			switch (tile.rotation) {
-			case TileRotation::None:
-				break;
-			case TileRotation::R90:
-				tcoords.set(1 - tcoords.Y, tcoords.X);
-				break;
-			case TileRotation::R180:
-				tcoords.set(1 - tcoords.X, 1 - tcoords.Y);
-				break;
-			case TileRotation::R270:
-				tcoords.set(tcoords.Y, 1 - tcoords.X);
-				break;
-			}
+	return vertices;
+}
 
-			if (tile.world_aligned) {
-				// Maps uv dimension of every face to world dimension xyz
-				constexpr int coord_dim[12] = {
-					0, 2, // up
-					0, 2, // down
-					2, 1, // right
-					2, 1, // left
-					0, 1, // back
-					0, 1, // front
-				};
-
-				auto scale = tile.layers[0].scale;
-				f32 scale_factor = 1.0f / scale;
-
-				float x = alignment[coord_dim[face*2]] % scale;
-				float y = alignment[coord_dim[face*2 + 1]] % scale;
-
-				// Faces grow in different directions
-				if (face != 1) {
-					y = tcoords.Y + ((scale-1)-y);
-				} else {
-					y = tcoords.Y + y;
-				}
-				if (face == 3 || face == 4) {
-					x = tcoords.X + ((scale-1)-x);
-				} else {
-					x = tcoords.X + x;
-				}
-
-				tcoords.set(x * scale_factor, y * scale_factor);
-			}
+static v2f applyTileUV(v2f tcoords, int face, const TileLayer &layer,
+		TileRotation rotation, v3s16 alignment)
+{
+	if (!layer.world_aligned) {
+		// World-aligned layers ignore node rotation
+		switch (rotation) {
+		case TileRotation::None:
+			break;
+		case TileRotation::R90:
+			tcoords.set(1 - tcoords.Y, tcoords.X);
+			break;
+		case TileRotation::R180:
+			tcoords.set(1 - tcoords.X, 1 - tcoords.Y);
+			break;
+		case TileRotation::R270:
+			tcoords.set(tcoords.Y, 1 - tcoords.X);
+			break;
 		}
+	} else {
+		// Maps uv dimension of every face to world dimension xyz
+		constexpr u8 coord_dim[12] = {
+			0, 2, // up
+			0, 2, // down
+			2, 1, // right
+			2, 1, // left
+			0, 1, // back
+			0, 1, // front
+		};
+
+		u8 scale = layer.scale;
+		assert(scale != 0);
+		f32 scale_factor = 1.0f / scale;
+
+		float x = alignment[coord_dim[face*2]] % scale;
+		float y = alignment[coord_dim[face*2 + 1]] % scale;
+
+		// Faces grow in different directions
+		if (face != 1) {
+			y = tcoords.Y + ((scale-1)-y);
+		} else {
+			y = tcoords.Y + y;
+		}
+		if (face == 3 || face == 4) {
+			x = tcoords.X + ((scale-1)-x);
+		} else {
+			x = tcoords.X + x;
+		}
+
+		tcoords.set(x * scale_factor, y * scale_factor);
 	}
 
-	return vertices;
+	return tcoords;
 }
 
 enum class QuadDiagonal {
@@ -287,15 +283,32 @@ void MapblockMeshGenerator::drawCuboid(const aabb3f &box,
 {
 	assert(tilecount >= 1 && tilecount <= 6); // pre-condition
 
-	auto vertices = setupCuboidVertices(box, txc, tiles, tilecount, cur_node.p);
+	auto vertices = setupCuboidVertices(box, txc);
 
-	for (int k = 0; k < 6; ++k) {
-		if (mask & (1 << k))
+	for (int face = 0; face < 6; ++face) {
+		if (mask & (u8{1} << face))
 			continue;
-		QuadDiagonal diagonal = face_lighter(k, &vertices[4 * k]);
-		const u16 *indices = diagonal == QuadDiagonal::Diag13 ? quad_indices_13 : quad_indices_02;
-		int tileindex = MYMIN(k, tilecount - 1);
-		collector->append(tiles[tileindex], &vertices[4 * k], 4, indices, 6);
+
+		const TileSpec &tile = tiles[MYMIN(face, tilecount - 1)];
+		video::S3DVertex *face_vertices = &vertices[4 * face];
+		QuadDiagonal diagonal = face_lighter(face, face_vertices);
+		const u16 *indices = diagonal == QuadDiagonal::Diag13 ?
+				quad_indices_13 : quad_indices_02;
+		std::array<v2f, 4> original_uv;
+		for (int j = 0; j < 4; ++j)
+			original_uv[j] = face_vertices[j].TCoords;
+
+		for (u8 layernum = 0; layernum < MAX_TILE_LAYERS; ++layernum) {
+			const TileLayer &layer = tile.layers[layernum];
+			if (layer.empty())
+				continue;
+
+			for (int j = 0; j < 4; ++j) {
+				face_vertices[j].TCoords = applyTileUV(original_uv[j], face, layer,
+						tile.rotation, cur_node.p);
+			}
+			collector->append(layer, face_vertices, 4, indices, 6, layernum);
+		}
 	}
 }
 
@@ -340,6 +353,8 @@ static LightPair getSmoothLightCorner(const v3s16 &p,
 {
 	const NodeDefManager *ndef = data->m_nodedef;
 
+	assert(data->m_smooth_lighting);
+
 	const std::array<v3s16,8> dirs {
 		// Always shine light
 		v3s16(0,0,0),
@@ -370,12 +385,13 @@ static LightPair getSmoothLightCorner(const v3s16 &p,
 		if (n.getContent() == CONTENT_IGNORE)
 			return true;
 		const ContentFeatures &f = ndef->get(n);
-		if (f.light_source > light_source_max)
-			light_source_max = f.light_source;
+
+		light_source_max = std::max(light_source_max, f.light_source);
 		// Check f.solidness because fast-style leaves look better this way
 		if (f.param_type == CPT_LIGHT && NDT_solidness[f.drawtype] != 2) {
-			u8 light_level_day = n.getLight(LIGHTBANK_DAY, f.getLightingFlags());
-			u8 light_level_night = n.getLight(LIGHTBANK_NIGHT, f.getLightingFlags());
+			const auto lf = f.getLightingFlags();
+			u8 light_level_day = n.getLight(LIGHTBANK_DAY, lf);
+			u8 light_level_night = n.getLight(LIGHTBANK_NIGHT, lf);
 			if (light_level_day == LIGHT_SUN)
 				direct_sunlight = true;
 			light_day += decode_light(light_level_day);
@@ -429,25 +445,20 @@ static LightPair getSmoothLightCorner(const v3s16 &p,
 	}
 
 	if (ambient_occlusion > 4) {
-		static thread_local const float ao_gamma = rangelim(
-			g_settings->getFloat("ambient_occlusion_gamma"), 0.25, 4.0);
-
-		// Table of gamma space multiply factors.
-		static thread_local const float light_amount[3] = {
-			powf(0.75, 1.0 / ao_gamma),
-			powf(0.5,  1.0 / ao_gamma),
-			powf(0.25, 1.0 / ao_gamma)
-		};
-
-		//calculate table index for gamma space multiplier
-		ambient_occlusion -= 5;
+		float light_amount; // gamma space multiplier
+		if (ambient_occlusion == 5)
+			light_amount = std::pow(0.75f, data->m_ao_gamma_inv);
+		else if (ambient_occlusion == 6)
+			light_amount = std::pow(0.5f, data->m_ao_gamma_inv);
+		else // >= 7
+			light_amount = std::pow(0.25f, data->m_ao_gamma_inv);
 
 		if (!skip_ambient_occlusion_day)
 			light_day = rangelim(core::round32(
-					light_day * light_amount[ambient_occlusion]), 0, 255);
+					light_day * light_amount), 0, 255);
 		if (!skip_ambient_occlusion_night)
 			light_night = rangelim(core::round32(
-					light_night * light_amount[ambient_occlusion]), 0, 255);
+					light_night * light_amount), 0, 255);
 	}
 
 	return LightPair((u8)light_day, (u8)light_night);
@@ -1528,7 +1539,12 @@ void MapblockMeshGenerator::drawPlantlikeRootedNode()
 	cur_node.origin += v3f(0, BS, 0);
 	cur_node.p.Y++;
 	if (data->m_smooth_lighting) {
-		getSmoothLightFrame();
+		// Use top light frames and not read light 2 nodes above.
+		for (int k : {0, 1, 4, 5}) { // Bit 2 is set for top corners, see light_dirs
+			cur_node.lframe.lightsDay[k] = cur_node.lframe.lightsDay[k | 2];
+			cur_node.lframe.lightsNight[k] = cur_node.lframe.lightsNight[k | 2];
+			cur_node.lframe.sunlight[k] = cur_node.lframe.sunlight[k | 2];
+		}
 	} else {
 		MapNode ntop = data->m_vmanip.getNodeRefUnsafeCheckFlags(blockpos_nodes + cur_node.p);
 		auto light = LightPair(getInteriorLight(ntop, 0, nodedef));
@@ -2037,12 +2053,9 @@ void MapblockMeshGenerator::generate()
 {
 	ZoneScoped;
 
-	// getNodeRefUnsafeCheckFlags can be used for nodes up to 3 away
-	// Also see MeshMakeData::fillBlockDataBegin and MeshMakeData::fillSingleNode
-	// Currently all drawtypes use at most nodes one away except for NDT_PLANTLIKE_ROOTED
-	// which reads nodes at y+2 for getSmoothLightFrame
-	assert(data->m_vmanip.m_area.contains(blockpos_nodes - 3));
-	assert(data->m_vmanip.m_area.contains(blockpos_nodes + v3s16(data->m_side_length + 2)));
+	assert(data->m_vmanip.m_area.contains(blockpos_nodes - DATA_MARGIN));
+	assert(data->m_vmanip.m_area.contains(
+			blockpos_nodes + data->m_side_length - 1 + DATA_MARGIN));
 
 	for (cur_node.p.Z = 0; cur_node.p.Z < data->m_side_length; cur_node.p.Z++)
 	for (cur_node.p.Y = 0; cur_node.p.Y < data->m_side_length; cur_node.p.Y++)
