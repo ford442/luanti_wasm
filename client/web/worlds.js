@@ -29,6 +29,74 @@
 	if (typeof window === "undefined" && typeof document === "undefined")
 		return;
 
+	/** @typedef {"archiveBytes" | "uncompressedBytes" | "entries" | "pathDepth" | "nameBytes"} LimitKey */
+	/** @typedef {Record<LimitKey, number>} Limits */
+
+	/** @typedef {Error & {code?: string}} WorldError Name "LuantiWorldError" plus a `code` (see LuantiWorldLibrary). */
+
+	/** @typedef {Record<string, string>} ConfValues Parsed `key = value` text (world.mt, game.conf). */
+
+	/** @typedef {Record<string, unknown>} LibraryMeta The JSON in web_library.json: created, lastPlayed, imported, source. */
+
+	/** @typedef {{rel: string, path: string, size: number, mtime: number}} WorldFile One file below a world directory. */
+
+	/** @typedef {{id: string, title: string, source: "bundled" | "installed"}} WorldGame */
+
+	/** @typedef {{usage: number | null, quota: number | null, persisted: boolean | null}} StorageInfo */
+
+	/**
+	 * One central-directory entry. `path` is the checked, normalised name that
+	 * inspect() adds.
+	 * @typedef {{name: string, method: number, flags: number, crc: number, compressed: number,
+	 *   size: number, offset: number, directory: boolean, symlink: boolean, path?: string}} ZipEntry
+	 */
+
+	/**
+	 * An entry the ZipWriter has written, kept for the central directory.
+	 * @typedef {{name: Uint8Array, method: number, flags: number, stamp: {time: number, date: number},
+	 *   crc: number, compressed: number, size: number, offset: number}} ZipRecord
+	 */
+
+	/** @typedef {{write: (bytes: Uint8Array) => Promise<unknown>, close: () => Promise<unknown>}} ZipSink */
+	/** @typedef {(position: number, length: number) => Uint8Array<ArrayBuffer>} ChunkReader */
+
+	/**
+	 * ZipWriter is an ES5 constructor function, which TypeScript 7 does not
+	 * model, so its instance shape is declared here and given to the constructor
+	 * and the prototype methods through their `this` tags.
+	 * @typedef {object} ZipWriterInstance
+	 * @property {ZipSink} sink
+	 * @property {number} offset Bytes written so far.
+	 * @property {ZipRecord[]} central
+	 * @property {boolean} deflate
+	 * @property {(bytes: Uint8Array) => Promise<unknown>} write
+	 * @property {(name: string, size: number, readChunk: ChunkReader, mtime?: number) => Promise<void>} add
+	 * @property {(name: string, bytes: Uint8Array<ArrayBuffer>, mtime?: number) => Promise<void>} addBytes
+	 * @property {() => Promise<void>} finish
+	 */
+	/** @typedef {ZipSink & {blob: () => Blob}} MemorySink */
+
+	/** @typedef {WritableStream & {write?: (data: Blob) => Promise<void>}} WorldWritable A FileSystemWritableFileStream or a WritableStream. */
+
+	/** @typedef {(done: number, total: number) => void} ProgressCallback */
+
+	/** @typedef {{writable?: WorldWritable, onProgress?: ProgressCallback, store?: boolean}} ExportOptions */
+	/** @typedef {{name?: string, fileName?: string, source?: string, onProgress?: ProgressCallback}} ImportOptions */
+	/** @typedef {{fileName?: string, games?: WorldGame[]}} InspectOptions */
+	/** @typedef {{signal?: AbortSignal, onProgress?: ProgressCallback}} FetchOptions */
+	/** @typedef {{name?: string, game?: string, seed?: string | null, creative?: boolean, damage?: boolean}} CreateOptions */
+
+	/**
+	 * luanti-world.json. Read from an untrusted archive, so inspect() checks `format`.
+	 * @typedef {{format: number, kind?: string, name?: string, game?: string, engine?: string,
+	 *   exported?: string, files?: number, bytes?: number, content?: LuantiWorldArchivePlan["content"]}} WorldManifest
+	 */
+
+	/**
+	 * What importing would do, plus the entries to extract (inspect).
+	 * @typedef {LuantiWorldArchivePlan & {_entries: ZipEntry[], _prefix: string}} WorldPlan
+	 */
+
 	var ROOT = "/home/web_user/.luanti";
 	var WORLDS = ROOT + "/worlds";
 	var LIBRARY_FILE = "web_library.json";
@@ -41,6 +109,7 @@
 	// Caps for anything imported. The whole world lives in memory while IDBFS
 	// is the backend, so these are well below the Wasm heap limit. An embedder
 	// or test may lower them with Module.luantiWorldLimits.
+	/** @type {Limits} */
 	var limits = {
 		"archiveBytes": 512 * 1024 * 1024,
 		"uncompressedBytes": 1024 * 1024 * 1024,
@@ -49,12 +118,18 @@
 		"nameBytes": 255
 	};
 	var overrides = Module["luantiWorldLimits"] || {};
-	Object.keys(limits).forEach(function(key) {
+	Object.keys(limits).forEach(/** @param {LimitKey} key */ function(key) {
 		if (typeof overrides[key] === "number" && overrides[key] > 0)
 			limits[key] = overrides[key];
 	});
 
+	/**
+	 * @param {string} message
+	 * @param {string} [code]
+	 * @returns {WorldError}
+	 */
 	function LibraryError(message, code) {
+		/** @type {WorldError} */
 		var error = new Error(message);
 		error.name = "LuantiWorldError";
 		error["code"] = code || "invalid";
@@ -64,6 +139,10 @@
 	var encoder = new TextEncoder();
 	var decoder = new TextDecoder();
 
+	/**
+	 * @param {number} bytes
+	 * @returns {string}
+	 */
 	function megabytes(bytes) {
 		return (bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0) + " MB";
 	}
@@ -81,6 +160,11 @@
 		return table;
 	})();
 
+	/**
+	 * @param {number} crc
+	 * @param {Uint8Array} bytes
+	 * @returns {number}
+	 */
 	function crc32(crc, bytes) {
 		crc = ~crc >>> 0;
 		for (var i = 0; i < bytes.length; i++)
@@ -90,6 +174,7 @@
 
 	// -------------------------------------------------------------- FS helpers
 
+	/** @param {string} path */
 	function stat(path) {
 		try {
 			return FS.stat(path);
@@ -98,21 +183,34 @@
 		}
 	}
 
+	/**
+	 * @param {string} path
+	 * @returns {boolean}
+	 */
 	function exists(path) {
 		return stat(path) !== null;
 	}
 
+	/**
+	 * @param {string} path
+	 * @returns {boolean}
+	 */
 	function isDir(path) {
 		var info = stat(path);
 		return !!info && FS.isDir(info.mode);
 	}
 
+	/**
+	 * @param {string} path
+	 * @returns {string[]}
+	 */
 	function children(path) {
-		return FS.readdir(path).filter(function(name) {
+		return FS.readdir(path).filter(/** @param {string} name */ function(name) {
 			return name !== "." && name !== "..";
 		}).sort();
 	}
 
+	/** @param {string} path */
 	function mkdirs(path) {
 		var parts = path.split("/").filter(Boolean);
 		var current = "";
@@ -123,6 +221,7 @@
 		});
 	}
 
+	/** @param {string} path */
 	function removeTree(path) {
 		if (isDir(path)) {
 			children(path).forEach(function(name) { removeTree(path + "/" + name); });
@@ -134,6 +233,12 @@
 
 	// Files below `dir` as {rel, path, size, mtime}, directories first-seen
 	// order, sorted for reproducible archives.
+	/**
+	 * @param {string} dir
+	 * @param {string} prefix
+	 * @param {WorldFile[]} [out]
+	 * @returns {WorldFile[]}
+	 */
 	function walk(dir, prefix, out) {
 		out = out || [];
 		children(dir).forEach(function(name) {
@@ -149,6 +254,12 @@
 		return out;
 	}
 
+	/**
+	 * @param {string} path
+	 * @param {number} position
+	 * @param {number} length
+	 * @returns {Uint8Array<ArrayBuffer>}
+	 */
 	function readRange(path, position, length) {
 		var stream = FS.open(path, "r");
 		try {
@@ -160,6 +271,10 @@
 		}
 	}
 
+	/**
+	 * @param {string} from
+	 * @param {string} to
+	 */
 	function copyFile(from, to) {
 		var size = FS.stat(from).size;
 		var output = FS.open(to, "w");
@@ -173,6 +288,10 @@
 		}
 	}
 
+	/**
+	 * @param {string} from
+	 * @param {string} to
+	 */
 	function copyTree(from, to) {
 		FS.mkdir(to);
 		children(from).forEach(function(name) {
@@ -184,6 +303,11 @@
 		});
 	}
 
+	/**
+	 * @param {string} path
+	 * @param {number} [maxBytes]
+	 * @returns {string | null}
+	 */
 	function readText(path, maxBytes) {
 		var info = stat(path);
 		if (!info || FS.isDir(info.mode))
@@ -195,7 +319,12 @@
 
 	// ------------------------------------------------- Luanti .conf (world.mt)
 
+	/**
+	 * @param {string | null} text
+	 * @returns {ConfValues}
+	 */
 	function parseConf(text) {
+		/** @type {ConfValues} */
 		var values = {};
 		String(text || "").split(/\r?\n/).forEach(function(line) {
 			var match = /^\s*([^#=\s][^=]*?)\s*=\s*(.*?)\s*$/.exec(line);
@@ -205,6 +334,12 @@
 		return values;
 	}
 
+	/**
+	 * @param {string | null} text
+	 * @param {string} key
+	 * @param {string} value
+	 * @returns {string}
+	 */
 	function setConfValue(text, key, value) {
 		var lines = String(text || "").split(/\r?\n/);
 		if (lines.length && lines[lines.length - 1] === "")
@@ -223,6 +358,10 @@
 		return lines.join("\n") + "\n";
 	}
 
+	/**
+	 * @param {unknown} value
+	 * @returns {string}
+	 */
 	function singleLine(value) {
 		return String(value).replace(/[\r\n]+/g, " ").trim();
 	}
@@ -234,6 +373,10 @@
 	var NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} _.,()'+-]*$/u;
 	var NAME_MAX = 48;
 
+	/**
+	 * @param {string} name
+	 * @returns {string}
+	 */
 	function validateName(name) {
 		name = String(name || "").trim();
 		if (!name)
@@ -246,6 +389,11 @@
 		return name;
 	}
 
+	/**
+	 * @param {string} raw
+	 * @param {string} [fallback]
+	 * @returns {string}
+	 */
 	function sanitizeName(raw, fallback) {
 		var name = String(raw || "").normalize("NFC")
 			.replace(/[^\p{L}\p{N} _.,()'+-]+/gu, " ")
@@ -255,6 +403,10 @@
 		return name || fallback || "Imported world";
 	}
 
+	/**
+	 * @param {string} base
+	 * @returns {string}
+	 */
 	function uniqueName(base) {
 		base = sanitizeName(base);
 		if (!exists(WORLDS + "/" + base))
@@ -268,6 +420,10 @@
 		throw LibraryError("Too many worlds named " + base + ".", "name");
 	}
 
+	/**
+	 * @param {string} name
+	 * @returns {string}
+	 */
 	function worldPath(name) {
 		return WORLDS + "/" + validateName(name);
 	}
@@ -275,6 +431,10 @@
 	// Worlds made elsewhere (the engine's own main menu, an older launcher)
 	// may have names the New world dialog would not allow; they only need to
 	// be one safe path component to be managed.
+	/**
+	 * @param {string} name
+	 * @returns {string}
+	 */
 	function requireWorld(name) {
 		name = String(name || "");
 		if (!name || name.charAt(0) === "." || name.indexOf("/") !== -1 || name.indexOf("\0") !== -1)
@@ -285,6 +445,10 @@
 		return path;
 	}
 
+	/**
+	 * @param {string} name
+	 * @returns {string}
+	 */
 	function requireFree(name) {
 		var path = worldPath(name);
 		if (exists(path))
@@ -294,6 +458,10 @@
 
 	// ------------------------------------------------------- library metadata
 
+	/**
+	 * @param {string} path
+	 * @returns {LibraryMeta}
+	 */
 	function readLibraryMeta(path) {
 		try {
 			var text = readText(path + "/" + LIBRARY_FILE, 16384);
@@ -304,6 +472,11 @@
 		}
 	}
 
+	/**
+	 * @param {string} path
+	 * @param {LibraryMeta} changes
+	 * @returns {LibraryMeta}
+	 */
 	function writeLibraryMeta(path, changes) {
 		var meta = readLibraryMeta(path);
 		Object.keys(changes).forEach(function(key) { meta[key] = changes[key]; });
@@ -311,6 +484,10 @@
 		return meta;
 	}
 
+	/**
+	 * @param {string} name
+	 * @returns {LuantiWorld}
+	 */
 	function describe(name) {
 		var path = WORLDS + "/" + name;
 		var conf = parseConf(readText(path + "/world.mt", MAX_CONF_BYTES));
@@ -342,10 +519,12 @@
 
 	var persistence = Module["luantiPersistence"];
 
+	/** @returns {LuantiPersistenceEvent} */
 	function storageState() {
 		return persistence && persistence["getState"] ? persistence["getState"]() : {"state": "ready"};
 	}
 
+	/** @returns {Promise<void>} */
 	function whenReady() {
 		var state = storageState();
 		if (state["fatal"])
@@ -366,12 +545,20 @@
 		});
 	}
 
+	/**
+	 * @param {string} [reason]
+	 * @returns {Promise<unknown>}
+	 */
 	function save(reason) {
 		if (!persistence || !persistence["requestSync"])
 			return Promise.resolve();
 		return persistence["requestSync"]({"reason": reason || "library", "urgent": true});
 	}
 
+	/**
+	 * @param {string} operation
+	 * @param {Record<string, unknown>} [detail]
+	 */
 	function emit(operation, detail) {
 		var payload = storageState();
 		payload["library"] = Object.assign({"operation": operation}, detail || {});
@@ -387,6 +574,11 @@
 
 	// Saves made through the library go through the ordinary persistence
 	// queue; the change is visible to every listener once it is on disk.
+	/**
+	 * @param {string} operation
+	 * @param {Record<string, unknown>} [detail]
+	 * @returns {Promise<Record<string, unknown>>}
+	 */
 	function commit(operation, detail) {
 		return save("library-" + operation).then(function() {
 			emit(operation, detail);
@@ -403,6 +595,7 @@
 	// keeping. Browsers decide silently (Chrome grants it to engaged sites,
 	// Firefox may prompt), so this is requested once per page and never
 	// treated as an error.
+	/** @returns {Promise<boolean>} */
 	function requestDurableStorage() {
 		if (persistRequested || typeof navigator === "undefined" || !navigator.storage ||
 				typeof navigator.storage.persist !== "function")
@@ -413,6 +606,7 @@
 		}).catch(function() { return false; });
 	}
 
+	/** @returns {Promise<StorageInfo>} */
 	function storageInfo() {
 		var storage = typeof navigator !== "undefined" ? navigator.storage : null;
 		if (!storage || typeof storage.estimate !== "function")
@@ -422,7 +616,7 @@
 			typeof storage.persisted === "function" ? storage.persisted() : Promise.resolve(null)
 		]).then(function(results) {
 			return {"usage": results[0].usage || 0, "quota": results[0].quota || 0, "persisted": results[1]};
-		}, function() {
+		}, /** @returns {StorageInfo} */ function() {
 			return {"usage": null, "quota": null, "persisted": null};
 		});
 	}
@@ -437,11 +631,13 @@
 
 	// ----------------------------------------------------------- games
 
+	/** @returns {Promise<WorldGame[]>} */
 	function availableGames() {
 		var bundled = Module["luantiPackages"] && Module["luantiPackages"]["manifest"] ?
-			Module["luantiPackages"]["manifest"]().catch(function() { return null; }) :
+			Module["luantiPackages"]["manifest"]().catch(/** @returns {LuantiAssetManifest | null} */ function() { return null; }) :
 			Promise.resolve(null);
 		return bundled.then(function(manifest) {
+			/** @type {Record<string, WorldGame>} */
 			var games = {};
 			if (manifest && manifest["games"]) {
 				Object.keys(manifest["games"]).forEach(function(id) {
@@ -456,6 +652,7 @@
 				children(dir).forEach(function(id) {
 					if (games[id] || !exists(dir + "/" + id + "/game.conf"))
 						return;
+					/** @type {ConfValues} */
 					var conf = {};
 					try {
 						conf = parseConf(readText(dir + "/" + id + "/game.conf", MAX_CONF_BYTES));
@@ -468,6 +665,7 @@
 		});
 	}
 
+	/** @returns {string} */
 	function engineVersion() {
 		try {
 			var fn = Module["_luanti_engine_version"];
@@ -479,6 +677,10 @@
 
 	// ------------------------------------------------------------ zip writer
 
+	/**
+	 * @param {number} ms
+	 * @returns {{time: number, date: number}}
+	 */
 	function dosDateTime(ms) {
 		var date = new Date(ms);
 		var year = Math.max(1980, date.getFullYear());
@@ -488,11 +690,17 @@
 		};
 	}
 
+	/** @returns {boolean} */
 	function canDeflate() {
 		return typeof CompressionStream === "function";
 	}
 
 	// sink: {write(Uint8Array) -> Promise, close() -> Promise}
+	/**
+	 * @this {ZipWriterInstance}
+	 * @param {ZipSink} sink
+	 * @param {{store?: boolean}} [options]
+	 */
 	function ZipWriter(sink, options) {
 		this.sink = sink;
 		this.offset = 0;
@@ -500,6 +708,11 @@
 		this.deflate = canDeflate() && !(options && options["store"]);
 	}
 
+	/**
+	 * @this {ZipWriterInstance}
+	 * @param {Uint8Array} bytes
+	 * @returns {Promise<unknown>}
+	 */
 	ZipWriter.prototype.write = function(bytes) {
 		this.offset += bytes.length;
 		if (this.offset > 0xFFFFFFFF)
@@ -508,6 +721,14 @@
 	};
 
 	// readChunk(position, length) -> Uint8Array
+	/**
+	 * @this {ZipWriterInstance}
+	 * @param {string} name
+	 * @param {number} size
+	 * @param {ChunkReader} readChunk
+	 * @param {number} [mtime]
+	 * @returns {Promise<void>}
+	 */
 	ZipWriter.prototype.add = async function(name, size, readChunk, mtime) {
 		if (this.central.length >= 0xFFFF)
 			throw LibraryError("The world has too many files to export.", "too-large");
@@ -576,12 +797,23 @@
 			"crc": crc, "compressed": compressed, "size": size, "offset": headerOffset});
 	};
 
+	/**
+	 * @this {ZipWriterInstance}
+	 * @param {string} name
+	 * @param {Uint8Array<ArrayBuffer>} bytes
+	 * @param {number} [mtime]
+	 * @returns {Promise<void>}
+	 */
 	ZipWriter.prototype.addBytes = function(name, bytes, mtime) {
 		return this.add(name, bytes.length, function(position, length) {
 			return bytes.subarray(position, position + length);
 		}, mtime);
 	};
 
+	/**
+	 * @this {ZipWriterInstance}
+	 * @returns {Promise<void>}
+	 */
 	ZipWriter.prototype.finish = async function() {
 		var start = this.offset;
 		for (var i = 0; i < this.central.length; i++) {
@@ -613,9 +845,12 @@
 		await this.sink.close();
 	};
 
+	/** @returns {MemorySink} */
 	function memorySink() {
+		/** @type {Uint8Array<ArrayBuffer>[]} */
 		var parts = [];
 		var sink = {
+			/** @param {Uint8Array} bytes */
 			"write": function(bytes) {
 				// The writer may reuse nothing, but copy anyway: a subarray of a
 				// caller's buffer must not be retained.
@@ -631,8 +866,13 @@
 	// A FileSystemWritableFileStream (File System Access API) or a WHATWG
 	// WritableStream. Writes are batched so a world of small files does not
 	// turn into thousands of tiny disk writes.
+	/**
+	 * @param {WorldWritable} writable
+	 * @returns {ZipSink}
+	 */
 	function streamSink(writable) {
 		var writer = typeof writable.getWriter === "function" ? writable.getWriter() : null;
+		/** @type {Uint8Array<ArrayBuffer>[]} */
 		var pending = [];
 		var pendingBytes = 0;
 		function flush() {
@@ -644,6 +884,7 @@
 			return writer ? writer.write(blob) : writable.write(blob);
 		}
 		return {
+			/** @param {Uint8Array} bytes */
 			"write": function(bytes) {
 				pending.push(bytes.slice());
 				pendingBytes += bytes.length;
@@ -657,10 +898,20 @@
 
 	// ------------------------------------------------------------ zip reader
 
+	/**
+	 * @param {Blob} blob
+	 * @param {number} start
+	 * @param {number} end
+	 * @returns {Promise<Uint8Array>}
+	 */
 	async function blobBytes(blob, start, end) {
 		return new Uint8Array(await blob.slice(start, end).arrayBuffer());
 	}
 
+	/**
+	 * @param {string} message
+	 * @returns {WorldError}
+	 */
 	function readError(message) {
 		return LibraryError("This file is not a usable world archive: " + message, "invalid");
 	}
@@ -668,6 +919,10 @@
 	// Returns the central directory as [{name, method, flags, crc, compressed,
 	// size, offset, directory, symlink}], enforcing the size and entry caps
 	// before any entry is decompressed.
+	/**
+	 * @param {Blob} blob
+	 * @returns {Promise<ZipEntry[]>}
+	 */
 	async function readDirectory(blob) {
 		var size = blob.size;
 		if (size > limits["archiveBytes"])
@@ -751,6 +1006,12 @@
 	// Streams one entry's bytes to onChunk, checking the declared size and the
 	// CRC. A deflate stream that inflates past its declared size (a zip bomb
 	// with a lying directory) is cut off as soon as it does.
+	/**
+	 * @param {Blob} blob
+	 * @param {ZipEntry} entry
+	 * @param {(chunk: Uint8Array) => unknown} onChunk
+	 * @returns {Promise<void>}
+	 */
 	async function extractEntry(blob, entry, onChunk) {
 		var header = await blobBytes(blob, entry["offset"], entry["offset"] + 30);
 		var view = new DataView(header.buffer);
@@ -789,9 +1050,16 @@
 			throw readError("\"" + entry["name"] + "\" is corrupt (checksum mismatch).");
 	}
 
+	/**
+	 * @param {Blob} blob
+	 * @param {ZipEntry} entry
+	 * @param {number} maxBytes
+	 * @returns {Promise<string>}
+	 */
 	async function entryText(blob, entry, maxBytes) {
 		if (entry["size"] > maxBytes)
 			throw readError(entry["name"] + " is too large.");
+		/** @type {Uint8Array<ArrayBuffer>[]} */
 		var parts = [];
 		await extractEntry(blob, entry, function(chunk) { parts.push(chunk.slice()); });
 		return decoder.decode(await new Blob(parts).arrayBuffer());
@@ -800,8 +1068,13 @@
 	// Archive paths are untrusted. Reject anything that is absolute, climbs
 	// out with "..", uses backslashes or drive letters, or contains control
 	// characters, instead of trying to repair it.
+	/**
+	 * @param {string} name
+	 * @returns {string}
+	 */
 	function checkEntryPath(name) {
 		var display = JSON.stringify(name.length > 80 ? name.slice(0, 80) + "…" : name);
+		/** @param {string} reason */
 		var unsafe = function(reason) {
 			return LibraryError("Archive entry " + display + " " + reason + "; the archive was not imported.", "unsafe-path");
 		};
@@ -826,9 +1099,15 @@
 
 	// Reads an archive's directory and decides what it would import, without
 	// writing anything to storage.
+	/**
+	 * @param {Blob} blob
+	 * @param {InspectOptions} [options]
+	 * @returns {Promise<WorldPlan>}
+	 */
 	async function inspect(blob, options) {
 		options = options || {};
 		var entries = await readDirectory(blob);
+		/** @type {Record<string, boolean>} */
 		var seen = {};
 		entries.forEach(function(entry) {
 			entry["path"] = checkEntryPath(entry["name"]);
@@ -843,10 +1122,13 @@
 			}
 		});
 		var files = entries.filter(function(entry) { return !entry["directory"]; });
+		/** @type {Record<string, ZipEntry>} */
 		var byPath = {};
 		files.forEach(function(entry) { byPath[entry["path"]] = entry; });
 
+		/** @type {WorldManifest | null} */
 		var manifest = null;
+		/** @type {string | null} */
 		var prefix = null;
 		var warnings = [];
 		if (byPath[MANIFEST_NAME]) {
@@ -864,6 +1146,7 @@
 		} else if (byPath["world.mt"]) {
 			prefix = "";
 		} else {
+			/** @type {Record<string, boolean>} */
 			var tops = {};
 			files.forEach(function(entry) { tops[entry["path"].split("/")[0]] = true; });
 			var names = Object.keys(tops);
@@ -915,18 +1198,27 @@
 		};
 	}
 
-	/** @returns {any} */
+	/**
+	 * @param {WorldPlan} plan
+	 * @returns {LuantiWorldArchivePlan}
+	 */
 	function publicPlan(plan) {
+		/** @type {Partial<Record<keyof WorldPlan, unknown>>} */
 		var copy = {};
-		Object.keys(plan).forEach(function(key) {
+		Object.keys(plan).forEach(/** @param {keyof WorldPlan} key */ function(key) {
 			if (key.charAt(0) !== "_")
 				copy[key] = plan[key];
 		});
-		return copy;
+		return /** @type {LuantiWorldArchivePlan} */ (copy);
 	}
 
 	// --------------------------------------------------------------- import
 
+	/**
+	 * @param {Blob} blob
+	 * @param {ImportOptions} [options]
+	 * @returns {Promise<LuantiWorld>}
+	 */
 	async function importArchive(blob, options) {
 		options = options || {};
 		await whenReady();
@@ -991,6 +1283,11 @@
 
 	// --------------------------------------------------------------- export
 
+	/**
+	 * @param {string} name
+	 * @param {ExportOptions} [options]
+	 * @returns {Promise<Blob | null>}
+	 */
 	async function exportWorld(name, options) {
 		options = options || {};
 		await whenReady();
@@ -998,6 +1295,7 @@
 		var world = describe(name);
 		var conf = parseConf(readText(path + "/world.mt", MAX_CONF_BYTES));
 		var files = walk(path, "").filter(function(file) { return file.rel !== LIBRARY_FILE; });
+		/** @type {LuantiWorldArchivePlan["content"]} */
 		var content = [{"type": "game", "name": world["game"]}];
 		Object.keys(conf).sort().forEach(function(key) {
 			var match = /^load_mod_(.+)$/.exec(key);
@@ -1005,6 +1303,7 @@
 				content.push({"type": "mod", "name": match[1],
 					"bundled": isDir(path + "/worldmods/" + match[1])});
 		});
+		/** @type {WorldManifest} */
 		var manifest = {
 			"format": ARCHIVE_FORMAT,
 			"kind": "luanti-world",
@@ -1018,6 +1317,9 @@
 		};
 		var memory = options["writable"] ? null : memorySink();
 		var sink = memory || streamSink(options["writable"]);
+		// TypeScript 7 gives an ES5 constructor function no construct signature.
+		/** @type {ZipWriterInstance} */
+		// @ts-expect-error
 		var writer = new ZipWriter(sink, options);
 		var progress = typeof options["onProgress"] === "function" ? options["onProgress"] : null;
 		var done = 0;
@@ -1048,6 +1350,11 @@
 	// Downloads a shared .luantiworld for inspection. Only HTTPS (or this
 	// page's own origin) is accepted, credentials are never sent, and the
 	// download stops at the archive cap whatever Content-Length claims.
+	/**
+	 * @param {string} rawUrl
+	 * @param {FetchOptions} [options]
+	 * @returns {Promise<{blob: Blob, url: string, host: string, fileName: string, plan: LuantiWorldArchivePlan}>}
+	 */
 	async function fetchShared(rawUrl, options) {
 		options = options || {};
 		var url;
@@ -1056,6 +1363,7 @@
 		} catch (_) {
 			throw LibraryError("The shared world link is not a valid URL.", "invalid-url");
 		}
+		/** @param {URL} candidate */
 		var allowed = function(candidate) {
 			return candidate.protocol === "https:" || candidate.origin === location.origin;
 		};
@@ -1110,6 +1418,7 @@
 				}).map(describe);
 			});
 		},
+		/** @param {string} name */
 		"get": function(name) {
 			return whenReady().then(function() {
 				requireWorld(name);
@@ -1118,10 +1427,12 @@
 		},
 		"games": availableGames,
 		"validateName": validateName,
+		/** @param {string} base */
 		"suggestName": function(base) {
 			return whenReady().then(function() { return uniqueName(base); });
 		},
 		"pathFor": worldPath,
+		/** @param {CreateOptions} [options] */
 		"create": function(options) {
 			options = options || {};
 			return whenReady().then(function() {
@@ -1164,6 +1475,10 @@
 				return commit("create", {"world": name}).then(function() { return result; });
 			});
 		},
+		/**
+		 * @param {string} from
+		 * @param {string} to
+		 */
 		"rename": function(from, to) {
 			return whenReady().then(function() {
 				var source = requireWorld(from);
@@ -1178,6 +1493,10 @@
 				return commit("rename", {"world": name, "from": from}).then(function() { return result; });
 			});
 		},
+		/**
+		 * @param {string} from
+		 * @param {string} [to]
+		 */
 		"duplicate": function(from, to) {
 			return whenReady().then(function() {
 				var source = requireWorld(from);
@@ -1200,24 +1519,31 @@
 				return commit("duplicate", {"world": name, "from": from}).then(function() { return result; });
 			});
 		},
+		/** @param {string} name */
 		"remove": function(name) {
 			return whenReady().then(function() {
 				removeTree(requireWorld(name));
 				return commit("delete", {"world": name});
 			});
 		},
+		/** @param {string} name */
 		"markPlayed": function(name) {
 			return whenReady().then(function() {
 				writeLibraryMeta(requireWorld(name), {"lastPlayed": Date.now()});
 				// The engine is about to start and will sync on its own.
 			});
 		},
+		/** @param {string} name */
 		"thumbnail": function(name) {
 			return whenReady().then(function() {
 				var path = requireWorld(name) + "/" + THUMBNAIL_FILE;
 				return exists(path) ? new Blob([FS.readFile(path)], {"type": "image/jpeg"}) : null;
 			});
 		},
+		/**
+		 * @param {string} name
+		 * @param {Blob} blob
+		 */
 		"saveThumbnail": function(name, blob) {
 			return whenReady().then(function() {
 				return blob.arrayBuffer();
@@ -1229,6 +1555,10 @@
 			});
 		},
 		"exportWorld": exportWorld,
+		/**
+		 * @param {Blob} blob
+		 * @param {InspectOptions} [options]
+		 */
 		"inspectArchive": function(blob, options) {
 			return whenReady().then(function() {
 				return inspect(blob, options);

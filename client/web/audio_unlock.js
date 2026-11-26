@@ -37,11 +37,20 @@
 	if (typeof document === "undefined")
 		return;
 
+	/**
+	 * One OpenAL context as AL.contexts holds it. `AL` is Emscripten's own
+	 * object (declared `any`), so the AudioContext it carries is the only part
+	 * of it this file relies on.
+	 * @typedef {{id: string, audioCtx: AudioContext}} AudioEntry
+	 */
+
 	var seen = typeof WeakSet === "function" ? new WeakSet() : null;
 	// True between Module.luantiSuspendAudio("pause") and the next unpause.
 	var held = false;
 
+	/** @returns {AudioEntry[]} */
 	function contexts() {
+		/** @type {AudioEntry[]} */
 		var out = [];
 		if (typeof AL === "undefined" || !AL || !AL.contexts)
 			return out;
@@ -53,6 +62,7 @@
 		return out;
 	}
 
+	/** @param {AudioEntry} entry */
 	function watch(entry) {
 		if (!seen || seen.has(entry.audioCtx))
 			return;
@@ -73,6 +83,10 @@
 
 	// Called from gestures, and by launcher.js. Returns how many contexts were
 	// still suspended, so the caller can tell nothing was there to unlock.
+	/**
+	 * @param {string} [reason]
+	 * @returns {number}
+	 */
 	function resumeAll(reason) {
 		var list = contexts();
 		var suspended = 0;
@@ -103,6 +117,10 @@
 	// Called by the launcher when the embedder pauses the engine: suspend every
 	// context (a no-op for one that is already stopped) and stop gestures and
 	// visibility changes from waking them until it is unpaused.
+	/**
+	 * @param {string} [reason]
+	 * @returns {number}
+	 */
 	function suspendAll(reason) {
 		held = true;
 		var list = contexts();
@@ -120,6 +138,10 @@
 		return list.length;
 	}
 
+	/**
+	 * @param {string} [reason]
+	 * @returns {number}
+	 */
 	function unhold(reason) {
 		held = false;
 		return resumeAll(reason);

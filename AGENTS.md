@@ -196,7 +196,7 @@ cmake --build build --parallel $(($(nproc) + 1))
 - `build-wasm/bin/luanti.html` — **WASM browser build**
 - `build-wasm/bin/luanti.wasm` — compiled engine
 - `build-wasm/bin/asset-manifest.json`, `build-wasm/bin/assets/*.data` — content-addressed streamed asset packages
-- `build-wasm/bin/{launcher.js,launcher.css,launcher-config.js,theater.js,videotexture.js,manifest.webmanifest,service-worker.js}` — launcher/PWA companions copied from `client/web/`
+- `build-wasm/bin/{launcher.js,launcher-{connect,library,input,glloss,update,start}.js,launcher.css,launcher-config.js,theater.js,videotexture.js,manifest.webmanifest,service-worker.js}` — launcher/PWA companions copied from `client/web/`
 
 ---
 
@@ -251,7 +251,7 @@ python3 util/wasm/test_client_browser.py --browser "$(command -v google-chrome)"
 python3 util/wasm/test_first_playable.py --browser "$(command -v google-chrome)" --screenshot-dir wasm-gate-screenshots
 python3 util/wasm/test_demo_tools.py        # packaging/deploy tooling
 npm ci && npm run proxy:install             # once: lint/typecheck tooling + proxy deps
-npm run lint && npm run typecheck           # ESLint + tsc (checkJs) over client/web and util/wasm
+npm run lint && npm run typecheck           # ESLint + tsc (checkJs, noImplicitAny on client/web) + C++ Module-contract check
 npm test                                    # WebSocket proxy (node --test)
 ```
 Other probes live in `util/wasm/test_*.py` / `test_persistence.mjs`. Browser automation is Playwright only. The `Module` surface shared between the C++ `EM_ASM` calls and `client/web/*.js` is documented in `client/web/emscripten-module.d.ts`.

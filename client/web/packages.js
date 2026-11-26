@@ -18,11 +18,37 @@
 	if (typeof window === "undefined" && typeof document === "undefined")
 		return;
 
+	/**
+	 * Per-package load state (one per name ever requested), kept in `states`.
+	 * @typedef {Object} PackageLoadState
+	 * @property {string} name
+	 * @property {string} state "loading", "loaded" or "error".
+	 * @property {number} loaded
+	 * @property {number} total
+	 * @property {Promise<void> | null} promise The load in flight or finished; null after a failure so it can be retried.
+	 * @property {Array<(loaded: number, total: number) => void>} listeners
+	 */
+	/**
+	 * One file of a package's trailing JSON index (build_packages.py, "LWP1"):
+	 * path inside the filesystem, start and end offsets into the package.
+	 * @typedef {{p: string, s: number, e: number}} PackageIndexFile
+	 */
+	/** @typedef {{files: PackageIndexFile[], payloadEnd: number}} PackageIndex */
+
 	var MAGIC = "LWP1";
 	var manifestUrl = Module["luantiAssetManifestUrl"] || "asset-manifest.json";
+	/** @type {Promise<LuantiAssetManifest> | null} */
 	var manifestPromise = null;
+	/** @type {Record<string, PackageLoadState>} */
 	var states = {};
 
+	/**
+	 * @param {string} name
+	 * @param {string} state
+	 * @param {number} loaded
+	 * @param {number} total
+	 * @param {string} [error]
+	 */
 	function emit(name, state, loaded, total, error) {
 		var detail = {"name": name, "state": state, "loaded": loaded, "total": total, "error": error || null};
 		try {
@@ -30,6 +56,7 @@
 		} catch (_) {}
 	}
 
+	/** @returns {Promise<LuantiAssetManifest>} */
 	function loadManifest() {
 		if (!manifestPromise) {
 			manifestPromise = fetch(manifestUrl, {"cache": "no-cache"}).then(function(response) {
@@ -46,17 +73,30 @@
 		return manifestPromise;
 	}
 
+	/**
+	 * @param {string} relative
+	 * @returns {string}
+	 */
 	function resolve(relative) {
 		// Package URLs are relative to the manifest, not to the page.
 		return new URL(relative, new URL(manifestUrl, document.baseURI)).href;
 	}
 
+	/**
+	 * @param {ArrayBuffer} buffer
+	 * @returns {string}
+	 */
 	function toHex(buffer) {
-		return Array.prototype.map.call(new Uint8Array(buffer), function(byte) {
+		return Array.prototype.map.call(new Uint8Array(buffer), /** @param {number} byte */ function(byte) {
 			return (byte < 16 ? "0" : "") + byte.toString(16);
 		}).join("");
 	}
 
+	/**
+	 * @param {LuantiAssetPackage} entry
+	 * @param {(received: number) => void} onBytes
+	 * @returns {Promise<Uint8Array>}
+	 */
 	async function download(entry, onBytes) {
 		var response = await fetch(resolve(entry["url"]));
 		if (!response.ok)
@@ -111,6 +151,10 @@
 		});
 	}
 
+	/**
+	 * @param {Uint8Array} bytes
+	 * @returns {PackageIndex}
+	 */
 	function parseIndex(bytes) {
 		var tail = new DataView(bytes.buffer, bytes.byteOffset + bytes.length - 8, 8);
 		var magic = String.fromCharCode(bytes[bytes.length - 4], bytes[bytes.length - 3],
@@ -125,8 +169,13 @@
 		return {"files": JSON.parse(text)["files"], "payloadEnd": start};
 	}
 
+	/**
+	 * @param {Uint8Array} bytes
+	 * @returns {number} The number of files written.
+	 */
 	function mount(bytes) {
 		var index = parseIndex(bytes);
+		/** @type {Record<string, boolean>} */
 		var made = {};
 		index["files"].forEach(function(file) {
 			if (file["e"] > index["payloadEnd"] || file["s"] > file["e"])
@@ -143,6 +192,11 @@
 		return index["files"].length;
 	}
 
+	/**
+	 * @param {string} name
+	 * @param {(loaded: number, total: number) => void} [onProgress]
+	 * @returns {Promise<void>}
+	 */
 	function loadPackage(name, onProgress) {
 		var state = states[name];
 		if (state && state.promise) {
@@ -180,8 +234,15 @@
 		return state.promise;
 	}
 
+	/**
+	 * @param {string[]} names
+	 * @param {(loaded: number, total: number) => void} [onProgress]
+	 * @returns {Promise<void[]>}
+	 */
 	function loadAll(names, onProgress) {
+		/** @type {Record<string, number>} */
 		var totals = {};
+		/** @type {Record<string, number>} */
 		var loaded = {};
 		function report() {
 			var done = 0, sum = 0;
@@ -212,6 +273,11 @@
 		});
 	}
 
+	/**
+	 * @param {LuantiAssetManifest} manifest
+	 * @param {string} game
+	 * @returns {LuantiAssetManifest["games"][string]}
+	 */
 	function gameEntry(manifest, game) {
 		var entry = manifest["games"][game];
 		if (!entry)
@@ -249,6 +315,7 @@
 		// module compiles; the launcher waits on it before enabling Play.
 		"core": null,
 		"getStates": function() {
+			/** @type {ReturnType<LuantiPackages["getStates"]>} */
 			var result = {};
 			Object.keys(states).forEach(function(name) {
 				result[name] = {"state": states[name]["state"], "loaded": states[name]["loaded"],

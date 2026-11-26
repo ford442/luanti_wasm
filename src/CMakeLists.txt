@@ -949,6 +949,19 @@ if(BUILD_CLIENT)
 		endif()
 		# Emit .html shell so the build is directly servable
 		set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
+		# The launcher is one script per concern; shell.html loads them in this
+		# order (doc/compiling/wasm-embedding.md). The list also lives in
+		# util/wasm/{packages.json,package_demo.py,deploy_1ink.py}; the
+		# test_demo_tools.py check fails when they disagree with shell.html.
+		set(WASM_LAUNCHER_SCRIPTS
+			${CMAKE_SOURCE_DIR}/client/web/launcher.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher-connect.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher-library.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher-input.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher-glloss.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher-update.js
+			${CMAKE_SOURCE_DIR}/client/web/launcher-start.js
+		)
 		set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
 			${WASM_BUILD_INFO}
 			${CMAKE_SOURCE_DIR}/client/web/startup.js
@@ -962,7 +975,7 @@ if(BUILD_CLIENT)
 			${CMAKE_SOURCE_DIR}/client/web/perf.js
 			${CMAKE_SOURCE_DIR}/client/web/present.js
 			${CMAKE_SOURCE_DIR}/client/web/shell.html
-			${CMAKE_SOURCE_DIR}/client/web/launcher.js
+			${WASM_LAUNCHER_SCRIPTS}
 			${CMAKE_SOURCE_DIR}/client/web/launcher.css
 			${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
 			${CMAKE_SOURCE_DIR}/client/web/theater.js
@@ -974,7 +987,7 @@ if(BUILD_CLIENT)
 		)
 		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
-				${CMAKE_SOURCE_DIR}/client/web/launcher.js
+				${WASM_LAUNCHER_SCRIPTS}
 				${CMAKE_SOURCE_DIR}/client/web/launcher.css
 				${CMAKE_SOURCE_DIR}/client/web/launcher-config.js
 				${CMAKE_SOURCE_DIR}/client/web/theater.js

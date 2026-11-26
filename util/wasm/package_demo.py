@@ -17,11 +17,17 @@ import shutil
 import size_report
 
 
+# The launcher is one script per concern, loaded by client/web/shell.html in
+# this order (see doc/compiling/wasm-embedding.md).
+LAUNCHER_SCRIPTS = (
+	"launcher.js", "launcher-connect.js", "launcher-library.js", "launcher-input.js",
+	"launcher-glloss.js", "launcher-update.js", "launcher-start.js",
+)
 # Per-release files. The asset packages are not here: they are
 # content-addressed, shared by every release and published under /assets/.
 REQUIRED_OUTPUTS = (
 	"luanti.html", "luanti.js", "luanti.wasm",
-	"launcher.js", "launcher.css", "launcher-config.js", "theater.js", "videotexture.js",
+	*LAUNCHER_SCRIPTS, "launcher.css", "launcher-config.js", "theater.js", "videotexture.js",
 	"manifest.webmanifest", "service-worker.js", "luanti-web.svg",
 )
 ASSET_NAME_PATTERN = re.compile(r"^assets/[A-Za-z0-9_-]+\.[0-9a-f]{12}\.data$")
@@ -144,7 +150,10 @@ def package_demo(source: Path, destination: Path, version: str) -> dict[str, obj
 <p>This Luanti WebAssembly build was not found. Return to <a href="/">the current build</a>.</p>
 """, encoding="utf-8")
 
-	(destination / "_headers").write_text("""/*
+	launcher_headers = "".join(
+		f"/releases/:version/{name}\n  Cache-Control: public, max-age=31536000, immutable\n\n"
+		for name in LAUNCHER_SCRIPTS)
+	(destination / "_headers").write_text(f"""/*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Resource-Policy: cross-origin
@@ -172,10 +181,7 @@ def package_demo(source: Path, destination: Path, version: str) -> dict[str, obj
 /releases/:version/asset-manifest.json
   Cache-Control: no-cache
 
-/releases/:version/launcher.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/releases/:version/launcher.css
+{launcher_headers}/releases/:version/launcher.css
   Cache-Control: public, max-age=31536000, immutable
 
 /releases/:version/launcher-config.js

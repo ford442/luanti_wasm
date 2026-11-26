@@ -193,7 +193,16 @@ Copyright (C) 2026 The Luanti Contributors
 	</script>
 	<script src="theater.js"></script>
 	<script src="videotexture.js"></script>
+	<!-- The launcher is one script per concern. Order matters: launcher.js creates
+	window.luantiShell and the scripts after it extend it; launcher-start.js
+	needs the three before it. See doc/compiling/wasm-embedding.md. -->
 	<script src="launcher.js"></script>
+	<script src="launcher-connect.js"></script>
+	<script src="launcher-library.js"></script>
+	<script src="launcher-input.js"></script>
+	<script src="launcher-glloss.js"></script>
+	<script src="launcher-update.js"></script>
+	<script src="launcher-start.js"></script>
 	{{{ SCRIPT }}}
 </body>
 </html>

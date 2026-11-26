@@ -31,6 +31,18 @@
 	// is also reachable from the page, so re-check rather than trust.
 	var SAFE_CLIP = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+	/**
+	 * @typedef {Object} TheaterState
+	 * @property {HTMLDivElement | null} root
+	 * @property {HTMLVideoElement | null} video
+	 * @property {HTMLSpanElement | null} caption
+	 * @property {HTMLButtonElement | null} sound
+	 * @property {HTMLParagraphElement | null} message
+	 * @property {boolean} visible
+	 * @property {boolean} relockOnHide
+	 */
+
+	/** @type {TheaterState} */
 	var state = {
 		root: null,
 		video: null,
@@ -41,6 +53,7 @@
 		relockOnHide: false
 	};
 
+	/** @param {string} id */
 	function byId(id) {
 		return document.getElementById(id);
 	}
@@ -123,6 +136,7 @@
 		return root;
 	}
 
+	/** @param {string} text */
 	function showMessage(text) {
 		if (!state.message)
 			return;
@@ -143,6 +157,7 @@
 		}
 	}
 
+	/** @param {Partial<Parameters<LuantiTheater["show"]>[0]>} [options] */
 	function show(options) {
 		options = options || {};
 		var clip = String(options.clip || "");

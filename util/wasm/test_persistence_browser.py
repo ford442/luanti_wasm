@@ -35,7 +35,7 @@ class ReusableTCPServer(socketserver.TCPServer):
 
 
 def start_main(page) -> None:
-	"""Do what launcher.js does once the runtime is up: call main."""
+	"""Do what launcher-start.js does once the runtime is up: call main."""
 	page.wait_for_function(
 		"typeof runtimeInitialized !== 'undefined' && runtimeInitialized && "
 		"typeof Module.callMain === 'function'")
@@ -68,8 +68,9 @@ def main() -> int:
 			"-sPROXY_TO_PTHREAD=1",
 			"-sFORCE_FILESYSTEM=1",
 			"-sEXIT_RUNTIME=0",
-			# shell.html sets noInitialRun and leaves main to launcher.js, which
-			# the probe does not ship, so the test starts main itself.
+			# shell.html sets noInitialRun and leaves main to the launcher scripts
+			# (launcher-start.js), which the probe does not ship, so the test
+			# starts main itself.
 			"-sEXPORTED_RUNTIME_METHODS=callMain",
 			"-lidbfs.js",
 			"--pre-js",

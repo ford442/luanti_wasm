@@ -30,6 +30,29 @@
 	if (typeof WebGL2RenderingContext === "undefined")
 		return;
 
+	/**
+	 * The typed arrays WebGL takes as data (never BigInt arrays or DataView).
+	 * @typedef {Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array |
+	 *   Int32Array | Uint32Array | Float32Array | Float64Array} TypedArray
+	 */
+
+	/**
+	 * A typed array's own constructor, which copyOf() builds the copy with.
+	 * @typedef {{BYTES_PER_ELEMENT: number, new (buffer: ArrayBuffer, byteOffset: number, length: number): TypedArray}} TypedArrayConstructor
+	 */
+
+	/**
+	 * `resizable` (ArrayBuffer) and `growable` (SharedArrayBuffer) are not in
+	 * the ES2022 lib the project is checked against.
+	 * @typedef {{byteLength: number, resizable?: boolean, growable?: boolean}} MaybeResizableBuffer
+	 */
+
+	/**
+	 * WebGL2RenderingContext.prototype, patched by entry point name. Genuinely
+	 * dynamic: any WebGL method is looked up and replaced by its string name.
+	 * @typedef {Record<string, any>} PatchableWebGL
+	 */
+
 	var stats = {"calls": 0, "copies": 0, "bytes": 0, "scratchBytes": 0};
 	if (typeof Module !== "undefined") {
 		Module["luantiWebGLCompat"] = {
@@ -44,15 +67,26 @@
 		};
 	}
 
+	/** @param {MaybeResizableBuffer} buffer */
 	function isResizable(buffer) {
 		return buffer && (buffer.resizable === true || buffer.growable === true);
 	}
 
 	// One scratch ArrayBuffer per (entry point, argument) so two arguments of
 	// one call never share storage. Grown in powers of two.
+	/** @type {Record<string, ArrayBuffer>} */
 	var scratch = {};
+	/**
+	 * @param {string} key
+	 * @param {TypedArray} view
+	 * @param {number} start
+	 * @param {number} end
+	 * @returns {TypedArray}
+	 */
 	function copyOf(key, view, start, end) {
-		var ctor = view.constructor;
+		// view.constructor is typed as Function; for a typed array it is the
+		// concrete typed array constructor.
+		var ctor = /** @type {TypedArrayConstructor} */ (view.constructor);
 		var count = end - start;
 		var bytes = count * ctor.BYTES_PER_ELEMENT;
 		var buffer = scratch[key];
@@ -72,20 +106,25 @@
 
 	// Index of the data argument and whether it is followed by srcOffset and
 	// srcLength (always the case for the uniform*v family).
+	/**
+	 * @param {string} name
+	 * @param {number} dataIndex
+	 */
 	function patch(name, dataIndex) {
+		/** @type {PatchableWebGL} */
 		var proto = WebGL2RenderingContext.prototype;
 		var original = proto[name];
 		if (typeof original !== "function")
 			return;
 		proto[name] = function() {
 			stats["calls"]++;
-			/** @type {any} */
+			/** @type {TypedArray} */
 			var data = arguments[dataIndex];
 			if (!data || !ArrayBuffer.isView(data) || !isResizable(data.buffer))
 				return original.apply(this, arguments);
 			var offset = arguments[dataIndex + 1] || 0;
 			var length = arguments[dataIndex + 2];
-			var end = length ? offset + length : /** @type {any} */ (data).length;
+			var end = length ? offset + length : data.length;
 			var args = Array.prototype.slice.call(arguments, 0, dataIndex);
 			args.push(copyOf(name, data, offset, end));
 			return original.apply(this, args);
@@ -108,8 +147,11 @@
 	// growable shared buffer and WebGL rejects it just the same. Inputs are
 	// copied; outputs (readPixels, getBufferSubData) are read into a copy and
 	// written back.
+	/** @type {Record<string, boolean>} */
 	var outputs = {readPixels: true, getBufferSubData: true};
+	/** @param {string} name */
 	function patchViews(name) {
+		/** @type {PatchableWebGL} */
 		var proto = WebGL2RenderingContext.prototype;
 		var original = proto[name];
 		if (typeof original !== "function")
@@ -117,13 +159,14 @@
 		proto[name] = function() {
 			stats["calls"]++;
 			var copied = null;
+			/** @type {[number, TypedArray] | null} */
 			var back = null;
 			for (var k = 0; k < arguments.length; k++) {
-				/** @type {any} */
+				/** @type {TypedArray} */
 				var arg = arguments[k];
 				if (arg && ArrayBuffer.isView(arg) && isResizable(arg.buffer)) {
 					copied = copied || Array.prototype.slice.call(arguments);
-					copied[k] = copyOf(name + k, arg, 0, /** @type {any} */ (arg).length);
+					copied[k] = copyOf(name + k, arg, 0, arg.length);
 					if (outputs[name])
 						back = [k, arg];
 				}

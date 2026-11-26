@@ -11,7 +11,7 @@
   "scripts": {
     "build": "bash -lc 'source \"${EMSDK:-/root/emsdk}/emsdk_env.sh\" && cmake --preset Emscripten && cmake --build build-wasm --parallel $(($(nproc) + 1))'",
     "lint": "eslint client/web util/wasm eslint.config.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p client/web && tsc --noEmit -p . && node util/wasm/check_module_contract.mjs",
     "proxy:install": "npm ci --prefix util/wasm/proxy",
     "test": "npm test --prefix util/wasm/proxy"
   },

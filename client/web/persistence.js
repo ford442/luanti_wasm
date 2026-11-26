@@ -13,6 +13,30 @@
 	if (typeof window === "undefined" && typeof document === "undefined")
 		return;
 
+	/**
+	 * What an error can look like when it comes from IDBFS or FS: usually an
+	 * Error or DOMException, but errorText copes with anything.
+	 * @typedef {{name?: string, message?: string}} PersistenceErrorLike
+	 */
+
+	/**
+	 * The `luanti:persistence` event detail, as LuantiPersistence.getState returns it.
+	 * @typedef {ReturnType<LuantiPersistence["getState"]>} PersistenceSnapshot
+	 */
+
+	/**
+	 * A requestSync caller waiting for a generation to reach storage.
+	 * @typedef {Object} PersistenceWaiter
+	 * @property {number} generation
+	 * @property {() => void} resolve
+	 * @property {(error: Error) => void} reject
+	 */
+
+	/**
+	 * What queueSync reads (`_requestGeneration` passes a `generation` as well).
+	 * @typedef {{reason?: string, urgent?: boolean}} PersistenceSyncOptions
+	 */
+
 	var mountPath = "/home/web_user/.luanti";
 	var dependencyName = "luanti-idbfs-hydration";
 	var testOptions = Module["luantiPersistenceTestOptions"] || {};
@@ -20,14 +44,19 @@
 	var requestedGeneration = 0;
 	var savedGeneration = 0;
 	var latestEngineGeneration = 0;
+	/** @type {object|null} */
 	var inFlight = null;
+	/** @type {ReturnType<typeof setTimeout>|null} */
 	var retryTimer = null;
 	var retryAttempt = 0;
 	var ready = false;
 	var fatal = false;
+	/** @type {string|null} */
 	var lastError = null;
+	/** @type {PersistenceWaiter[]} */
 	var waiters = [];
 	var latestReason = "startup";
+	/** @type {PersistenceSnapshot} */
 	var snapshot = {
 		"state": "loading",
 		"reason": "startup",
@@ -36,6 +65,10 @@
 		"error": null
 	};
 
+	/**
+	 * @param {PersistenceErrorLike|null|undefined} error
+	 * @returns {string}
+	 */
 	function errorText(error) {
 		if (!error)
 			return "Unknown storage error";
@@ -44,6 +77,7 @@
 		return String(error.message || error);
 	}
 
+	/** @returns {PersistenceSnapshot} */
 	function copySnapshot() {
 		return {
 			"state": snapshot["state"],
@@ -54,12 +88,14 @@
 		};
 	}
 
+	/** @param {PersistenceSnapshot} state */
 	function updateShell(state) {
 		if (typeof document === "undefined")
 			return;
 		var status = document.getElementById("luanti-persistence-status");
 		var error = document.getElementById("luanti-persistence-error");
 		if (status) {
+			/** @type {Record<string, string>} */
 			var labels = {
 				"loading": "Loading saved data…",
 				"ready": "Storage ready",
@@ -86,6 +122,13 @@
 		}
 	}
 
+	/**
+	 * @param {string} state
+	 * @param {string|null} reason
+	 * @param {boolean} pending
+	 * @param {boolean} isFatal
+	 * @param {string|null} error
+	 */
 	function emitState(state, reason, pending, isFatal, error) {
 		snapshot = {
 			"state": state,
@@ -108,6 +151,7 @@
 		}
 	}
 
+	/** @param {string} path */
 	function ensureDirectory(path) {
 		try {
 			FS.mkdir(path);
@@ -118,6 +162,7 @@
 		}
 	}
 
+	/** @param {PersistenceErrorLike|null|undefined} error */
 	function failStartup(error) {
 		fatal = true;
 		lastError = errorText(error);
@@ -127,13 +172,22 @@
 			requestedGeneration);
 	}
 
+	/**
+	 * @param {"_luanti_persistence_sync_failed"|"_luanti_persistence_sync_completed"} name
+	 * @param {number} generation
+	 */
 	function callEngine(name, generation) {
 		var callback = Module[name];
 		if (typeof callback === "function")
 			callback(generation);
 	}
 
+	/**
+	 * @param {Error|null} error
+	 * @param {number} completedGeneration
+	 */
 	function settleWaiters(error, completedGeneration) {
+		/** @type {PersistenceWaiter[]} */
 		var remaining = [];
 		waiters.forEach(function(waiter) {
 			if (waiter["generation"] <= completedGeneration) {
@@ -171,7 +225,8 @@
 		inFlight = {};
 		emitState("saving", reason, true, false, lastError);
 
-		FS.syncfs(false, function(error) {
+		// FS is declared any, so the callback's parameter type is given here.
+		FS.syncfs(false, /** @param {Error|null} error */ function(error) {
 			inFlight = null;
 			if (error) {
 				lastError = errorText(error);
@@ -199,6 +254,11 @@
 		});
 	}
 
+	/**
+	 * @param {PersistenceSyncOptions} [options]
+	 * @param {boolean} [withPromise] Whether to return a promise for the sync.
+	 * @returns {Promise<void>|undefined}
+	 */
 	function queueSync(options, withPromise) {
 		options = options || {};
 		var reason = options["reason"] || "external";
@@ -206,6 +266,7 @@
 		requestedGeneration++;
 		latestReason = reason;
 
+		/** @type {Promise<void>|undefined} */
 		var promise;
 		if (withPromise) {
 			var generation = requestedGeneration;
@@ -227,6 +288,7 @@
 	}
 
 	var api = {
+		/** @param {PersistenceSyncOptions} [options] */
 		"requestSync": function(options) {
 			if (fatal)
 				return Promise.reject(new Error(lastError || "Storage unavailable"));
@@ -235,6 +297,7 @@
 		"getState": function() {
 			return copySnapshot();
 		},
+		/** @param {PersistenceSyncOptions & {generation?: number}} [options] */
 		"_requestGeneration": function(options) {
 			options = options || {};
 			latestEngineGeneration = Math.max(latestEngineGeneration,
@@ -248,6 +311,7 @@
 	// returns. The generated browser shell owns the page lifetime.
 	Module["noExitRuntime"] = true;
 
+	/** @param {string} reason */
 	function lifecycleSync(reason) {
 		if (ready && !fatal)
 			queueSync({"reason": reason, "urgent": true}, false);
@@ -285,7 +349,7 @@
 		}
 
 		try {
-			FS.syncfs(true, function(error) {
+			FS.syncfs(true, /** @param {Error|null} error */ function(error) {
 				if (error) {
 					failStartup(error);
 					return;

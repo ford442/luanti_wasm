@@ -25,7 +25,9 @@
 	if (typeof window === "undefined" || typeof Module === "undefined")
 		return;
 
+	/** @type {ImageBitmapRenderingContext | null} */
 	var ctx = null;
+	/** @type {ImageBitmap | null} */
 	var pending = null;
 	var ackPtr = 0;
 	var unacked = 0;
@@ -96,6 +98,7 @@
 	// pthread pool (pre-js); other workers simply never send such a message.
 	var NativeWorker = window.Worker;
 	if (typeof NativeWorker === "function") {
+		/** @param {MessageEvent} event */
 		var onMessage = function(event) {
 			var data = event.data;
 			if (data && data["luantiFrame"])

@@ -35,6 +35,19 @@
 	if (typeof window === "undefined" && typeof document === "undefined")
 		return;
 
+	/** @typedef {LuantiMediaSet["files"][number]} MediaFileEntry One file of a set, as the manifest lists it. */
+	/** @typedef {{name: string, bytes: Uint8Array}} MediaFile A downloaded, verified file. */
+	/**
+	 * What this file knows about one requested set (`sets`, keyed by id).
+	 * @typedef {Object} MediaSetState
+	 * @property {"loading" | "ready" | "missing" | "failed"} state
+	 * @property {string[]} names File names written under `dest` (once ready).
+	 * @property {string} dest
+	 * @property {number} bytes Total size of the files written (once ready).
+	 * @property {number} at When the last attempt failed, for the retry delay.
+	 * @property {string} [error] Why the last attempt failed.
+	 */
+
 	var ID_PATTERN = /^[a-z0-9_]+\/[a-z0-9_]{1,64}$/;
 	var FILE_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 	var DEST_PATTERN = /^\/[A-Za-z0-9_/.-]+$/;
@@ -45,10 +58,18 @@
 	var CODES = {"unavailable": 0, "ready": 1, "loading": 2, "busy": 3,
 		"missing": 4, "failed": 5, "invalid": 6};
 
+	/** @type {Record<string, MediaSetState>} */
 	var sets = {};
+	/** @type {string | null} */
 	var inFlight = null;
+	/** @type {string[]} */
 	var resident = [];
 
+	/**
+	 * @param {string} id
+	 * @param {string} state
+	 * @param {string} [detail]
+	 */
 	function emit(id, state, detail) {
 		try {
 			window.dispatchEvent(new CustomEvent("luanti:media", {"detail":
@@ -60,26 +81,46 @@
 		return Module["luantiAssetManifestUrl"] || "asset-manifest.json";
 	}
 
+	/**
+	 * @param {string} relative
+	 * @returns {string}
+	 */
 	function resolve(relative) {
 		// Media URLs are relative to the manifest, not to the page.
 		return new URL(relative, new URL(manifestUrl(), document.baseURI)).href;
 	}
 
+	/**
+	 * @param {ArrayBuffer} buffer
+	 * @returns {string}
+	 */
 	function toHex(buffer) {
-		return Array.prototype.map.call(new Uint8Array(buffer), function(byte) {
+		return Array.prototype.map.call(new Uint8Array(buffer), /** @param {number} byte */ function(byte) {
 			return (byte < 16 ? "0" : "") + byte.toString(16);
 		}).join("");
 	}
 
+	/**
+	 * TypeScript does not infer a JS constructor function as a class, so the
+	 * one `new MissingError` below goes through this construct signature.
+	 * @typedef {new (message: string) => Error} MissingErrorConstructor
+	 */
+
+	/** @param {string} message */
 	function MissingError(message) {
 		this.message = message;
 	}
 	MissingError.prototype = Object.create(Error.prototype);
 
+	/**
+	 * @param {MediaFileEntry} item
+	 * @param {RequestCache} cache
+	 * @returns {Promise<Uint8Array>}
+	 */
 	async function fetchOnce(item, cache) {
 		var response = await fetch(resolve(item["url"]), {"cache": cache});
 		if (response.status === 404)
-			throw new MissingError(item["url"] + ": HTTP 404");
+			throw new (/** @type {typeof MissingError & MissingErrorConstructor} */ (MissingError))(item["url"] + ": HTTP 404");
 		if (!response.ok)
 			throw new Error(item["url"] + ": HTTP " + response.status);
 		var expected = item["bytes"];
@@ -113,6 +154,10 @@
 		return bytes;
 	}
 
+	/**
+	 * @param {MediaFileEntry} item
+	 * @returns {Promise<Uint8Array>}
+	 */
 	async function download(item) {
 		try {
 			return await fetchOnce(item, "default");
@@ -129,12 +174,17 @@
 		return typeof FS !== "undefined" && FS.root && FS.createDataFile;
 	}
 
+	/** @param {string} path */
 	function unlinkQuietly(path) {
 		try {
 			FS.unlink(path);
 		} catch (_) {}
 	}
 
+	/**
+	 * @param {LuantiMediaSet} entry
+	 * @param {MediaFile[]} files
+	 */
 	function write(entry, files) {
 		FS.createPath("/", entry["dest"], true, true);
 		for (var i = 0; i < files.length; i++) {
@@ -144,6 +194,10 @@
 		}
 	}
 
+	/**
+	 * @param {string} id
+	 * @returns {boolean}
+	 */
 	function erase(id) {
 		var set = sets[id];
 		if (!set || set.state !== "ready")
@@ -157,6 +211,7 @@
 		return true;
 	}
 
+	/** @param {string} id */
 	async function run(id) {
 		var set = sets[id];
 		try {
@@ -213,6 +268,10 @@
 		}
 	}
 
+	/**
+	 * @param {string} id
+	 * @returns {LuantiMediaState}
+	 */
 	function request(id) {
 		if (typeof id !== "string" || !ID_PATTERN.test(id))
 			return "invalid";
@@ -247,7 +306,7 @@
 		},
 		"status": function() {
 			return {"inFlight": inFlight, "resident": resident.slice(),
-				"sets": Object.keys(sets).reduce(function(all, id) {
+				"sets": Object.keys(sets).reduce(/** @param {Record<string, string>} all */ function(all, id) {
 					all[id] = sets[id].state;
 					return all;
 				}, {})};

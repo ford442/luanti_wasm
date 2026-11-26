@@ -75,7 +75,13 @@ build-wasm/bin/luanti.wasm
 build-wasm/bin/asset-manifest.json
 build-wasm/bin/assets/core.<hash>.data
 build-wasm/bin/assets/<game>.<hash>.data   # one per game, plus the song packages
-build-wasm/bin/launcher.js
+build-wasm/bin/launcher.js         # launcher shell and status; launcher-*.js load after it
+build-wasm/bin/launcher-connect.js
+build-wasm/bin/launcher-library.js
+build-wasm/bin/launcher-input.js
+build-wasm/bin/launcher-glloss.js
+build-wasm/bin/launcher-update.js
+build-wasm/bin/launcher-start.js
 build-wasm/bin/launcher.css
 build-wasm/bin/launcher-config.js
 build-wasm/bin/manifest.webmanifest

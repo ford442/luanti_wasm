@@ -1,4 +1,13 @@
 {
+	// Shared options for the type-checked JavaScript. This project covers the
+	// WebSocket proxy (util/wasm/proxy, Node ESM); the browser scripts are a
+	// separate project, client/web/tsconfig.json, that extends this one.
+	//
+	// The way to `strict` is one flag at a time, one project at a time.
+	// Done: noImplicitAny on client/web. Next: noImplicitAny here, then
+	// strictNullChecks on client/web. Fix a new flag's fallout by declaring
+	// types (client/web/emscripten-module.d.ts for the Module contract), not
+	// with casts. `npm run typecheck` runs both projects.
 	"compilerOptions": {
 		"allowJs": true,
 		"checkJs": true,
@@ -13,8 +22,6 @@
 		"skipLibCheck": true
 	},
 	"include": [
-		"client/web/**/*.js",
-		"client/web/emscripten-module.d.ts",
 		"util/wasm/proxy/**/*.mjs"
 	],
 	"exclude": ["**/node_modules"]

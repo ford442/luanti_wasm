@@ -96,6 +96,65 @@ nothing). The same text is in `Module.luantiNetwork.getState().error` and the
 `luanti:network` event. The close reasons are listed in
 `util/wasm/proxy/README.md`.
 
+## Launcher scripts
+
+The page is plain classic JavaScript on purpose. The engine's `--pre-js` files
+are concatenated into `luanti.js` in link order and run before `main`; they are
+not ES modules, and a bundler or a TypeScript build step would fight that
+order. The launcher on top of them follows the same rule: one script per
+concern, loaded by `shell.html` before `luanti.js`, in a fixed order. Each one
+talks to one object and nothing else.
+
+| Script | Owns | Talks to |
+| --- | --- | --- |
+| `launcher.js` | Shared state and element lookups (`window.luantiShell`), the loading panel, status line, runtime log, the Local / Join server tabs, the in-game toolbar, and `Module.luantiLauncher` | the engine (`reportEngineStatus`, `setPaused`, ...) |
+| `launcher-connect.js` | Multiplayer proxy picker, its privacy notice, the public server list | `Module.luantiNetwork` |
+| `launcher-library.js` | World list and menu, New / Rename / Delete / Import dialogs, export, `?world=` offers, world thumbnails | `Module.luantiWorlds` |
+| `launcher-input.js` | Pointer-lock resume panel, audio unlock, canvas size before the engine owns it, the touch/pointer probe | `Module.luantiInput`, `audio_unlock.js` |
+| `launcher-glloss.js` | WebGL context-loss overlay; adds `getGLState` and `notifyContext*` to `Module.luantiLauncher` | `Module.luantiPersistence` |
+| `launcher-update.js` | Service-worker registration and the "new version" toast | `service-worker.js` |
+| `launcher-start.js` | The launch form: validation, the game's asset package, `callMain` | all of the above |
+
+The order matters: `launcher.js` creates `window.luantiShell` and every later
+script adds to it, `launcher-glloss.js` extends the `Module.luantiLauncher`
+that `launcher.js` made, and `launcher-start.js` needs the three scripts before
+it (`connect`, `library`, `input`). A script that loads out of order throws a
+one-line error naming what it needs. `shell.html` lists them like this, and
+`util/wasm/test_demo_tools.py` fails if that list, the CMake copy list,
+`packages.json`, `package_demo.py` or `deploy_1ink.py` disagree:
+
+```text
+launcher.js
+launcher-connect.js
+launcher-library.js
+launcher-input.js
+launcher-glloss.js
+launcher-update.js
+launcher-start.js
+```
+
+`worlds.js` is a `--pre-js` that owns storage; `launcher-library.js` only
+renders what `Module.luantiWorlds` returns.
+
+### Where new code goes
+
+- New **engine** behaviour is C++ under `#ifdef __EMSCRIPTEN__`. It reaches the
+  page through the existing `Module.luanti*` objects, not through a new
+  `EM_JS` launcher in `CIrrDeviceSDL.cpp`.
+- New **browser** behaviour goes in the script that owns the object it talks
+  to, or in a new script of its own (add it to every list above).
+- Every new `Module.luanti*` member is declared in
+  `client/web/emscripten-module.d.ts` in the same change as the C++ call and
+  the JavaScript that implements it. `LuantiModule` has no index signature, so
+  a script that reads an undeclared member fails `npm run typecheck`, and
+  `util/wasm/check_module_contract.mjs` (also run by it) fails when C++ reads a
+  `Module` member that is not declared. What the launcher scripts share among
+  themselves is typed in `client/web/launcher-shell.d.ts`; that is not part of
+  the engine contract.
+- Add `// @ts-check` to new scripts. `client/web` is checked with
+  `noImplicitAny`; `npm run lint` and `npm run typecheck` are the gate
+  (`npm test` is the proxy suite only).
+
 ## Browser behavior
 
 - Clicking the game lets SDL request pointer lock. Escape releases pointer
