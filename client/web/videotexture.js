@@ -34,6 +34,26 @@
 	// file is reachable from the page too.
 	var SAFE_CLIP = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+	/**
+	 * @typedef {Object} VideoTextureState
+	 * @property {HTMLVideoElement | null} video
+	 * @property {HTMLCanvasElement | null} canvas
+	 * @property {CanvasRenderingContext2D | null} ctx
+	 * @property {boolean} active
+	 * @property {number} width
+	 * @property {number} height
+	 * @property {number} fps
+	 * @property {number[]} bufferPtr Heap addresses of the two frame buffers.
+	 * @property {number} bufferSize
+	 * @property {number} writeIndex Which of the two buffers is written next.
+	 * @property {number} frameIntervalMs
+	 * @property {number} lastFrameTimeMs
+	 * @property {number} rafHandle
+	 * @property {boolean} usingVideoFrameCallback
+	 * @property {number} vfcHandle
+	 */
+
+	/** @type {VideoTextureState} */
 	var state = {
 		video: null,
 		canvas: null,
@@ -123,6 +143,7 @@
 		});
 	}
 
+	/** @param {Partial<Parameters<LuantiVideoTexture["start"]>[0]>} [options] */
 	function start(options) {
 		options = options || {};
 		var clip = String(options.clip || "");

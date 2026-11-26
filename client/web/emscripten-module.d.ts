@@ -3,10 +3,17 @@
 // Copyright (C) 2026 The Luanti Contributors
 
 // The `Module` surface shared between the browser scripts in client/web and
-// the C++ engine (`MAIN_THREAD_EM_ASM` / `EM_JS` in src/porting_emscripten.cpp
-// and src/network/socket.cpp). This file is documentation first: when you add
-// or rename a member on either side, update it here so `npm run typecheck`
-// keeps both sides honest.
+// the C++ engine (`MAIN_THREAD_EM_ASM` / `EM_JS` in src/porting_emscripten.cpp,
+// src/network/socket.cpp, irr/src/CIrrDeviceSDL.cpp and a few more). This is
+// the review surface for that boundary: a new `Module.luanti*` field is
+// declared here in the same change as the C++ call and the JS implementation.
+//
+//   - `LuantiModule` has no index signature on purpose. A script that reads an
+//     undeclared member fails `npm run typecheck`, and
+//     util/wasm/check_module_contract.mjs (run by it) fails when C++ reads a
+//     `Module` member that is not declared below.
+//   - What the launcher scripts share among themselves is not part of this
+//     contract; see launcher-shell.d.ts.
 //
 // Property names are always accessed as quoted strings in the scripts so they
 // survive Closure/JS minification; the declarations use plain identifiers.
@@ -40,8 +47,10 @@ interface LuantiNetwork {
 	getState(): LuantiNetworkState;
 	_createSocket(handle: number, port: number): unknown;
 	_destroySocket(handle: number): unknown;
-	_registerHostname(address: number, hostname: string): unknown;
-	_send(handle: number, pointer: number, length: number, address: number, port: number): unknown;
+	/** `address` is the dotted-quad IPv4 string (socket.cpp passes UTF8ToString). */
+	_registerHostname(address: string, hostname: string): unknown;
+	/** `pointer`/`length` locate the datagram on the heap; `address` is a dotted-quad string. */
+	_send(handle: number, pointer: number, length: number, address: string, port: number): unknown;
 	/** Exposed for the unit tests only. */
 	_test: { encapsulate: Function; decodeFrame: Function };
 }
@@ -189,7 +198,10 @@ interface LuantiPackages {
 	getStates(): Record<string, { state: string; loaded: number; total: number }>;
 }
 
-/** Launcher hooks the engine calls back into (client/web/launcher.js). */
+/**
+ * Launcher hooks the engine calls back into. launcher.js creates the object;
+ * the context-loss members are added by launcher-glloss.js.
+ */
 interface LuantiLauncher {
 	/** Called by network.js on every proxy-link state change. */
 	reportProxyStatus(detail: LuantiNetworkState): void;
@@ -207,15 +219,15 @@ interface LuantiLauncher {
 	isPaused(): boolean;
 	/** Measured frame clock of the engine loop; null until the runtime exists. */
 	getFrameClock(): { frames: number; lastDtimeMs: number; paused: boolean } | null;
-	/** WebGL context-loss counters since page load. */
-	getGLState(): { lost: number; restored: number; recovered: number; restoreFailed: number; overlay: boolean };
-	/** Called by the engine when its offscreen (worker-owned) context is lost. */
-	notifyContextLost(): void;
-	notifyContextRestoring(): void;
-	notifyContextRestored(): void;
-	notifyContextRestoreFailed(): void;
-	/** Test hook: lose the engine's context; false if the browser cannot. */
-	debugLoseContext(): boolean;
+	/** launcher-glloss.js: WebGL context-loss counters since page load. */
+	getGLState?(): { lost: number; restored: number; recovered: number; restoreFailed: number; overlay: boolean };
+	/** launcher-glloss.js: called by the engine when its offscreen (worker-owned) context is lost. */
+	notifyContextLost?(): void;
+	notifyContextRestoring?(): void;
+	notifyContextRestored?(): void;
+	notifyContextRestoreFailed?(): void;
+	/** launcher-glloss.js, test hook: lose the engine's context; false if the browser cannot. */
+	debugLoseContext?(): boolean;
 	getState(): {
 		runtimeReady: boolean;
 		started: boolean;
@@ -272,10 +284,30 @@ interface LuantiModule {
 	onRuntimeInitialized: () => void;
 	callMain(args?: string[]): void;
 	HEAPU8: Uint8Array;
-	/** C export, called by videotexture.js when a decoded frame is ready. */
+	/** The SDL2 audio state Emscripten keeps on Module (launcher-input.js resumes its context). */
+	SDL2?: { audioContext?: AudioContext };
+
+	// C exports (EMSCRIPTEN_KEEPALIVE in src/ and irr/src/), present once the
+	// runtime exists. Called from the page; the engine never calls them itself.
+	/** videotexture.js: a decoded frame is ready. */
 	_luanti_video_texture_frame?: (bufferIndex: number, width: number, height: number) => void;
-	/** C export, called by the persistence service when a sync fails. */
+	/** persistence.js: a sync failed / completed for this engine-side generation. */
 	_luanti_persistence_sync_failed?: (generation: number) => void;
+	_luanti_persistence_sync_completed?: (generation: number) => void;
+	/** launcher.js: the embedder pause flag (an atomic in shared memory). */
+	_luanti_set_paused?: (paused: number) => void;
+	_luanti_is_paused?: () => number;
+	/** launcher.js: frames counted by the engine loop and its latest dtime, in ms. */
+	_luanti_frame_clock_count?: () => number;
+	_luanti_frame_clock_last_dtime_ms?: () => number;
+	/** launcher-glloss.js, tests: lose the WebGL context owned by the engine worker. */
+	_luanti_debug_lose_webgl_context?: () => void;
+	/** network.js: deliver a datagram to the engine's UDP socket `handle`. */
+	_luanti_websocket_proxy_receive?: (handle: number, pointer: number, length: number, address: number, port: number) => void;
+	/** perf.js: address of the frame-statistics ring in shared memory. */
+	_luanti_perf_ring?: () => number;
+	/** startup.js: the allocator's sbrk break, in bytes. */
+	_luanti_heap_break?: () => number;
 
 	// Luanti services; each is installed by the script named above it.
 	luantiNetwork?: LuantiNetwork;
@@ -373,8 +405,8 @@ interface LuantiModule {
 	luantiProxyUrl?: string;
 	/** Test hook: tweaks persistence timing (util/wasm/test_persistence_browser.py). */
 	luantiPersistenceTestOptions?: Record<string, unknown>;
-
-	[key: string]: any;
+	/** Set and read by CIrrDeviceSDL.cpp alone: the page-state publisher it installs on the main thread. */
+	luantiPublishPageState?: () => void;
 }
 
 interface LuantiWebConfig {
@@ -394,9 +426,40 @@ declare function addRunDependency(id: string): void;
 declare function UTF8ToString(pointer: number): string;
 declare function removeRunDependency(id: string): void;
 
+/** The `detail` of the `luanti:persistence` event (persistence.js, plus worlds.js with `library`). */
+interface LuantiPersistenceEvent {
+	state: string;
+	reason?: string | null;
+	pending?: boolean;
+	fatal?: boolean;
+	error?: string | null;
+	/** Present when the event reports a world-library operation (create, rename, ...). */
+	library?: { operation: string; [key: string]: unknown };
+}
+
+/** The `detail` of the `luanti:package` event (packages.js). */
+interface LuantiPackageEvent {
+	name: string;
+	state: string;
+	loaded: number;
+	total: number;
+	error: string | null;
+}
+
+/** Page events fired by the --pre-js files (`window.dispatchEvent`). */
+interface WindowEventMap {
+	"luanti:persistence": CustomEvent<LuantiPersistenceEvent>;
+	"luanti:package": CustomEvent<LuantiPackageEvent>;
+	"luanti:network": CustomEvent<LuantiNetworkState>;
+	/** startup.js ended luanti.js before the engine existed; `detail` is `Module.luantiStartup.fatal`. */
+	"luanti:startup-error": CustomEvent<{ code: string; message: string }>;
+}
+
 interface Window {
 	Module: LuantiModule;
 	LUANTI_WEB_CONFIG?: LuantiWebConfig;
 	AL?: any;
 	webkitAudioContext?: typeof AudioContext;
+	/** Test hook (launcher-glloss.js): keeps the WEBGL_lose_context extension of the context it lost. */
+	luantiLoseContextExt?: WEBGL_lose_context;
 }

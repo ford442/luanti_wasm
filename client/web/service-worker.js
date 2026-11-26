@@ -44,7 +44,7 @@ var ASSET_PATTERN = /\/assets\/([A-Za-z0-9_-]+)\.([0-9a-f]{12})\.data$/;
 
 /** @param {ArrayBuffer} buffer */
 function hex(buffer) {
-	return Array.prototype.map.call(new Uint8Array(buffer), function(byte) {
+	return Array.prototype.map.call(new Uint8Array(buffer), /** @param {number} byte */ function(byte) {
 		return (byte < 16 ? "0" : "") + byte.toString(16);
 	}).join("");
 }
@@ -62,6 +62,7 @@ async function fetchFresh(url) {
 
 async function precache() {
 	var manifestResponse = await fetchFresh(MANIFEST_URL);
+	/** @type {LuantiAssetManifest} */
 	var manifest = await manifestResponse.clone().json();
 	if (!manifest || manifest.buildId !== BUILD_ID) {
 		// The server is already on another build than this worker was stamped
@@ -124,7 +125,9 @@ async function cleanup() {
 	var stored = await shell.match(MANIFEST_URL);
 	if (!stored)
 		return;
+	/** @type {LuantiAssetManifest} */
 	var manifest = await stored.json();
+	/** @type {Record<string, string>} */
 	var current = {};
 	Object.keys(manifest.packages || {}).forEach(function(name) {
 		current[name] = new URL(manifest.packages[name].url, MANIFEST_URL).href;

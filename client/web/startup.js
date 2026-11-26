@@ -79,10 +79,19 @@
 	});
 	Module["luantiStartup"] = startup;
 
+	/**
+	 * @param {number} bytes
+	 * @returns {number}
+	 */
 	function mib(bytes) {
 		return Math.round(bytes / MIB);
 	}
 
+	/**
+	 * @param {string} code
+	 * @param {string} message
+	 * @returns {never}
+	 */
 	function fatal(code, message) {
 		startup["fatal"] = {"code": code, "message": message};
 		try {
@@ -92,6 +101,7 @@
 		throw new Error(message);
 	}
 
+	/** @param {string} message */
 	function warn(message) {
 		var report = Module["printErr"] || (typeof console !== "undefined" && console.warn);
 		if (report)
@@ -118,6 +128,12 @@
 	}
 
 	// Distinct whole-page ceilings, largest first, none below the start size.
+	/**
+	 * @param {number} initial
+	 * @param {number} buildMaximum
+	 * @param {number} requested
+	 * @returns {number[]}
+	 */
 	function ceilings(initial, buildMaximum, requested) {
 		var top = requested ? Math.min(requested, buildMaximum) : buildMaximum;
 		top = Math.max(initial, Math.floor(top / PAGE) * PAGE);
@@ -129,7 +145,12 @@
 		return list;
 	}
 
+	/**
+	 * @param {number} initial
+	 * @param {number[]} list
+	 */
 	function reserve(initial, list) {
+		/** @type {Array<{maximum: number, ok: boolean, ms: number, error?: string}>} */
 		var attempts = [];
 		for (var i = 0; i < list.length; i++) {
 			var started = performance.now();

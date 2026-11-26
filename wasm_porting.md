@@ -25,20 +25,52 @@ This document describes the current state, blockers, and step-by-step plan for b
 
 ### What Already Works
 
-- **IrrlichtMt** (the embedded graphics engine in `irr/`) already has **partial Emscripten support**:
-  - `irr/src/CMakeLists.txt` detects `EMSCRIPTEN` and sets `_IRR_EMSCRIPTEN_PLATFORM_` and `_IRR_COMPILE_WITH_EGL_MANAGER_`
-  - `irr/src/CIrrDeviceSDL.cpp/h` contain Emscripten-specific pointer-lock and event handling code
-  - `irr/src/os.cpp` uses `emscripten_log()` and `emscripten_get_now()` for logging and timing
-  - `irr/src/CEGLManager.cpp` has Emscripten EGL stubs
-  - GLES2 is enabled by default for Emscripten
-  - SDL2 device backend is used (Emscripten has excellent SDL2 port support)
+This section is a summary; the numbered sections below are the detail, and
+`src/CMakeLists.txt` (the `if(EMSCRIPTEN)` branch) and `CMakePresets.json` are
+the authority on flags.
+
+- **Build:** `cmake --preset Emscripten` (Release, client only, `build-wasm`)
+  with the pinned Emscripten 6.0.3 emits `luanti.{html,js,wasm}`. Two more
+  presets share its configuration: `EmscriptenDebug` (`build-wasm-debug`) and
+  `EmscriptenProfile` (RelWithDebInfo, `build-wasm-profile`). See "Appendix:
+  Flag Matrix".
+- **Main loop:** `-sPROXY_TO_PTHREAD=1` with `-sOFFSCREEN_FRAMEBUFFER=1`; the
+  synchronous launcher, menu and game run on an application worker. No
+  Asyncify and no `emscripten_set_main_loop`.
+- **Rendering:** WebGL2 then WebGL1 through a context ladder, in two render
+  modes (`proxy`, `offscreen`), with context-loss handling and an in-place
+  restore in proxy mode ("Render thread", "Context restore").
+- **Memory:** 256 MiB initial and 2 GiB + 64 KiB maximum. A browser that
+  refuses that ceiling gets 1 GiB or 512 MiB from the same binary
+  ("Heap ceiling probe").
+- **Assets:** streamed, content-addressed packages (`core`, one per game) from
+  `util/wasm/packages.json`; no `--preload-file` and no monolithic
+  `luanti.data`. Songs are runtime media ("File System Strategy").
+- **Persistence:** IDBFS mounted at `/home/web_user/.luanti`, synced by
+  `emscripten_sync_filesystem()`, with a world library (create, rename,
+  duplicate, delete, `.luantiworld` export and import, share links).
+- **Networking:** in-process loopback for the internal server; remote servers
+  through the WebSocket proxy in `util/wasm/proxy/` (not WebRTC).
+- **Sound and input:** OpenAL with Ogg/Vorbis (`ENABLE_SOUND=TRUE` in the
+  preset); keyboard, mouse look and pointer lock, text input, touch defaults.
+- **Launcher:** a browser shell in `client/web/`, one script per concern, with
+  the `Module` contract with C++ declared in `emscripten-module.d.ts`
+  (`doc/compiling/wasm-embedding.md`).
+- **CI:** `.github/workflows/wasm.yml` builds with the pinned SDK, runs the
+  Chrome smoke tests and the first-playable gate, and deploys the default
+  branch to Cloudflare Pages.
+- **Inherited:** IrrlichtMt already had partial Emscripten support
+  (`irr/src/CMakeLists.txt` sets `_IRR_EMSCRIPTEN_PLATFORM_`;
+  `CIrrDeviceSDL.cpp` has the pointer-lock and event handling; GLES2 is the
+  default; the SDL2 device backend is used).
 
 ### Remaining Work
 
 - The proxy is hardened for public exposure (connection caps, shared rate limit, Origin and port/server-list allowlists, health and metrics, Docker + Caddy recipe). A deployed TLS proxy and public-server multiplayer acceptance are still outstanding.
-- Full world persistence acceptance across Chrome/Edge/Firefox is outstanding.
-- CI and public demo hosting are not yet configured.
-- Sound and complete keyboard, pointer-lock, and touch acceptance remain.
+- Full world persistence acceptance across Chrome/Edge/Firefox is outstanding (the world library test runs in Firefox as a non-gating CI step).
+- Gamepad delivery is not yet verified. Touch defaults are checked by `util/wasm/test_touch_input.py`.
+- Some CI steps are non-gating until they have run green there: the WebGL context tests in both render modes, the frame-time benchmark and the allocator trial. The other numbers under "Appendix: Flag Matrix" were measured locally on Emscripten 3.1.61, not on the pinned 6.0.3.
+- Performance follow-ups are listed under "Not yet done".
 
 ---
 
@@ -187,7 +219,7 @@ The CMake build assumes native targets. Key issues:
    - Zstd
    - Freetype
    - SDL2 (use Emscripten's built-in: `-sUSE_SDL=2`)
-   - Optionally: OpenAL-soft (`-sUSE_OPENAL=1`)
+   - Optionally: OpenAL (Emscripten provides one; the build uses `find_package(OpenAL)`)
 3. **Create a CMake toolchain file** or Emscripten preset in `CMakePresets.json`
 
 ### Phase 1: CMake & Compilation (Client Only, No Network)
@@ -328,9 +360,9 @@ sent to the proxy; only ports an in-process socket has held are in-process now.
 
 Goal: In-game audio works.
 
-- **Implemented:** Enabled OpenAL and Vorbis via Emscripten ports (`-sUSE_OPENAL=1`, `-sUSE_OGG=1`, `-sUSE_VORBIS=1`).
+- **Implemented:** OpenAL and Vorbis. `src/CMakeLists.txt` finds OpenAL with `find_package(OpenAL)` (there is no `-sUSE_OPENAL` flag) and passes `-sUSE_OGG=1 -sUSE_VORBIS=1` when sound is enabled; `ENABLE_SOUND=TRUE` is set by the preset.
 - `EmscriptenDependencies.cmake` prepares `ogg` and `vorbis` ports and registers static library cache paths.
-- Browser autoplay unlock handler added to `launcher.js` to resume the Web Audio context on user interactions.
+- Browser autoplay unlock: `client/web/audio_unlock.js` (a `--pre-js`) owns the OpenAL contexts, and `launcher-input.js` resumes them on user interactions.
 - Threaded OpenAL audio pipeline runs seamlessly via Emscripten pthreads.
 
 ### Phase 6: Input & Browser Integration
@@ -354,7 +386,7 @@ Goal: Keyboard, mouse, touch, and gamepad work correctly in the browser.
    - Use `emscripten_request_fullscreen()` or SDL's fullscreen toggle
 
 The MVP web experience now lives in `client/web/`. It holds `main()` with
-`Module.noInitialRun` until preload-file and IDBFS startup complete, then calls
+`Module.noInitialRun` until the core asset package and IDBFS startup complete, then calls
 the exported Emscripten `callMain` once with validated launcher arguments. It
 includes local/direct launch flows, an opt-in public server list, deployment-
 configured WSS regions, real engine loading status, deep links, sharing,
@@ -375,26 +407,24 @@ measured values are logged as `Frame clock: dtime=… ms`; verify with
 
 ### Phase 7: Polish & Optimization
 
-1. **Memory tuning**:
-   - Start with `-sINITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH=1`
-   - Profile with browser DevTools to find a stable size
-   - Large worlds may require 512MB+; consider chunk unloading strategies
+1. **Memory tuning:** done. `-sINITIAL_MEMORY` is 256 MiB and
+   `-sMAXIMUM_MEMORY` is 2 GiB + 64 KiB (`WASM_INITIAL_MEMORY` /
+   `WASM_MAXIMUM_MEMORY` in `src/CMakeLists.txt`), with
+   `-sALLOW_MEMORY_GROWTH=1`; `client/web/startup.js` falls back to 1 GiB or
+   512 MiB when the browser refuses the ceiling ("Heap ceiling probe").
 
-2. **Binary size**:
-   - Use `-O3` or `-Oz` for release builds
-   - Use `-sMODULARIZE=1` to wrap the output in a factory function
-   - Use `-sEXPORT_NAME="LuantiModule"`
-   - Strip debug info: `-g0`
-   - Consider `WASM=1` (default) and disable unnecessary Emscripten runtime features
+2. **Binary size:** the Release link runs Binaryen `-O3` ("Which `-O` applies
+   where"); sizes are logged on every CI run ("Download sizes"). The output is
+   deliberately not `-sMODULARIZE=1` / `-sEXPORT_NAME`: `luanti.html` owns the
+   page and the `Module` object, and the `--pre-js` files are classic scripts.
+   Not done: shipping a second `wasm-opt` pass.
 
-3. **Asset loading**:
-   - Instead of `--preload-file` (which base64-encodes data into JS), consider:
-     - Fetching assets at runtime via `emscripten_async_wget()` or the Fetch API
-     - Using a `.data` file with `--preload-file` (kept separate from `.wasm`)
+3. **Asset loading:** done, not with `--preload-file`. Content-addressed
+   packages are streamed by `client/web/packages.js` ("File System Strategy").
 
-4. **CI/CD**:
-   - Add a GitHub Actions workflow that installs emsdk and builds the WASM target
-   - Host the output on GitHub Pages for easy testing
+4. **CI/CD:** done. `.github/workflows/wasm.yml` installs the pinned emsdk,
+   builds, runs the browser tests and deploys the default branch to Cloudflare
+   Pages (`doc/compiling/wasm.md`).
 
 ---
 
@@ -484,7 +514,7 @@ smoke, Cloudflare Pages deployment, cache strategy, and troubleshooting.
 | **Zstd** | Supported | Compile upstream with `emcc` |
 | **Freetype** | Emscripten port | `-sUSE_FREETYPE=1` or compile upstream |
 | **SDL2** | Emscripten port | `-sUSE_SDL=2` (strongly recommended) |
-| **OpenAL** | Emscripten port | `-sUSE_OPENAL=1` for OpenAL-soft wrapper |
+| **OpenAL** | Emscripten built-in | `find_package(OpenAL)`; no `-sUSE_OPENAL` flag is passed |
 | **cURL** | Complex | Disable initially; use `emscripten_fetch` or browser `fetch()` |
 | **Gettext** | Not supported | Disable (`ENABLE_GETTEXT=FALSE`) |
 | **Vorbis/Ogg** | Emscripten ports | `-sUSE_VORBIS=1 -sUSE_OGG=1` if using OpenAL |
@@ -866,34 +896,38 @@ last run, the failures blocking the gate, and the browsers still to cover.
 
 ## Appendix: Useful Emscripten Flags
 
+What `src/CMakeLists.txt` (`if(EMSCRIPTEN)`) passes for every build type. The
+per-build-type flags are in "Appendix: Flag Matrix". When the two disagree,
+the CMake file wins; fix this table.
+
 | Flag | Purpose |
 |------|---------|
-| `-sUSE_SDL=2` | Use Emscripten's SDL2 port |
-| `-sUSE_ZLIB=1` | Use Emscripten's ZLIB port |
-| `-sUSE_FREETYPE=1` | Use Emscripten's Freetype port |
-| `-sUSE_OPENAL=1` | Use Emscripten's OpenAL-soft port |
-| `-sFULL_ES2=1` | Full OpenGL ES 2.0 emulation |
-| `-sALLOW_MEMORY_GROWTH=1` | Grow heap dynamically |
-| `-sINITIAL_MEMORY=256MB` | Starting heap size |
-| `-sMAXIMUM_MEMORY=1GB` | Max heap size |
-| `-pthread` | Enable pthread support |
-| `-sSHARED_MEMORY=1` | Required for pthreads |
-| `-sPROXY_TO_PTHREAD=1` | Run the synchronous application main on a worker |
-| `-sOFFSCREEN_FRAMEBUFFER=1` | Proxy worker-side SDL/EGL rendering to the browser canvas |
-| `-sFETCH=1` | Enable `emscripten_fetch` API |
+| `-pthread`, `-sSHARED_MEMORY=1` | Pthreads on shared WebAssembly memory (needs COOP/COEP) |
+| `-fexceptions` | C++ exceptions; implies `DISABLE_EXCEPTION_CATCHING=0` |
+| `-sUSE_SDL=2` | Emscripten's SDL2 port (compile and link) |
+| `-sUSE_ZLIB=1`, `-sUSE_FREETYPE=1` | Emscripten's zlib and Freetype ports (compile and link) |
+| `-sUSE_OGG=1`, `-sUSE_VORBIS=1` | Ogg and Vorbis ports, when sound is enabled (`ENABLE_SOUND=TRUE` in the preset) |
+| `-sFULL_ES2=1`, `-sMAX_WEBGL_VERSION=2` | Full OpenGL ES 2.0 emulation; allow WebGL2 contexts |
+| `-sPROXY_TO_PTHREAD=1` | Run the synchronous application `main` on a worker |
+| `-sOFFSCREEN_FRAMEBUFFER=1` | Intermediate FBO that `emscripten_webgl_commit_frame()` presents |
+| `-sALLOW_MEMORY_GROWTH=1` | Grow the heap dynamically |
+| `-sINITIAL_MEMORY=268435456` | 256 MiB starting heap (`WASM_INITIAL_MEMORY`) |
+| `-sMAXIMUM_MEMORY=2147549184` | 2 GiB + 64 KiB ceiling (`WASM_MAXIMUM_MEMORY`); `startup.js` hands the binary a smaller memory when the browser refuses it |
+| `-sPTHREAD_POOL_SIZE=10` | Pre-spawned worker pool (`WASM_PTHREAD_POOL_SIZE`) |
+| `-sFETCH=1` | `emscripten_fetch` API |
 | `-sFORCE_FILESYSTEM=1` | Include FS support even if not auto-detected |
-| `-sASYNCIFY` | Optional blocking-yield transform; not used by the current target |
 | `-sEXIT_RUNTIME=0` | Keep browser callbacks and final persistence retries alive after `main()` returns |
-| `-lidbfs.js` | Explicitly retain the legacy JavaScript IDBFS backend |
-| `-sMODULARIZE=1` | Wrap output in a factory function |
-| `-sEXPORT_NAME="LuantiModule"` | Name of the factory function |
-| `--preload-file src@dst` | Bundle files into a `.data` payload |
-| `--embed-file src@dst` | Embed files into the wasm binary |
-| `--shell-file template.html` | Custom HTML shell |
-| `--pre-js file.js` | Install the browser networking and persistence contracts before engine startup |
-| `-sASSERTIONS=1` | Enable runtime assertions (debug builds) |
-| `-sSAFE_HEAP=1` | Check for memory errors (debug builds) |
-| `-g` / `-gsource-map` | Debug info / source maps |
+| `-sEXPORTED_RUNTIME_METHODS=callMain,HEAPU8` | The launcher calls `callMain`; `HEAPU8` stays live across heap growth |
+| `-lidbfs.js` | Explicitly retain the JavaScript IDBFS backend |
+| `--pre-js <file>` | In this order: the generated build info, then `startup.js`, `network.js`, `persistence.js`, `worlds.js`, `packages.js`, `runtime_media.js`, `webgl_compat.js`, `audio_unlock.js`, `perf.js`, `present.js`. They are classic scripts, installed before the engine starts, not ES modules |
+| `--shell-file client/web/shell.html` | The page; it loads the launcher scripts (`doc/compiling/wasm-embedding.md`) |
+| `-sMALLOC=<name>` | Only with `-DWASM_MALLOC=`; the default is dlmalloc |
+
+Not used, and not planned: `-sASYNCIFY` (the main loop runs on a worker),
+`-sOFFSCREENCANVAS_SUPPORT` (it blanked the game, see "Render thread"),
+`-sMODULARIZE=1` / `-sEXPORT_NAME` (the page owns `Module`),
+`--preload-file` / `--embed-file` (assets are streamed packages, no
+`luanti.data`) and `-sUSE_OPENAL` (OpenAL is found with `find_package`).
 
 ## Appendix: Flag Matrix
 
@@ -913,10 +947,18 @@ base plus a per-`CMAKE_BUILD_TYPE` profile. Presets: `Emscripten` (Release,
 | `-sMALLOC` | default (dlmalloc). `-DWASM_MALLOC=mimalloc` was trialled and **rejected** (larger binary, about twice the heap, startup no different; see "Allocator trial") | same | same |
 | `-sINITIAL_MEMORY` / `-sMAXIMUM_MEMORY` | 256 MiB / 2 GiB + 64 KiB, from `WASM_INITIAL_MEMORY` / `WASM_MAXIMUM_MEMORY` in `src/CMakeLists.txt`, also written into `Module.luantiBuild` | same | same |
 | Memory ceiling actually granted | 2 GiB + 64 KiB, else 1 GiB, else 512 MiB: `client/web/startup.js`. **Measured:** reserved in 0.7-3.1 ms; with 2 GiB refused the same `luanti.wasm` reached the launcher and a world on 1 GiB and on 512 MiB (committed heap 256 MiB); with everything refused the launcher says why and the engine does not start ("Heap ceiling probe") | same | same |
-| Packed size, Brotli 11 (raw) | **Measured:** `luanti.wasm` 2,690,745 B (10,641,925), `luanti.js` 88,105 B (467,558), `core` 3,140,060 B (9,334,893); a second `wasm-opt -O3` pass would save 5.0% of the Brotli size and is not shipped ("Download sizes") | not measured | not measured |
+| Packed size, Brotli 11 (raw) | **Measured (Emscripten 3.1.61, not the CI-pinned 6.0.3):** `luanti.wasm` 2,690,745 B (10,641,925), `luanti.js` 88,105 B (467,558), `core` 3,140,060 B (9,334,893); a second `wasm-opt -O3` pass would save 5.0% of the Brotli size and is not shipped ("Download sizes") | not measured | not measured |
 | `-sPTHREAD_POOL_SIZE` | `-DWASM_PTHREAD_POOL_SIZE=10` (integer or JS expression) | same | same |
 
 `-sDISABLE_EXCEPTION_CATCHING=0` was dropped: `-fexceptions` already implies it.
+
+**Which SDK the numbers come from.** CI builds with the pinned Emscripten
+6.0.3 (`.github/workflows/wasm.yml`, `EMSDK_VERSION`). The measured figures in
+this appendix (the packed-size row above, "Download sizes", the SIMD, allocator
+and startup measurements) were taken on 2026-11-19 on the local **Emscripten
+3.1.61** SDK, and have not been repeated on 6.0.3. Treat them as a baseline,
+not as what CI ships: the CI job writes the 6.0.3 size table into its summary
+and uploads it as `luanti-wasm-size-<sha>`.
 
 **Which `-O` applies where.** Read from `build-wasm/src/CMakeFiles/*/flags.make`
 and `luanti.dir/link.txt` of a Release configure (the same strings
@@ -1385,20 +1427,22 @@ mimalloc trial on the pinned 6.0.3 SDK, re-enabling `enable_post_processing`
 
 ## Summary Checklist
 
-- [x] Phase 0: Emscripten SDK installed; required dependencies prepared for WASM
-- [x] Phase 1: CMake configures and links a client-only build
+- [x] Phase 0: Emscripten SDK installed (6.0.3 pinned in CI); required dependencies prepared for WASM
+- [x] Phase 1: CMake configures and links a client-only build (`Emscripten`, `EmscriptenDebug`, `EmscriptenProfile` presets)
 - [x] Phase 1: Browser UDP interface has in-process loopback and proxy routing
 - [x] Phase 1: `porting.cpp` returns correct virtual paths
-- [x] Phase 2: Asset preload bundle is emitted and available at startup
+- [x] Phase 2: Assets are built into content-addressed packages and streamed on demand (`util/wasm/packages.json`); there is no `--preload-file` bundle
 - [x] Phase 2: IDBFS hydration and sentinel persistence pass browser automation
-- [x] Phase 3: Synchronous engine loop is isolated from the browser main thread
-- [x] Phase 3: Rendering pipeline runs (menu visible)
+- [x] Phase 3: Synchronous engine loop is isolated from the browser main thread (`-sPROXY_TO_PTHREAD=1`)
+- [x] Phase 3: Rendering pipeline runs (menu visible), in `proxy` and `offscreen` render modes
 - [x] Phase 4: WebSocket/UDP transport, launcher configuration, and self-hostable proxy implemented
 - [ ] Phase 4: Public-server browser play acceptance completed
-- [x] Phase 5: (Optional) Sound enabled via OpenAL + Vorbis
-- [x] Phase 6: Input functional (keyboard, mouse look & pointer-lock, text input, touch/gamepad)
-  - Touch defaults: the launcher sets `Module.luantiInput = {maxTouchPoints, coarsePointer}` before `callMain`; `defaultsettings.cpp` reads it once (`porting::emscripten_input_probe`). Coarse pointer → `touch_controls=true`, `touch_gui=true`; otherwise `touch_controls=auto`. Pinned on (not `auto`) because browsers synthesize mouse events after a tap, which made `auto` drop the HUD again. Checked by `util/wasm/test_touch_input.py`. Gamepad delivery is not yet verified.
-- [ ] Phase 7: Optimized release build; CI workflow added
+- [x] Phase 5: Sound enabled via OpenAL + Vorbis (`ENABLE_SOUND=TRUE`)
+- [x] Phase 6: Input functional (keyboard, mouse look & pointer-lock, text input, touch)
+  - Touch defaults: the launcher sets `Module.luantiInput = {maxTouchPoints, coarsePointer}` before `callMain`; `defaultsettings.cpp` reads it once (`porting::emscripten_input_probe`). Coarse pointer → `touch_controls=true`, `touch_gui=true`; otherwise `touch_controls=auto`. Pinned on (not `auto`) because browsers synthesize mouse events after a tap, which made `auto` drop the HUD again. Checked by `util/wasm/test_touch_input.py`.
+- [ ] Phase 6: Gamepad delivery verified
+- [x] Phase 7: Release profile (`-O3` with Binaryen, 256 MiB / 2 GiB + 64 KiB memory, heap ceiling probe), size log, CI workflow and Cloudflare Pages deploy
+- [ ] Phase 7: Performance follow-ups (see "Not yet done"); the numbers in "Appendix: Flag Matrix" re-measured on the pinned 6.0.3
 - [x] **Shaders**: Added integer precision qualifiers (`int`, `uint`, `sampler2DArray`) in `src/client/shader.cpp` to ensure WebGL 2 / GLES 3 compilation passes for advanced features like FXAA and 3D UI nodes.
 
 ---

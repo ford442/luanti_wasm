@@ -27,6 +27,17 @@
 	// Header words: version, capacity, words per frame, written.
 	var HEADER_WORDS = 4;
 
+	/**
+	 * @typedef {Object} PerfRing
+	 * @property {Uint32Array} u32
+	 * @property {Float32Array} f32
+	 * @property {number} frames Word index of the first record.
+	 * @property {number} capacity
+	 * @property {number} stride Words per record.
+	 * @property {number} written Records written so far.
+	 */
+
+	/** @returns {PerfRing | null} */
 	function ring() {
 		var heap = Module["HEAPU8"];
 		var locate = Module["_luanti_perf_ring"];
@@ -49,8 +60,13 @@
 		};
 	}
 
+	/**
+	 * @param {PerfRing} r
+	 * @param {number} since
+	 */
 	function read(r, since) {
 		var first = Math.max(since | 0, r.written - r.capacity + 1, 0);
+		/** @type {Array<Record<string, number>>} */
 		var out = [];
 		for (var n = first; n < r.written; n++) {
 			var at = r.frames + (n % r.capacity) * r.stride;
@@ -66,6 +82,11 @@
 		return {"first": first, "next": r.written, "frames": out};
 	}
 
+	/**
+	 * @param {number[]} sorted
+	 * @param {number} p
+	 * @returns {number}
+	 */
 	function percentile(sorted, p) {
 		if (!sorted.length)
 			return 0;
@@ -73,11 +94,13 @@
 		return sorted[Math.min(sorted.length - 1, Math.max(0, rank))];
 	}
 
+	/** @param {number[]} values */
 	function distribution(values) {
 		var sorted = values.slice().sort(function(a, b) { return a - b; });
 		var sum = 0;
 		for (var i = 0; i < sorted.length; i++)
 			sum += sorted[i];
+		/** @param {number} v */
 		function round(v) { return Math.round(v * 1000) / 1000; }
 		return {
 			"mean": round(sorted.length ? sum / sorted.length : 0),
@@ -88,8 +111,9 @@
 		};
 	}
 
-	/** @param {Array<Object<string, number>>} frames */
+	/** @param {Array<Record<string, number>>} frames */
 	function summarize(frames) {
+		/** @param {string} name */
 		function column(name) {
 			return frames.map(function(f) { return f[name]; });
 		}

@@ -11,6 +11,9 @@ on:
       - '.github/workflows/js.yml'
       - 'client/web/**'
       - 'util/wasm/**'
+      # util/wasm/check_module_contract.mjs reads the C++ side of the Module contract.
+      - 'src/**'
+      - 'irr/src/**'
       - 'eslint.config.js'
       - 'package.json'
       - 'package-lock.json'
@@ -20,6 +23,9 @@ on:
       - '.github/workflows/js.yml'
       - 'client/web/**'
       - 'util/wasm/**'
+      # util/wasm/check_module_contract.mjs reads the C++ side of the Module contract.
+      - 'src/**'
+      - 'irr/src/**'
       - 'eslint.config.js'
       - 'package.json'
       - 'package-lock.json'

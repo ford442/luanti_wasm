@@ -10,13 +10,46 @@
 	if (typeof window === "undefined" && typeof document === "undefined")
 		return;
 
+	/**
+	 * The proxy connection behind one engine UDP socket handle. The fields
+	 * after `queue` are set once a connection has been attempted.
+	 * @typedef {Object} NetworkLink
+	 * @property {number} handle
+	 * @property {number} port
+	 * @property {string} state One of idle, connecting, ready, closed, error.
+	 * @property {WebSocket|null} ws
+	 * @property {ArrayBuffer[]} queue Frames held until the link is ready.
+	 * @property {boolean} [opened] Whether the WebSocket ever reached open.
+	 * @property {Error|null} [failure] A malformed proxy message this end gave up on.
+	 * @property {number} [backoff] Current retry delay in ms.
+	 * @property {number} [retryAt] Date.now() before which no reconnect is tried.
+	 */
+
+	/**
+	 * How the proxy link ended, as passed on to emitState.
+	 * @typedef {{reason: string|null, code: number}} NetworkCloseInfo
+	 */
+
+	/**
+	 * The reading describeClose gives of a close.
+	 * @typedef {{state: string, reason: string|null, message: string, retry: boolean}} NetworkCloseVerdict
+	 */
+
+	/**
+	 * A decoded proxy frame: one UDP datagram and where it came from.
+	 * @typedef {{address: string, port: number, payload: Uint8Array}} NetworkFrame
+	 */
+
 	var MAGIC = 0x778B4CF3;
 	var HEADER_SIZE = 12;
 	var MAX_DATAGRAM = 65507;
+	/** @type {Map<number, NetworkLink>} */
 	var links = new Map();
+	/** @type {Map<string, string>} */
 	var hostnames = new Map();
 	var pingSequence = 0;
 	var configuredUrl = readConfiguredUrl();
+	/** @type {LuantiNetworkState} */
 	var snapshot = {
 		"state": configuredUrl ? "idle" : "disabled",
 		"url": configuredUrl || null,
@@ -52,6 +85,10 @@
 		return String(queryUrl || Module["luantiProxyUrl"] || stored || "").trim();
 	}
 
+	/**
+	 * @param {string} value
+	 * @returns {string}
+	 */
 	function validateUrl(value) {
 		if (!value)
 			return "";
@@ -64,6 +101,7 @@
 		return url.href;
 	}
 
+	/** @returns {LuantiNetworkState} */
 	function copyState() {
 		return {
 			"state": snapshot["state"],
@@ -78,6 +116,7 @@
 		};
 	}
 
+	/** @param {LuantiNetworkState} state */
 	function updateShell(state) {
 		if (typeof document === "undefined")
 			return;
@@ -87,14 +126,16 @@
 		if (input && document.activeElement !== input)
 			input.value = state["url"] || "";
 		if (status) {
-			var label = {
+			/** @type {Record<string, string>} */
+			var labels = {
 				"disabled": "Multiplayer proxy disabled",
 				"idle": "Multiplayer proxy configured",
 				"connecting": "Connecting to multiplayer proxy…",
 				"ready": "Multiplayer proxy connected",
 				"closed": "Multiplayer proxy disconnected",
 				"error": "Multiplayer proxy error"
-			}[state["state"]] || state["state"];
+			};
+			var label = labels[state["state"]] || state["state"];
 			if (state["rttMs"] !== null && state["state"] === "ready")
 				label += " (" + state["rttMs"] + " ms)";
 			status.textContent = label;
@@ -106,6 +147,11 @@
 		}
 	}
 
+	/**
+	 * @param {string} state
+	 * @param {Error|null} error
+	 * @param {NetworkCloseInfo} [info]
+	 */
 	function emitState(state, error, info) {
 		snapshot["state"] = state;
 		snapshot["url"] = configuredUrl || null;
@@ -148,6 +194,12 @@
 	// `opened` is whether the WebSocket ever reached the open state.
 	// Returns {state, reason, message, retry}: `retry` is false for a close the
 	// proxy ended in an ordinary way, where the next datagram may reconnect at once.
+	/**
+	 * @param {number} code WebSocket close code.
+	 * @param {string} reasonText WebSocket close reason.
+	 * @param {boolean} opened
+	 * @returns {NetworkCloseVerdict}
+	 */
 	function describeClose(code, reasonText, opened) {
 		var host = proxyHost();
 		var parsed = /^([a-z][a-z_]*)(?:: (.*))?$/.exec(String(reasonText || ""));
@@ -216,11 +268,16 @@
 		return {"state": state, "reason": tag, "message": message, "retry": retry};
 	}
 
+	/** @param {NetworkLink} link */
 	function scheduleRetry(link) {
 		link["backoff"] = Math.min(RETRY_MAX_MS, (link["backoff"] || RETRY_FIRST_MS / 2) * 2);
 		link["retryAt"] = Date.now() + link["backoff"];
 	}
 
+	/**
+	 * @param {string} address Dotted-quad IPv4 address.
+	 * @returns {number}
+	 */
 	function ipv4Number(address) {
 		var parts = address.split(".");
 		if (parts.length !== 4)
@@ -235,11 +292,21 @@
 		return value >>> 0;
 	}
 
+	/**
+	 * @param {number} value
+	 * @returns {string}
+	 */
 	function ipv4String(value) {
 		return [(value >>> 24) & 255, (value >>> 16) & 255,
 			(value >>> 8) & 255, value & 255].join(".");
 	}
 
+	/**
+	 * @param {string} address Dotted-quad IPv4 address of the target.
+	 * @param {number} port
+	 * @param {Uint8Array} bytes The datagram payload.
+	 * @returns {ArrayBuffer} The proxy frame: header followed by the payload.
+	 */
 	function encapsulate(address, port, bytes) {
 		if (bytes.byteLength > MAX_DATAGRAM)
 			throw new Error("UDP datagram exceeds proxy limit");
@@ -253,6 +320,10 @@
 		return frame;
 	}
 
+	/**
+	 * @param {unknown} data A binary WebSocket message.
+	 * @returns {NetworkFrame}
+	 */
 	function decodeFrame(data) {
 		if (!(data instanceof ArrayBuffer) || data.byteLength < HEADER_SIZE)
 			throw new Error("Proxy sent a truncated UDP frame");
@@ -269,12 +340,17 @@
 		};
 	}
 
+	/** @param {Error} error */
 	function reportDrop(error) {
 		snapshot["droppedPackets"]++;
 		emitState("error", error);
 		console.error("Luanti multiplayer proxy:", error);
 	}
 
+	/**
+	 * @param {number} handle
+	 * @param {NetworkFrame} frame
+	 */
 	function deliver(handle, frame) {
 		var callback = Module["_luanti_websocket_proxy_receive"];
 		if (typeof callback !== "function") {
@@ -291,12 +367,17 @@
 		}
 	}
 
+	/** @param {NetworkLink} link */
 	function sendMappings(link) {
 		hostnames.forEach(function(hostname, address) {
 			link["ws"].send("RESOLVE " + address + " " + hostname);
 		});
 	}
 
+	/**
+	 * @param {NetworkLink} link
+	 * @returns {boolean}
+	 */
 	function openLink(link) {
 		if (!configuredUrl)
 			return false;
@@ -307,6 +388,7 @@
 		link["opened"] = false;
 		link["failure"] = null;
 		emitState("connecting", null);
+		/** @type {WebSocket} */
 		var ws;
 		try {
 			ws = new WebSocket(configuredUrl);
@@ -383,6 +465,7 @@
 		return true;
 	}
 
+	/** @param {NetworkLink} link */
 	function closeLink(link) {
 		if (link["ws"]) {
 			link["ws"].onopen = link["ws"].onmessage =
@@ -397,6 +480,10 @@
 	}
 
 	var api = {
+		/**
+		 * @param {string} value
+		 * @returns {LuantiNetworkState}
+		 */
 		"setProxyUrl": function(value) {
 			configuredUrl = validateUrl(String(value || "").trim());
 			try {
@@ -412,16 +499,25 @@
 			return copyState();
 		},
 		"getState": copyState,
+		/**
+		 * @param {number} handle
+		 * @param {number} port
+		 */
 		"_createSocket": function(handle, port) {
 			links.set(handle, {"handle": handle, "port": port, "state": "idle",
 				"ws": null, "queue": []});
 		},
+		/** @param {number} handle */
 		"_destroySocket": function(handle) {
 			var link = links.get(handle);
 			if (link)
 				closeLink(link);
 			links.delete(handle);
 		},
+		/**
+		 * @param {string} address
+		 * @param {string} hostname
+		 */
 		"_registerHostname": function(address, hostname) {
 			if (!address || !hostname || address === hostname)
 				return;
@@ -431,6 +527,14 @@
 					link["ws"].send("RESOLVE " + address + " " + hostname);
 			});
 		},
+		/**
+		 * @param {number} handle
+		 * @param {number} pointer Heap address of the datagram.
+		 * @param {number} length
+		 * @param {string} address Dotted-quad IPv4 address of the target.
+		 * @param {number} port
+		 * @returns {boolean}
+		 */
 		"_send": function(handle, pointer, length, address, port) {
 			var link = links.get(handle);
 			if (!link) {

@@ -9,6 +9,7 @@ from __future__ import annotations
 import http.client
 import json
 from pathlib import Path
+import re
 import tempfile
 import threading
 import unittest
@@ -19,7 +20,7 @@ from build_packages import (
 import bench_startup
 import memory_import
 import size_report
-from package_demo import REQUIRED_OUTPUTS, package_demo
+from package_demo import LAUNCHER_SCRIPTS, REQUIRED_OUTPUTS, package_demo
 from serve import create_server
 
 REPO = Path(__file__).resolve().parents[2]
@@ -349,6 +350,32 @@ class DemoToolsTest(unittest.TestCase):
 		# core is what every visitor downloads before the first frame.
 		core, _ = build_package(REPO, config["packages"]["core"])
 		self.assertLessEqual(len(core), 12 * 1024 * 1024, "first-visit budget (wasm_porting.md)")
+
+	def test_every_script_the_shell_loads_ships_in_the_documented_order(self) -> None:
+		# The launcher is several classic scripts whose order matters
+		# (launcher.js creates window.luantiShell; launcher-start.js needs the
+		# three before it). A script that shell.html loads but a deploy list
+		# omits is a 404 and a dead launcher, so every list is checked here.
+		shell = (REPO / "client/web/shell.html").read_text()
+		scripts = re.findall(r'<script src="([^"]+)"', shell)
+		launcher = [name for name in scripts if name.startswith("launcher") and name != "launcher-config.js"]
+		self.assertEqual(launcher, list(LAUNCHER_SCRIPTS), "shell.html order vs package_demo.LAUNCHER_SCRIPTS")
+		config = load_config(REPO / "util/wasm/packages.json")
+		deploy = (REPO / "util/wasm/deploy_1ink.py").read_text()
+		cmake = (REPO / "src/CMakeLists.txt").read_text()
+		for name in scripts:
+			self.assertIn(name, config["shell"], f"{name} missing from packages.json shell")
+			self.assertIn(name, REQUIRED_OUTPUTS, f"{name} missing from package_demo.REQUIRED_OUTPUTS")
+			self.assertIn(f'"{name}"', deploy, f"{name} missing from deploy_1ink.py")
+		for name in LAUNCHER_SCRIPTS:
+			self.assertIn(f"client/web/{name}", cmake, f"{name} missing from src/CMakeLists.txt")
+		# The embedding guide states the order.
+		guide = (REPO / "doc/compiling/wasm-embedding.md").read_text()
+		section = guide.split("## Launcher scripts", 1)[1].split("\n## ", 1)[0]
+		positions = [section.index(name) for name in LAUNCHER_SCRIPTS]
+		self.assertEqual(positions, sorted(positions), "doc/compiling/wasm-embedding.md lists a different order")
+		# And the page-side contract (the only thing C++ may reach) is checked
+		# by util/wasm/check_module_contract.mjs, run by `npm run typecheck`.
 
 	def test_service_worker_stamping(self) -> None:
 		source = (REPO / "client/web/service-worker.js").read_text()

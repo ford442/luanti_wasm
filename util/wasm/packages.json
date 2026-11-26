@@ -64,9 +64,11 @@
 		}
 	},
 	"shell": [
-		"luanti.html", "luanti.js", "luanti.wasm", "launcher.js", "launcher.css",
-		"launcher-config.js", "theater.js", "videotexture.js", "manifest.webmanifest",
-		"luanti-web.svg"
+		"luanti.html", "luanti.js", "luanti.wasm",
+		"launcher.js", "launcher-connect.js", "launcher-library.js", "launcher-input.js",
+		"launcher-glloss.js", "launcher-update.js", "launcher-start.js",
+		"launcher.css", "launcher-config.js", "theater.js", "videotexture.js",
+		"manifest.webmanifest", "luanti-web.svg"
 	],
 	"shellOptional": ["luanti.worker.js"],
 	"verified": ["luanti.js", "luanti.wasm"],
