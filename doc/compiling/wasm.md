@@ -287,6 +287,14 @@ scene. `--no-map-io` keeps the world in the `dummy` backends to compare
 rendering alone. Offscreen mode also reports `presented` (frames shown on the
 page) and both report `rafHz`, the page's animation-frame rate after the path.
 
+`--check-terrain N` takes N screenshots of the canvas along the path and fails
+the run if any of them has lost the terrain (too little texture detail in the
+middle of the view: sky, fog or a cleared frame). CI runs it with
+`--setting enable_post_processing=true` in both render modes; that is the
+check for post-processing's old "terrain fades to sky" bug. The screenshots
+cost a frame hitch each, so leave it off when comparing frame times.
+`--check-terrain-dir DIR` keeps them.
+
 The numbers come from `Module.luantiPerf` (`client/web/perf.js`), which any
 page or the browser console can query in game:
 

@@ -1372,9 +1372,26 @@ behaviour. `?glrestore=fail` makes every rebuild fail, which is how
 `test_webgl_context.py --scenario lose` tests that path. `--scenario restore`
 loses and restores the context, then checks for no reload, a drawn world, no
 stale-object WebGL warnings, a dig the server logs, and the saved world. On
-SwiftShader (2026-11-19) it passed: 170 → 195 colours, 2 digs. The dig is the
-flaky part in proxy mode, because the internal server starves (see "Frame-time
-baseline"); a control run with no context loss also once saw no dig.
+SwiftShader (2026-11-19, proxy mode) it passed: 170 → 195 colours, 2 digs.
+The dig is the flaky part in proxy mode, because the internal server starves
+(see "Frame-time baseline"); a control run with no context loss also once saw
+no dig. Both scenarios now run in offscreen mode too, where the engine
+replaces the context. On SwiftShader (2026-11-26, after the OPFS change):
+offscreen 121 → 139 colours, 3 digs; proxy 136 → 153 colours, 7 digs; no
+stale-object warnings in either; `--scenario lose` with `?glrestore=fail`
+keeps the overlay and its reload button in both. One proxy run of five
+logged 159 stale-object warnings before the rebuild, then recovered: the
+check at the start of a frame cannot see a restore that lands while that
+frame's GL calls are still queued on the main thread, so the rest of the
+frame runs with dead objects. Proxy frames are faster since OPFS, which
+leaves this window open more often. Closing it means not issuing GL calls at
+all while the context is lost (skipping the frame), not checking more
+often. Offscreen mode cannot hit it: the engine replaces the context itself,
+between frames. The dig step used to turn the view down with the first
+mouse movement after pointer lock, which the engine drops
+(`Game::updateCameraDirection` skips the first movement after the window
+becomes active), so it could stay looking at the horizon; it now turns once
+before digging, as `test_first_playable.py`'s placing step does.
 
 ### Render thread
 
@@ -1475,6 +1492,24 @@ and rebuilds in place, as proxy mode does after a restore (see "Context
 restore").
 `Module.luantiLauncher.debugLoseContext()` triggers a loss in either mode.
 
+Memory: in Chrome, offscreen mode grows by about one frame (width x height x
+4 bytes) for every frame presented, and the memory is not returned while the
+engine runs: 25-50 MB/s on SwiftShader at 960x540 to 1280x720, 13.5 GB and an
+out-of-memory kill after about four and a half minutes in this container.
+Proxy mode stays flat. A minimal page reproduces it without Luanti
+(2026-11-26): a worker that renders into its own `OffscreenCanvas` and posts
+`transferToImageBitmap()` results to the page grows by the same amount per
+frame if the worker never returns to its event loop, and stays flat if it
+does, or if it closes the bitmaps itself instead of posting them. Chrome
+releases a frame consumed on another thread with a task on the thread that
+produced it, and the engine worker never runs tasks. Closing the bitmap on
+the page (`drawImage` and `close()` instead of `bitmaprenderer`) does not
+help. Whether a real GPU behaves the same has not been measured, but nothing
+in the mechanism is specific to SwiftShader. Until the hand-off no longer
+needs the worker's event loop (for example, a copy through shared memory, or
+a worker that yields, which needs JSPI or ASYNCIFY), offscreen mode cannot be
+the default, whatever its frame times.
+
 Per-frame main-thread queries are gone in both modes: canvas layout,
 visibility and pointer-lock state are published into shared memory by
 main-thread listeners (`installBrowserPageState()`), instead of synchronous
@@ -1502,6 +1537,23 @@ Ranges are over two to four runs, all with post-processing off. The
 2026-11-26 rows ran on a 4-core container, so compare their server column,
 not their frame times, with the 8-core rows; the IDBFS row's higher fps is
 the stalled scene (a third fewer draw calls), not a faster renderer.
+
+Post-processing cost, same path, after the depth-clear fix (see "Render
+thread"), single runs on the same 4-core container, SwiftShader, SQLite on
+OPFS:
+
+| Render path | `enable_post_processing` | fps | frame p50 / p95 / p99 ms | present p95 ms | server steps/s |
+|-------------|--------------------------|-----|--------------------------|----------------|----------------|
+| proxy | false | 5.5 | 185 / 243 / 287 | 41 | 48.7 |
+| proxy | true | 5.2 | 198 / 253 / 287 | 102 | 47.6 |
+| offscreen | false | 7.1 | 143 / 179 / 202 | 144 | 50.6 |
+| offscreen | true | 6.6 | 152 / 192 / 224 | 156 | 50.6 |
+
+About 6-7 % at the median in either mode here; an earlier pair on `dummy`
+map I/O measured 4 % (offscreen) and 22 % (proxy), so read these as noisy.
+On SwiftShader the extra full-screen passes are CPU work competing with
+everything else; a real GPU should be cheaper, which is what decides the
+default.
 
 **Fixed 2026-11-26:** with the world databases on OPFS (see "World databases
 on OPFS"), the proxied server keeps 49-50 steps/s with SQLite, the range of
