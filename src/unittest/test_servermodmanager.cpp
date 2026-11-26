@@ -111,10 +111,12 @@ void TestServerModManager::testGetMods()
 	auto sm = makeManager(m_worlddir);
 	const auto &mods = sm.getMods();
 	// `ls ./games/devtest/mods | wc -l` + 1 (test mod)
-	UASSERTEQ(std::size_t, mods.size(), 35 + 1);
+	// The fork adds one devtest mod (web_media_probe), counted separately
+	// so the upstream number stays visible when it changes.
+	UASSERTEQ(std::size_t, mods.size(), 35 + 1 + 1);
 
 	// Ensure we found basenodes mod (part of devtest)
-	// and test_mod (for testing MINETEST_MOD_PATH).
+	// and test_mod (for testing LUANTI_MOD_PATH).
 	bool default_found = false;
 	bool test_mod_found = false;
 	for (const auto &m : mods) {

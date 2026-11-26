@@ -286,7 +286,7 @@ void ClientMediaDownloader::remoteHashSetReceived(
 
 	m_outstanding_hash_sets--;
 
-	if (fetch_result.succeeded) {
+	if (fetch_result.good()) {
 		try {
 			// Server sent a list of file hashes that are
 			// available on it, try to parse the list
@@ -343,7 +343,7 @@ void ClientMediaDownloader::remoteMediaReceived(
 
 	// If fetch succeeded, try to load media file
 
-	if (fetch_result.succeeded) {
+	if (fetch_result.good()) {
 		bool success = checkAndLoad(name, filestatus->sha1,
 				fetch_result.data, false, client);
 		if (success) {
@@ -460,7 +460,7 @@ void ClientMediaDownloader::startConventionalTransfers(Client *client)
 
 	if (m_uncached_received_count != m_uncached_count) {
 		// Some media files have not been received yet, use the
-		// conventional slow method (minetest protocol) to get them
+		// conventional slow method (luanti protocol) to get them
 		std::vector<std::string> file_requests;
 		for (auto &file : m_files) {
 			if (!file.second->received)
@@ -523,7 +523,7 @@ IClientMediaDownloader::IClientMediaDownloader():
 bool IClientMediaDownloader::tryLoadFromCache(const std::string &name,
 	const std::string &sha1, Client *client)
 {
-	std::ostringstream tmp_os(std::ios_base::binary);
+	my_ostringstream tmp_os;
 	bool found_in_cache = m_media_cache.load(hex_encode(sha1), tmp_os);
 
 	// If found in cache, try to load it from there
@@ -716,7 +716,7 @@ void SingleMediaDownloader::remoteMediaReceived(
 	sanity_check(m_current_remote >= 0);
 
 	// If fetch succeeded, try to load it
-	if (fetch_result.succeeded) {
+	if (fetch_result.good()) {
 		bool success = checkAndLoad(m_file_name, m_file_sha1,
 				fetch_result.data, false, client);
 		if (success) {

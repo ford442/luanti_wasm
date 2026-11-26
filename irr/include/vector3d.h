@@ -9,6 +9,7 @@
 #include <functional>
 #include <array>
 #include <cassert>
+#include <optional>
 
 namespace core
 {
@@ -199,7 +200,7 @@ public:
 	std::array<T, 3> toArray() const { return {X, Y, Z}; }
 
 	//! Get length of the vector.
-	T getLength() const { return core::squareroot(X * X + Y * Y + Z * Z); }
+	T getLength() const { return core::squareroot(getLengthSQ()); }
 
 	//! Get squared length of the vector.
 	/** This is useful because it is much faster than getLength().
@@ -227,7 +228,8 @@ public:
 	}
 
 	//! Calculates the cross product with another vector.
-	/** \param p Vector to multiply with.
+	/** \note cross product of +X and +Y is +Z, not -Z.
+	\param p Vector to multiply with.
 	\return Cross product of this vector with p. */
 	vector3d<T> crossProduct(const vector3d<T> &p) const
 	{
@@ -263,6 +265,13 @@ public:
 		return *this;
 	}
 
+	//! Whether the vector is normalized.
+	//! @note can be false even after normalize() due to a zero length or significant arithmetic errors.
+	inline bool is_normalized(T tol = 1e-4) const
+	{
+		return std::abs(getLength() - 1) < tol;
+	}
+
 	//! Sets the length of the vector to a new value
 	vector3d<T> &setLength(T newlength)
 	{
@@ -292,7 +301,7 @@ public:
 		f64 sn = sin(degrees);
 		X -= center.X;
 		Z -= center.Z;
-		set((T)(X * cs - Z * sn), Y, (T)(X * sn + Z * cs));
+		set(rounding_cast<T>(X * cs - Z * sn), Y, rounding_cast<T>(X * sn + Z * cs));
 		X += center.X;
 		Z += center.Z;
 	}
@@ -307,7 +316,7 @@ public:
 		f64 sn = sin(degrees);
 		X -= center.X;
 		Y -= center.Y;
-		set((T)(X * cs - Y * sn), (T)(X * sn + Y * cs), Z);
+		set(rounding_cast<T>(X * cs - Y * sn), rounding_cast<T>(X * sn + Y * cs), Z);
 		X += center.X;
 		Y += center.Y;
 	}
@@ -322,7 +331,7 @@ public:
 		f64 sn = sin(degrees);
 		Z -= center.Z;
 		Y -= center.Y;
-		set(X, (T)(Y * cs - Z * sn), (T)(Y * sn + Z * cs));
+		set(X, rounding_cast<T>(Y * cs - Z * sn), rounding_cast<T>(Y * sn + Z * cs));
 		Z += center.Z;
 		Y += center.Y;
 	}

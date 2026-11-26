@@ -9,22 +9,16 @@
 #include "matrix4.h"
 #include "vector3d.h"
 
-// NOTE: You *only* need this when updating an application from Irrlicht before 1.8 to Irrlicht 1.8 or later.
-// Between Irrlicht 1.7 and Irrlicht 1.8 the quaternion-matrix conversions changed.
-// Before the fix they had mixed left- and right-handed rotations.
-// To test if your code was affected by the change enable IRR_TEST_BROKEN_QUATERNION_USE and try to compile your application.
-// This defines removes those functions so you get compile errors anywhere you use them in your code.
-// For every line with a compile-errors you have to change the corresponding lines like that:
-// - When you pass the matrix to the quaternion constructor then replace the matrix by the transposed matrix.
-// - For uses of getMatrix() you have to use quaternion::getMatrix_transposed instead.
-// #define IRR_TEST_BROKEN_QUATERNION_USE
+#include <cmath>
+#include <algorithm>
 
 namespace core
 {
 
 //! Quaternion class for representing rotations.
-/** It provides cheap combinations and avoids gimbal locks.
-Also useful for interpolations. */
+/** It provides cheap composition and avoids gimbal locks.
+Also useful for interpolations.
+See https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation. */
 class quaternion
 {
 public:
@@ -36,16 +30,31 @@ public:
 	constexpr quaternion(f32 x, f32 y, f32 z, f32 w) :
 			X(x), Y(y), Z(z), W(w) {}
 
-	//! Constructor which converts Euler angles (radians) to a quaternion
-	quaternion(f32 x, f32 y, f32 z);
-
-	//! Constructor which converts Euler angles (radians) to a quaternion
-	quaternion(const vector3df &vec);
-
-#ifndef IRR_TEST_BROKEN_QUATERNION_USE
 	//! Constructor which converts a matrix to a quaternion
 	quaternion(const matrix4 &mat);
-#endif
+
+	//! Constructor which converts Euler angles to a quaternion.
+	//! @note Euler angles are in radians, left-handed, X-Y-Z rotation order.
+	static quaternion eulerXYZ(f32 pitch, f32 yaw, f32 roll);
+
+	// TODO get rid of this, introduce proper EulerAngles struct(s).
+	static quaternion eulerXYZ(vector3df v)
+	{ return eulerXYZ(v.X, v.Y, v.Z); }
+
+	//! Constructor which converts Euler angles to a quaternion.
+	//! @note Euler angles are in radians, left-handed, Z-X-Y rotation order.
+	static quaternion eulerZXY(f32 pitch, f32 yaw, f32 roll)
+	{
+		const auto z = quaternion::eulerXYZ(0, 0, roll);
+		const auto xy = quaternion::eulerXYZ(pitch, yaw, 0);
+		return z * xy;
+	}
+
+	//! Constructor which maps dir_from to dir_to by rotating
+	//! in the plane spanned by the two vectors, along a shortest path.
+	//! @note if the vectors lie in a common line, any plane containing the line may be chosen.
+	static quaternion mapsTo(
+		const vector3df &dir_from, const vector3df &dir_to);
 
 	//! Equality operator
 	constexpr bool operator==(const quaternion &other) const
@@ -62,41 +71,55 @@ public:
 		return !(*this == other);
 	}
 
-#ifndef IRR_TEST_BROKEN_QUATERNION_USE
 	//! Matrix assignment operator
 	inline quaternion &operator=(const matrix4 &other);
-#endif
 
-	//! Add operator
+	//! Component-wise addition
 	quaternion operator+(const quaternion &other) const;
 
-	//! Multiplication operator
-	//! Be careful, unfortunately the operator order here is opposite of that in CMatrix4::operator*
+	//! Component-wise subtraction
+	quaternion operator-(const quaternion &other) const;
+
+	//! Quaternion multiplication (composition of rotations).
+	//! @note The returned quaternion applies `this` first, `other` second.
+	//!       That is, if `p` and `q` are quaternions and `v` is a vector,
+	//!       `p * (q * v)` equals `(q * p) * v` and *not* `(p * q) * v`.
 	quaternion operator*(const quaternion &other) const;
 
-	//! Multiplication operator with scalar
+	//! Quaternion multiplication (composition of rotations).
+	//! @note *Not* equivalent to `a = a * b`, but rather to `a = b * a`.
+	quaternion &operator*=(const quaternion &other);
+
+	//! Multiplication with scalar
 	quaternion operator*(f32 s) const;
 
-	//! Multiplication operator with scalar
+	//! Multiplication with scalar
 	quaternion &operator*=(f32 s);
 
-	//! Multiplication operator
+	//! Quaternion-vector multiplication (application of a rotation).
 	vector3df operator*(const vector3df &v) const;
-
-	//! Multiplication operator
-	quaternion &operator*=(const quaternion &other);
 
 	//! Calculates the dot product
 	inline f32 dotProduct(const quaternion &other) const;
 
+	//! Euclidean norm of the 4d vector
+	inline f32 norm() const
+	{
+		return sqrtf(dotProduct(*this));
+	}
+
+	//! Calculates the (unsigned) angle between two normalized quaternions
+	inline f32 angleTo(const quaternion &other) const
+	{
+		// Kahan's method
+		const f32 a = (*this - other).norm();
+		const f32 b = (*this + other).norm();
+		// Take the smaller of the two possible angles (unsigned angle)
+		return 4.0f * atan2f(std::min(a, b), std::max(a, b));
+	}
+
 	//! Sets new quaternion
 	inline quaternion &set(f32 x, f32 y, f32 z, f32 w);
-
-	//! Sets new quaternion based on Euler angles (radians)
-	inline quaternion &set(f32 x, f32 y, f32 z);
-
-	//! Sets new quaternion based on Euler angles (radians)
-	inline quaternion &set(const core::vector3df &vec);
 
 	//! Sets new quaternion from other quaternion
 	inline quaternion &set(const core::quaternion &quat);
@@ -106,12 +129,19 @@ public:
 			const f32 tolerance = ROUNDING_ERROR_f32) const;
 
 	//! Normalizes the quaternion
+	//! @note quaternion must not be zero
 	inline quaternion &normalize();
 
-#ifndef IRR_TEST_BROKEN_QUATERNION_USE
+	//! Whether the quaternion is normalized.
+	//! @note can be false even after normalize() due to a zero length or significant arithmetic errors.
+	inline bool is_normalized(f32 tol = 1e-4) const
+	{
+		return std::abs(norm() - 1.0f) < tol;
+	}
+
 	//! Creates a matrix from this quaternion
 	matrix4 getMatrix() const;
-#endif
+
 	//! Faster method to create a rotation matrix, you should normalize the quaternion before!
 	void getMatrixFast(matrix4 &dest) const;
 
@@ -123,7 +153,7 @@ public:
 		Rotate about a center point
 		shortcut for
 		core::quaternion q;
-		q.rotationFromTo ( vin[i].Normal, forward );
+		q.mapsTo ( vin[i].Normal, forward );
 		q.getMatrixCenter ( lookat, center, newPos );
 
 		core::matrix4 m2;
@@ -191,14 +221,12 @@ public:
 	//! Fills an angle (radians) around an axis (unit vector)
 	void toAngleAxis(f32 &angle, core::vector3df &axis) const;
 
-	//! Output this quaternion to an Euler angle (radians)
-	void toEuler(vector3df &euler) const;
+	//! Output this quaternion to an Euler angle.
+	//! X-Y-Z rotation order, left-handed, radians.
+	void toEulerXYZ(vector3df &euler) const;
 
 	//! Set quaternion to identity
 	quaternion &makeIdentity();
-
-	//! Set quaternion to represent a rotation from one vector to another.
-	quaternion &rotationFromTo(const vector3df &from, const vector3df &to);
 
 	//! Quaternion elements.
 	f32 X; // vectorial (imaginary) part
@@ -208,32 +236,49 @@ public:
 };
 
 // Constructor which converts Euler angles to a quaternion
-inline quaternion::quaternion(f32 x, f32 y, f32 z)
+inline quaternion quaternion::eulerXYZ(f32 pitch, f32 yaw, f32 roll)
 {
-	set(x, y, z);
+	f64 angle;
+
+	angle = pitch * 0.5;
+	const f64 sr = sin(angle);
+	const f64 cr = cos(angle);
+
+	angle = yaw * 0.5;
+	const f64 sp = sin(angle);
+	const f64 cp = cos(angle);
+
+	angle = roll * 0.5;
+	const f64 sy = sin(angle);
+	const f64 cy = cos(angle);
+
+	const f64 cpcy = cp * cy;
+	const f64 spcy = sp * cy;
+	const f64 cpsy = cp * sy;
+	const f64 spsy = sp * sy;
+
+	return quaternion(
+		(f32)(sr * cpcy - cr * spsy),
+		(f32)(cr * spcy + sr * cpsy),
+		(f32)(cr * cpsy - sr * spcy),
+		(f32)(cr * cpcy + sr * spsy)
+	).normalize();
 }
 
-// Constructor which converts Euler angles to a quaternion
-inline quaternion::quaternion(const vector3df &vec)
-{
-	set(vec.X, vec.Y, vec.Z);
-}
-
-#ifndef IRR_TEST_BROKEN_QUATERNION_USE
 // Constructor which converts a matrix to a quaternion
 inline quaternion::quaternion(const matrix4 &mat)
 {
 	(*this) = mat;
 }
-#endif
 
-#ifndef IRR_TEST_BROKEN_QUATERNION_USE
 // matrix assignment operator
 inline quaternion &quaternion::operator=(const matrix4 &m)
 {
-	const f32 diag = m[0] + m[5] + m[10] + 1;
+	// Refer to getMatrixFast(), which this is the inverse of, for what m[i] resolves to.
+	const f32 diag = m[0] + m[5] + m[10] + 1; // = 4(1 - x^2 - y^2 - z^2) = 4w^2
 
-	if (diag > 0.0f) {
+	// Solve for a large (c^2 >= 1/4) component c of x, y, z, w.
+	if (diag > 1.0f) { // w^2 > 1/4
 		const f32 scale = sqrtf(diag) * 2.0f; // get scale from diagonal
 
 		// TODO: speed this up
@@ -241,10 +286,10 @@ inline quaternion &quaternion::operator=(const matrix4 &m)
 		Y = (m[8] - m[2]) / scale;
 		Z = (m[1] - m[4]) / scale;
 		W = 0.25f * scale;
-	} else {
+	} else { // w^2 <= 1/4 => x^2 + y^2 + z^2 >= 3/4 => max{x^2, y^2, z^2} >= 1/4
 		if (m[0] > m[5] && m[0] > m[10]) {
 			// 1st element of diag is greatest value
-			// find scale according to 1st element, and double it
+			// => x is greatest component
 			const f32 scale = sqrtf(1.0f + m[0] - m[5] - m[10]) * 2.0f;
 
 			// TODO: speed this up
@@ -254,7 +299,7 @@ inline quaternion &quaternion::operator=(const matrix4 &m)
 			W = (m[6] - m[9]) / scale;
 		} else if (m[5] > m[10]) {
 			// 2nd element of diag is greatest value
-			// find scale according to 2nd element, and double it
+			// => y is greatest component
 			const f32 scale = sqrtf(1.0f + m[5] - m[0] - m[10]) * 2.0f;
 
 			// TODO: speed this up
@@ -264,7 +309,7 @@ inline quaternion &quaternion::operator=(const matrix4 &m)
 			W = (m[8] - m[2]) / scale;
 		} else {
 			// 3rd element of diag is greatest value
-			// find scale according to 3rd element, and double it
+			// => z is greatest component
 			const f32 scale = sqrtf(1.0f + m[10] - m[0] - m[5]) * 2.0f;
 
 			// TODO: speed this up
@@ -278,11 +323,35 @@ inline quaternion &quaternion::operator=(const matrix4 &m)
 	normalize();
 	return *this;
 }
-#endif
 
-// multiplication operator
+inline quaternion quaternion::mapsTo(
+		const vector3df &dir_from, const vector3df &dir_to)
+{
+	vector3df axis = dir_from.crossProduct(dir_to);
+	f32 dot = dir_from.dotProduct(dir_to);
+	f32 angle = 0;
+	if (axis.getLength() < ROUNDING_ERROR_f32 * (dir_from.getLength() * dir_to.getLength())) { // dirs are (almost) parallel
+		// Choose any nonzero orthogonal vector as axis.
+		const vector3df &v = dir_from;
+		axis = std::abs(v.X) > std::abs(v.Y)
+				? vector3df(-v.Y, v.X, 0)
+				: vector3df(0, -v.Z, v.Y);
+		angle = dot < 0 ? PI : 0; // opposite or same direction?
+	} else {
+		// Don't just do an acos of the dot product for numerical stability.
+		// See https://www.jwwalker.com/pages/angle-between-vectors.html
+		angle = atan2(axis.getLength(), dot);
+	}
+	quaternion q;
+	axis.normalize();
+	q.fromAngleAxis(angle, axis);
+	return q;
+}
+
 inline quaternion quaternion::operator*(const quaternion &other) const
 {
+	// TODO swap `this` and `other` for consistency with matrix multiplications and the rest of mathematics.
+
 	quaternion tmp;
 
 	tmp.W = (other.W * W) - (other.X * X) - (other.Y * Y) - (other.Z * Z);
@@ -309,19 +378,21 @@ inline quaternion &quaternion::operator*=(f32 s)
 	return *this;
 }
 
-// multiplication operator
 inline quaternion &quaternion::operator*=(const quaternion &other)
 {
 	return (*this = other * (*this));
 }
 
-// add operator
 inline quaternion quaternion::operator+(const quaternion &b) const
 {
 	return quaternion(X + b.X, Y + b.Y, Z + b.Z, W + b.W);
 }
 
-#ifndef IRR_TEST_BROKEN_QUATERNION_USE
+inline quaternion quaternion::operator-(const quaternion &b) const
+{
+	return quaternion(X - b.X, Y - b.Y, Z - b.Z, W - b.W);
+}
+
 // Creates a matrix from this quaternion
 inline matrix4 quaternion::getMatrix() const
 {
@@ -329,7 +400,6 @@ inline matrix4 quaternion::getMatrix() const
 	getMatrix(m);
 	return m;
 }
-#endif
 
 //! Faster method to create a rotation matrix, you should normalize the quaternion before!
 inline void quaternion::getMatrixFast(matrix4 &dest) const
@@ -400,7 +470,7 @@ inline void quaternion::getMatrix(matrix4 &dest,
 	Rotate about a center point
 	shortcut for
 	core::quaternion q;
-	q.rotationFromTo(vin[i].Normal, forward);
+	q.mapsTo(vin[i].Normal, forward);
 	q.getMatrix(lookat, center);
 
 	core::matrix4 m2;
@@ -484,42 +554,6 @@ inline quaternion &quaternion::set(f32 x, f32 y, f32 z, f32 w)
 	Z = z;
 	W = w;
 	return *this;
-}
-
-// sets new quaternion based on Euler angles
-inline quaternion &quaternion::set(f32 x, f32 y, f32 z)
-{
-	f64 angle;
-
-	angle = x * 0.5;
-	const f64 sr = sin(angle);
-	const f64 cr = cos(angle);
-
-	angle = y * 0.5;
-	const f64 sp = sin(angle);
-	const f64 cp = cos(angle);
-
-	angle = z * 0.5;
-	const f64 sy = sin(angle);
-	const f64 cy = cos(angle);
-
-	const f64 cpcy = cp * cy;
-	const f64 spcy = sp * cy;
-	const f64 cpsy = cp * sy;
-	const f64 spsy = sp * sy;
-
-	X = (f32)(sr * cpcy - cr * spsy);
-	Y = (f32)(cr * spcy + sr * cpsy);
-	Z = (f32)(cr * cpsy - sr * spcy);
-	W = (f32)(cr * cpcy + sr * spsy);
-
-	return normalize();
-}
-
-// sets new quaternion based on Euler angles
-inline quaternion &quaternion::set(const core::vector3df &vec)
-{
-	return set(vec.X, vec.Y, vec.Z);
 }
 
 // sets new quaternion based on other quaternion
@@ -616,7 +650,7 @@ inline void quaternion::toAngleAxis(f32 &angle, core::vector3df &axis) const
 	}
 }
 
-inline void quaternion::toEuler(vector3df &euler) const
+inline void quaternion::toEulerXYZ(vector3df &euler) const
 {
 	const f64 sqw = W * W;
 	const f64 sqx = X * X;
@@ -670,35 +704,6 @@ inline core::quaternion &quaternion::makeIdentity()
 	Y = 0.f;
 	Z = 0.f;
 	return *this;
-}
-
-inline core::quaternion &quaternion::rotationFromTo(const vector3df &from, const vector3df &to)
-{
-	// Based on Stan Melax's article in Game Programming Gems
-	// Optimized by Robert Eisele: https://raw.org/proof/quaternion-from-two-vectors
-
-	// Copy, since cannot modify local
-	vector3df v0 = from;
-	vector3df v1 = to;
-	v0.normalize();
-	v1.normalize();
-
-	const f32 d = v0.dotProduct(v1);
-	if (d >= 1.0f) { // If dot == 1, vectors are the same
-		return makeIdentity();
-	} else if (d <= -1.0f) { // exactly opposite
-		core::vector3df axis(1.0f, 0.f, 0.f);
-		axis = axis.crossProduct(v0);
-		if (axis.getLength() == 0) {
-			axis.set(0.f, 1.f, 0.f);
-			axis = axis.crossProduct(v0);
-		}
-		// same as fromAngleAxis(core::PI, axis).normalize();
-		return set(axis.X, axis.Y, axis.Z, 0).normalize();
-	}
-
-	const vector3df c = v0.crossProduct(v1);
-	return set(c.X, c.Y, c.Z, 1 + d).normalize();
 }
 
 } // end namespace core

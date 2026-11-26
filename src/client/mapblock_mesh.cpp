@@ -45,8 +45,9 @@ void MeshMakeData::fillBlockDataBegin(const v3s16 &blockpos)
 
 	m_vmanip.clear();
 	// extra 1 block thick layer around the mesh
-	VoxelArea voxel_area(blockpos_nodes - v3s16(1,1,1) * MAP_BLOCKSIZE,
-			blockpos_nodes + v3s16(1,1,1) * (m_side_length + MAP_BLOCKSIZE) - v3s16(1,1,1));
+	static_assert(MAP_BLOCKSIZE >= MapblockMeshGenerator::DATA_MARGIN);
+	VoxelArea voxel_area(blockpos_nodes - MAP_BLOCKSIZE,
+			blockpos_nodes + (m_side_length + MAP_BLOCKSIZE - 1));
 	m_vmanip.addArea(voxel_area);
 }
 
@@ -55,8 +56,8 @@ void MeshMakeData::fillSingleNode(MapNode data, MapNode padding)
 	m_blockpos = {0, 0, 0};
 
 	m_vmanip.clear();
-	// area around 0,0,0 so that this positon has neighbors
-	const s16 sz = 3;
+	// area around 0,0,0 so that this position has neighbors
+	const s16 sz = MapblockMeshGenerator::DATA_MARGIN;
 	m_vmanip.addArea({v3s16(-sz), v3s16(sz)});
 
 	u32 count = m_vmanip.m_area.getVolume();
@@ -236,7 +237,7 @@ void getNodeTile(MapNode mn, const v3s16 &p, const v3s16 &dir, MeshMakeData *dat
 		   {{0,R0},  {4,R2}, {1,R1}, {2,R2},  {0,R0},  {3,R2}, {0,R3}, {5,R2}}
 	};
 	getNodeTileN(mn, p, dir_to_tile[facedir][dir_i].tile, data, tile);
-	tile.rotation = tile.world_aligned ? TileRotation::None : dir_to_tile[facedir][dir_i].rotation;
+	tile.rotation = dir_to_tile[facedir][dir_i].rotation;
 }
 
 /*
@@ -514,7 +515,7 @@ MapBlockMesh::MapBlockMesh(Client *client, MeshMakeData *data):
 			// Generate animation data
 			if (p.layer.material_flags & MATERIAL_FLAG_ANIMATION) {
 				// Add to MapBlockMesh in order to animate these tiles
-				m_animation_info.emplace(std::make_pair(layer, i), AnimationInfo(p.layer));
+				m_animation_info.emplace_back(std::make_pair(layer, i), AnimationInfo(p.layer));
 			}
 
 			// Create material

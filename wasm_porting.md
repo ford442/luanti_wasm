@@ -72,6 +72,36 @@ the authority on flags.
 - Some CI steps are non-gating until they have run green there: the WebGL context tests in both render modes, the frame-time benchmark and the allocator trial. The other numbers under "Appendix: Flag Matrix" were measured locally on Emscripten 3.1.61, not on the pinned 6.0.3.
 - Performance follow-ups are listed under "Not yet done".
 
+### Upstream base
+
+`main` is the WASM client. The fork's `master` mirrors
+`luanti-org/luanti` `master` and is never a pull request base. Upstream syncs
+are merges (not rebases) of `upstream/master` into a branch off `main`.
+
+- **Current merge-base:** `3c632c0b6` ("Set mapblock meshgen margin to 1",
+  2026-11-25). `git merge-base main upstream/master` prints it until the next
+  sync. `git rev-list --count upstream/master..main` counts only the fork's
+  own commits.
+- **Previous merge-base:** `0e1414682` ("Fix high resolution hotbar
+  scrolling", 2026-10-14). The 2026-11 sync brought in 142 upstream commits.
+- **Conflicts in the 2026-11 sync**, for the next one:
+  - `src/client/client.cpp`: upstream calls `updateStaticLighting()` before
+    it takes mesh results. The Emscripten app-thread meshing
+    (`wasm_mesh_app_thread_items`) runs after that call, so its meshes use the
+    new light curve.
+  - `src/network/clientpackethandler.cpp`: upstream ACKs a block when it
+    arrives, not when it is meshed. `addUpdateMeshTaskWithEdge()` lost its
+    `ack_to_server` argument. Passing the old `true` now sets `urgent`
+    instead.
+  - `src/client/game.cpp`: upstream sets the light curve in
+    `Client::updateStaticLighting()` (#16697). The old `set_light_curve()`
+    call before the game loop is gone, because it would overwrite a curve the
+    server sent.
+  - `src/client/mesh_generator_thread.cpp` (no textual conflict):
+    `QueuedMeshUpdate::ack_list` became `epoch`, so the fork's
+    `processOneUnlocked()` copies `epoch` the same way
+    `MeshUpdateWorkerThread::doUpdate()` does.
+
 ---
 
 ## High-Level Architecture

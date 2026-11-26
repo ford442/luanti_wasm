@@ -87,10 +87,11 @@ public class UnzipService extends IntentService {
 			}
 
 			unzip(notificationBuilder, zipFile, userDataDirectory);
+			sendResult(true);
 		} catch (IOException e) {
 			Log.w("UnzipService", null, e);
-			isSuccess = false;
 			failureMessage = e.getLocalizedMessage();
+			sendResult(false);
 		} finally {
 			setIsRunning(false);
 			zipFile.delete();
@@ -143,6 +144,7 @@ public class UnzipService extends IntentService {
 
 		int readLen;
 		byte[] readBuffer = new byte[16384];
+		int lastProgress = -1;
 		try (FileInputStream fileInputStream = new FileInputStream(zipFile);
 		     ZipInputStream zipInputStream = new ZipInputStream(fileInputStream)) {
 			ZipEntry ze;
@@ -152,7 +154,13 @@ public class UnzipService extends IntentService {
 					Utils.createDirs(userDataDirectory, ze.getName());
 					continue;
 				}
-				publishProgress(notificationBuilder, R.string.loading, 100 * ++per / size);
+				int progress = 100 * ++per / size;
+				// The system might throttle broadcasts so don't spam them,
+				// or the final completion broadcast might be missed.
+				if (progress != lastProgress) {
+					publishProgress(notificationBuilder, R.string.loading, progress);
+					lastProgress = progress;
+				}
 				File destFile = new File(userDataDirectory, ze.getName());
 				try (OutputStream outputStream = new FileOutputStream(destFile)) {
 					while ((readLen = zipInputStream.read(readBuffer)) != -1) {
@@ -163,6 +171,16 @@ public class UnzipService extends IntentService {
 		}
 
 		Log.i("UnzipService", "Done extracting");
+	}
+
+	private boolean resultSent = false;
+
+	private void sendResult(boolean success) {
+		if (resultSent)
+			return;
+		resultSent = true;
+		isSuccess = success;
+		publishProgress(null, R.string.loading, success ? SUCCESS : FAILURE);
 	}
 
 	private void publishProgress(@Nullable Notification.Builder notificationBuilder, @StringRes int message, int progress) {
@@ -189,6 +207,9 @@ public class UnzipService extends IntentService {
 	public void onDestroy() {
 		super.onDestroy();
 		mNotifyManager.cancel(MainActivity.NOTIFICATION_ID_UNZIP);
-		publishProgress(null, R.string.loading, isSuccess ? SUCCESS : FAILURE);
+		// Only sends anything if onHandleIntent() hasn't reported yet
+		// e.g. service destroyed mid-extraction. isSuccess then still holds
+		// the default and may not reflect the actual outcome.
+		sendResult(isSuccess);
 	}
 }

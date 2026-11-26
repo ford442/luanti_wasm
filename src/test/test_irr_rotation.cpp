@@ -5,6 +5,7 @@
 #include "catch_amalgamated.hpp"
 #include "irrMath.h"
 #include "matrix4.h"
+#include "irr_v2d.h"
 #include "irr_v3d.h"
 #include "quaternion.h"
 #include <functional>
@@ -65,7 +66,7 @@ SECTION("euler-to-quaternion conversion") {
 	test_euler_angles_rad([](v3f rad) {
 		core::matrix4 rot, rot_quat;
 		rot.setRotationRadians(rad);
-		quaternion q(rad);
+		const auto q = core::quaternion::eulerXYZ(rad);
 		q.getMatrix(rot_quat);
 		// Check equivalence of the rotations via matrices
 		CHECK(matrix_equals(rot, rot_quat));
@@ -76,9 +77,9 @@ SECTION("euler-to-quaternion conversion") {
 // this essentially primarily tests the quaternion to euler conversion
 SECTION("quaternion-euler roundtrip") {
 	test_euler_angles_rad([](v3f rad) {
-		quaternion q(rad);
+		const auto q = core::quaternion::eulerXYZ(rad);
 		v3f rad2;
-		q.toEuler(rad2);
+		q.toEulerXYZ(rad2);
 		CHECK(euler_angles_equiv(rad, rad2));
 	});
 }
@@ -104,4 +105,77 @@ SECTION("matrix-euler roundtrip") {
 	});
 }
 
+// These euler angles all produce rotations close to 180 degrees, whose matrix
+// trace is near -1. Converting such a matrix back to a quaternion used to take a
+// numerically unstable branch (dividing by a scale close to zero) that,
+// depending on rounding, could return a badly wrong rotation.
+SECTION("matrix-quaternion roundtrip near 180 degrees") {
+	const v3f near_half_turn[] = {
+		{core::PI, 0.0f, 0.0f}, // exactly 180 degrees about X
+		{2.82365f, 1.59297f, 5.97210f},
+		{2.50468f, 3.80537f, 0.22627f},
+		{6.12445f, 3.48952f, 3.99157f},
+		{3.63448f, 4.57395f, 5.85211f},
+		{3.28258f, 4.72149f, 6.14091f},
+	};
+	for (v3f rad : near_half_turn) {
+		matrix4 mat;
+		mat.setRotationRadians(rad);
+		quaternion q(mat);
+		matrix4 mat2 = q.getMatrix();
+		CHECK(matrix_equals(mat, mat2));
+	}
+}
+
+}
+
+TEST_CASE("integer vectors are rotated with rounding instead of truncation", "[irr]")
+{
+	// Rotating integer vectors must not rely on sin()/cos() returning exactly
+	// 1 or 0 at multiples of 90 degrees: a result just below 1 would truncate
+	// to 0. Use 45 degrees, where truncation and rounding differ for sure.
+	SECTION("vector3d")
+	{
+		v3s16 v(1, 0, 0);
+		v.rotateXZBy(45);
+		CHECK(v == v3s16(1, 0, 1));
+		v = v3s16(-1, 0, 0);
+		v.rotateXZBy(45);
+		CHECK(v == v3s16(-1, 0, -1));
+
+		v = v3s16(1, 0, 0);
+		v.rotateXYBy(45);
+		CHECK(v == v3s16(1, 1, 0));
+
+		v = v3s16(0, 1, 0);
+		v.rotateYZBy(45);
+		CHECK(v == v3s16(0, 1, 1));
+
+		for (int deg = -360; deg <= 360; deg += 90) {
+			v = v3s16(3, 5, 7);
+			v.rotateYZBy(deg);
+			CHECK(v.getLengthSQ() == 9 + 25 + 49);
+			CHECK(v.X == 3);
+
+			v = v3s16(3, 5, 7);
+			v.rotateXZBy(deg);
+			CHECK(v.getLengthSQ() == 9 + 25 + 49);
+			CHECK(v.Y == 5);
+
+			v = v3s16(3, 5, 7);
+			v.rotateXYBy(deg);
+			CHECK(v.getLengthSQ() == 9 + 25 + 49);
+			CHECK(v.Z == 7);
+		}
+	}
+
+	SECTION("vector2d")
+	{
+		v2s32 v(1, 0);
+		v.rotateBy(45);
+		CHECK(v == v2s32(1, 1));
+		v = v2s32(-1, 0);
+		v.rotateBy(45);
+		CHECK(v == v2s32(-1, -1));
+	}
 }
