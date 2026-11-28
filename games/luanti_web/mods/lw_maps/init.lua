@@ -1468,6 +1468,23 @@ lw_maps.register({
 	},
 })
 
+lw_maps.register({
+	id = "cliff_rim",
+	title = "Cliff Rim Overlook",
+	blurb = "A switchback cut into a basalt cliff, with glass balconies and " ..
+		"a final glass lip above the glowing chasm.",
+	size = {x = 32, y = 30, z = 32},
+	origin = {x = 153, y = BASE, z = -11},
+	spawn = {x = 153, y = BASE + 4, z = -7},
+	day_night_ratio = 0.35,
+	sky = lw_maps.sky({
+		sky = "#344658", horizon = "#bd704c",
+		night_sky = "#202c3c", night_horizon = "#713b32", indoors = "#302a30",
+		sun_tint = "#ffad70", moon_tint = "#8498b8",
+		fog = 64, fog_start = 0.3,
+	}),
+})
+
 --------------------------------------------------------------------------
 -- Per-player atmosphere
 --------------------------------------------------------------------------

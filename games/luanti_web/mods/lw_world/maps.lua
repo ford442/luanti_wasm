@@ -24,12 +24,13 @@
 --  (west-southwest)  (southwest)         rainbow storm
 --                                        (southeast)
 --
--- and five spurs off islands rather than the plaza, whose faces are full: the
+-- and spurs off islands rather than the plaza, whose faces are full: the
 -- laser serpent west of the smoke caldera, out of its basalt tube, the mirror
 -- hall east of the crystal bazaar, out of the end of its arcade, the
 -- waterfall cascade south of the snowy mountain, out of its tunnel's south
 -- mouth, the Christmas village east of the fruit garden, off the end of its
--- path, and the Weeks on Fire Christmas south of the laser serpent's field.
+-- path, the Weeks on Fire Christmas south of the laser serpent's field, and
+-- Cliff Rim Overlook east of the Christmas village.
 --
 -- Each map is one island with its own beach, in one sea, joined to the plaza
 -- by a paved causeway with a themed gate at the hub end. Fly is on for
@@ -367,6 +368,18 @@ function maps.causeways(api)
 				"festive anyway, lasers spiralling up it, a mirror colonnade, " ..
 				"and a cabaret stage set for a holiday revue. Punch the console " ..
 				"on the stage to change the beams.",
+		},
+		{
+			-- East from the Christmas village, beyond its snowfield.
+			map = "cliff_rim",
+			from = "christmas",
+			legs = {
+				{x0 = 145, z0 = -8, x1 = 152, z1 = -6},
+			},
+			gate = {x = 144, z = -7},
+			post = "lw_maps:basalt",
+			sign = "East: Cliff Rim Overlook. Climb the cliff's switchbacks " ..
+				"through rock and out onto glass above a glowing chasm.",
 		},
 	}
 end
