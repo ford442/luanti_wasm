@@ -3813,6 +3813,62 @@ def build_wof_christmas() -> Build:
 
 
 # --------------------------------------------------------------------------
+# 17. Cliff Rim Overlook
+# --------------------------------------------------------------------------
+
+CLIFF_SIZE = (32, 30, 32)
+CLIFF_SPAWN = (0, FLOOR, 4)
+
+
+def build_cliff_rim() -> Build:
+	build = Build(*CLIFF_SIZE)
+	build.ground(BASALT, BASALT, BASALT)
+
+	# A vertical wall on the west, with a much lower chasm floor to its east.
+	build.box(0, FLOOR, 0, 15, 25, 31, BASALT)
+	for x in range(17, 31):
+		for z in range(2, 30):
+			if (x * 7 + z * 3) % 11 < 3:
+				build.set(x, SURFACE, z, LAVA)
+
+	# Rock overhangs briefly enclose each of the exposed runs.
+	for tier in (0, 2):
+		for z in range(10, 13):
+			y = SURFACE + tier * 5 + (z - 4) // 4
+			build.box(16, y + 1, z, 16, y + 4, z, BASALT)
+			build.box(13, y + 4, z, 15, y + 4, z, BASALT)
+
+	# The entrance tunnel leads to three switchbacks: the middle one is
+	# buried in the wall, the others run along its exposed face.
+	build.clear(0, FLOOR, 3, 15, FLOOR + 3, 5)
+	build.box(0, SURFACE, 3, 15, SURFACE, 5, PACKED_BASALT)
+	for tier, (x0, x1) in enumerate(((13, 15), (8, 10), (13, 15))):
+		for step in range(24):
+			z = 4 + step if tier != 1 else 27 - step
+			y = SURFACE + tier * 5 + step // 4
+			node = BRICK_STAIR if step and step % 4 == 0 else PACKED_BASALT
+			direction = SOUTH if tier == 1 else NORTH
+			build.box(x0, y, z, x1, y, z, node, direction if node == BRICK_STAIR else 0)
+			build.clear(x0, y + 1, z, x1, y + 3, z)
+		if tier < 2:
+			z = 27 if tier == 0 else 4
+			y = SURFACE + (tier + 1) * 5
+			build.box(8, y, z - 1, 15, y, z + 1, PACKED_BASALT)
+			build.clear(8, y + 1, z - 1, 15, y + 3, z + 1)
+
+	# Two small balconies and a larger final lip, all suspended over the
+	# chasm rather than backed by an opaque floor.
+	for z, y, end in ((16, 6, 21), (27, 8, 21), (4, 13, 21), (27, 18, 24)):
+		build.box(16, y, z - 1, end, y, z + 1, GLASS)
+		build.clear(16, y + 1, z - 1, end, y + 3, z + 1)
+		for x in range(17, end + 1, 2):
+			build.set(x, y + 1, z - 1, FENCE)
+			build.set(x, y + 1, z + 1, FENCE)
+		build.set(end, y + 1, z, FENCE)
+	return build
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -3859,6 +3915,7 @@ SPECS = [
 		build_waterfall_cascade),
 	MapSpec("map_christmas", XMAS_SIZE, XMAS_SPAWN, build_christmas),
 	MapSpec("map_wof_christmas", WOF_XMAS_SIZE, WOF_XMAS_SPAWN, build_wof_christmas),
+	MapSpec("map_cliff_rim", CLIFF_SIZE, CLIFF_SPAWN, build_cliff_rim),
 ]
 
 MAPS = {spec.name: spec.build for spec in SPECS}

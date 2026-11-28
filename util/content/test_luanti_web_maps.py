@@ -369,6 +369,7 @@ def christmas_landmarks() -> dict:
 		"on the frozen pond": (px, maps.FLOOR, pz),
 		"beside the sleigh": (s["x0"] + 2, maps.FLOOR, s["z1"] + 2),
 		"by the snowmen": (maps.XMAS_SNOWMEN[0][0] + 2, maps.FLOOR, maps.XMAS_SNOWMEN[0][1]),
+		"east edge, onto the cliff spur": (39, maps.FLOOR, 20),
 	}
 
 
@@ -392,6 +393,17 @@ def wof_christmas_landmarks() -> dict:
 	}
 
 
+def cliff_rim_landmarks() -> dict:
+	return {
+		"entrance": maps.CLIFF_SPAWN,
+		"first balcony": (19, 7, 16),
+		"lower switchback balcony": (19, 9, 27),
+		"tunnel in the cliff": (9, 11, 16),
+		"upper switchback balcony": (19, 14, 4),
+		"final glass lip": (22, 19, 27),
+	}
+
+
 # Every map in the pack, and what it has to deliver. A map the generator
 # builds but this table does not name fails test_every_map_has_landmarks: the
 # flood-fill is the acceptance test, so it is not optional for a new one.
@@ -412,6 +424,7 @@ LANDMARKS = {
 	"map_waterfall_cascade": lambda schem: cascade_landmarks(),
 	"map_christmas": lambda schem: christmas_landmarks(),
 	"map_wof_christmas": lambda schem: wof_christmas_landmarks(),
+	"map_cliff_rim": lambda schem: cliff_rim_landmarks(),
 }
 
 # Both arenas' trusses, for the checks that hold for either:
@@ -443,6 +456,22 @@ def test_reachability() -> None:
 				f"{name}: cannot walk from the spawn to the {label} at {cell} "
 				f"(node {world.at(*cell)!r}, floor "
 				f"{world.at(cell[0], cell[1] - 1, cell[2])!r})")
+
+
+def test_cliff_rim_overlooks() -> None:
+	world = World(maps.build_cliff_rim().to_schematic())
+	for x, y, z in ((19, 7, 16), (19, 9, 27), (19, 14, 4), (22, 19, 27)):
+		assert_true(world.at(x, y - 1, z) == maps.GLASS,
+			f"cliff overlook at {(x, y, z)} has no glass floor")
+		assert_true(all(not world.solid(x, below, z) for below in range(4, y - 1)),
+			f"cliff overlook at {(x, y, z)} is not suspended over the chasm")
+	assert_true(world.at(9, 14, 16) == maps.BASALT,
+		"the middle switchback should pass through the cliff")
+	for y in (5, 15):
+		assert_true(world.at(16, y, 10) == maps.BASALT,
+			"the outer switchbacks should pass through rock overhangs")
+		assert_true(world.at(16, y, 16) == maps.AIR,
+			"the outer switchbacks should re-emerge to a view")
 
 
 def test_snow_goes_through_the_mountain() -> None:

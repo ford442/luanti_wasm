@@ -49,7 +49,8 @@ QA sandbox and this game is not a replacement for it.
 
  Christmas: the Christmas village is a spur off the fruit garden, off the
  east end of its path; the Weeks on Fire Christmas is a spur off the laser
- serpent, off the south side of its field
+ serpent, off the south side of its field. Cliff Rim Overlook is a spur east
+ of the Christmas village
 ```
 
 The plaza is the hub. The showcase tour runs north from it; ten causeways
@@ -92,7 +93,9 @@ plaza's south-west corner), so none of them crosses the tour.
    a workshop cabin with a fire, a sleigh and reindeer, beyond the fruit
    garden; and, beyond the laser serpent, a Weeks on Fire Christmas where the
    tree is on fire and festive anyway, lasers spiral up it, and a cabaret
-   stage is set for a holiday revue. Walk a causeway or use `/maps`. Full
+   stage is set for a holiday revue. East of the village, Cliff Rim Overlook
+   climbs through basalt to glass balconies above a glowing chasm. Walk a
+   causeway or use `/maps`. Full
    footprints, spawns and intended time of day are in
    [`docs/maps.md`](docs/maps.md).
 

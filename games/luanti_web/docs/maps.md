@@ -6,7 +6,7 @@ Copyright (C) 2026 The Luanti Contributors
 
 # The themed maps
 
-Sixteen authored maps ship with the showcase pack, as islands around the hub
+Seventeen authored maps ship with the showcase pack, as islands around the hub
 plaza. They are design pieces, not procedural terrain: each one is a single
 committed schematic, compact enough for the WASM heap and short enough to walk
 in about three minutes.
@@ -40,7 +40,8 @@ concert arena, each is a spur off the island next to it. The waterfall
 cascade is a spur too, off the snow mountain: walk through the mountain's
 tunnel and keep going south. So are the two Christmas islands: the
 Christmas village off the far end of the fruit garden's path, and the Weeks
-on Fire Christmas off the south side of the laser serpent's field.
+on Fire Christmas off the south side of the laser serpent's field. Cliff Rim
+Overlook is a further spur east of the Christmas village.
 
 Every causeway is walkable. Fly, fast and noclip are on for everyone, but the
 tour never needs them.
@@ -65,6 +66,7 @@ tour never needs them.
 | Waterfall cascade | `waterfall_cascade` | `map_waterfall_cascade.mts` | 40 × 28 × 52 | `(-20, 5, -136)` | `(-1, 9, -85)` | soft twilight (`0.3`, misty lilac sky over a teal horizon, light fog at 72) |
 | Christmas village | `christmas` | `map_christmas.mts` | 40 × 24 × 40 | `(103, 5, -27)` | `(103, 9, -7)` | blue twilight (`0.24`, navy sky over a pale blue horizon, fog at 120, snow) |
 | Weeks on Fire Christmas | `wof_christmas` | `map_wof_christmas.mts` | 36 × 22 × 40 | `(-141, 5, -27)` | `(-123, 9, 12)` | night (`0.12`, magenta and red sky, light fog at 88, snow and embers) |
+| Cliff Rim Overlook | `cliff_rim` | `map_cliff_rim.mts` | 32 × 30 × 32 | `(153, 5, -11)` | `(153, 9, -7)` | golden storm light (`0.35`, cool sky, warm horizon and fog at 64) |
 
 Local `y = 0` of every map schematic is stamped at world `y = 5`
 (`lw_maps.base_y`), so local `y = 3` is the world's `GROUND` and local `y = 4`
@@ -785,6 +787,20 @@ The lasers run only while someone is on the island, as on the serpent's
 field. The two Christmas islands add fourteen nodes and no textures (see
 Nodes the pack adds). Neither one plays a song.
 
+### Cliff Rim Overlook
+
+East of the Christmas village, a basalt wall rises over a glowing chasm. The
+32 × 30 × 32 box is 30,720 cells.
+
+* Three ascending switchbacks follow the cliff: the middle run is cut into
+  the rock, and overhangs on the outer runs enclose the trail before it
+  re-emerges on the exposed face.
+* Four cantilevered glass balconies give views down into the chasm, including
+  the final glass lip at the top. Lava below provides a warm glow; it is the
+  same harmless lava used by the smoke caldera.
+* The per-player sky pairs a cool upper sky with a warm horizon and close fog.
+  Leave the island and the hub's sky and time return as on the other maps.
+
 ## Getting there
 
 * Walk. A causeway leaves the plaza for every map, each with a gate whose
@@ -821,8 +837,8 @@ Geometry is why: the maps are cones, ellipsoids and a helical ramp, and doing
 that arithmetic once at build time keeps it off the browser's application
 worker, where chunk generation competes with the compositor. `.mts` is the
 committed form because it keeps `param2` (a theater seat still faces the stage,
-a chase controller knows its place in the loop) and compresses all sixteen maps
-to about 32 KiB.
+a chase controller knows its place in the loop) and compresses all seventeen maps
+to about 33 KiB.
 
 Once they are stamped into a world, `/lw_schem place map_halloween` puts the
 committed file back over an existing world, the same as any other piece.
@@ -1040,6 +1056,8 @@ loader under Lua 5.1:
 | sixteen maps kept (with the two Christmas islands) | — | **168 KiB** |
 | Christmas village (38,400 cells) | — | 11 KiB |
 | Weeks on Fire Christmas (31,680 cells) | — | 11 KiB |
+| Cliff Rim Overlook (30,720 cells) | — | 10 KiB |
+| seventeen maps kept (with Cliff Rim Overlook) | — | **179 KiB** |
 | load peak, Christmas village | — | 9.4 MiB |
 | load peak, waterfall cascade | — | 13.8 MiB |
 | load peak, snow mountain | 12.6 MiB | 10.9 MiB |
@@ -1062,8 +1080,7 @@ saved with (plus a synthetic piece with runs past 255 cells, never-place and
 * one map's box passes **65,536** cells (`MAX_MAP_VOLUME`);
 * the pack's total box volume passes **512,000** cells (`NODE_BUDGET`). This
   is a creep guard on how much world has to be generated and meshed, no longer
-  a heap figure: the sixteen maps are 436,486 cells, room for about two more
-  the size of the concert arena.
+  a heap figure: the seventeen maps are 467,206 cells, leaving 44,794 cells.
 
 The limits used to be set by the box: a 120,000-cell cap before the cost was
 measured, then 200,000 to 272,000 cells against an 8 to 10.5 MiB kept-heap cap,
@@ -1073,12 +1090,13 @@ heap stopped being the constraint, so the heap cap was re-based on the
 measurement (110 KiB for eleven maps, capped at 512) and the cell cap at
 512,000. The two Weeks on Fire islands took it to 127 KiB and 308,166 cells,
 the waterfall cascade to 146 KiB and 366,406, and the two Christmas islands
-to 168 KiB and 436,486, inside both caps. The
+to 168 KiB and 436,486; Cliff Rim Overlook brings them to 179 KiB and
+467,206, inside both caps. The
 cascade is the biggest box in the pack (58,240 cells, under
 `MAX_MAP_VOLUME`), and its 13.8 MiB load peak is the closest any map comes to
 the 16 MiB budget. Raise them on
 purpose, with a new measurement in `wasm_porting.md`, rather than squeeze a map
-to fit. The schematics themselves are 31.6 KiB on disk and the twenty-two
+to fit. The schematics themselves are about 33 KiB on disk and the twenty-two
 textures about 11 KiB. The sounds are the lighthouse horn (4 KiB) and the chapel's three
 thunder rolls (24 KiB). The chapel's organ slot and the cabaret's song slot are
 empty and cost nothing until files are dropped into them (see Thunder chapel
